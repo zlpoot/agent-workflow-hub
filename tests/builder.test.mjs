@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectBuilder, createJwt, BRANCH, REPO } from '../dist/builder.js';
-import { PROFILES, selectWorkflow, HUB_REPO, FUTURE_REPO } from '../dist/profiles.js';
+import { PROFILES, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO } from '../dist/profiles.js';
 
 // Ephemeral key generated in memory; no real credential and no saved key fixture.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -501,4 +501,177 @@ test('Profile CLI rejects arbitrary repo and forbidden actions before credential
     assert.equal(child.status, 2); assert.equal(child.stdout, '');
     assert(!child.stderr.includes('environment')); assert(!child.stderr.includes('evil/repo'));
   }
+});
+
+test('webskill/bootstrap fixes every boundary without an Agent or local clone path', () => {
+  const webskill = selectWorkflow({ profile: 'webskill', workflow: 'bootstrap' });
+  assert.deepEqual(webskill, { profile: { id: 'webskill', repository: WEBSKILL_REPO, base: 'main', workflows: [webskill.workflow] },
+    workflow: { id: 'bootstrap', branch: 'codex/awh-c07-webskill-bootstrap', work_item: { repo: HUB_REPO, issue: 8 },
+      verification_commands: ['pnpm check:foundations', 'pnpm lint', 'pnpm typecheck'],
+      bootstrap_paths: ['docs/management/agent-workflow-hub.md'] } });
+  const hub = selectWorkflow({ profile: 'hub', workflow: 'c07' });
+  assert.equal(hub.workflow.branch, 'codex/c07-webskill-profile');
+  assert.deepEqual(hub.workflow.work_item, { repo: HUB_REPO, issue: 8 });
+  assert.deepEqual(hub.workflow.verification_commands, ['pnpm check']);
+  for (const key of ['repository', 'base', 'branch', 'work_item', 'verification_commands', 'bootstrap_paths', 'url', 'api', 'git'])
+    assert.throws(() => selectWorkflow({ profile: 'webskill', workflow: 'bootstrap', [key]: 'override' }));
+  assert.throws(() => { webskill.profile.base = 'other'; });
+  assert.throws(() => { webskill.workflow.branch = 'other'; });
+  assert.throws(() => { webskill.workflow.work_item.issue = 147; });
+  assert.throws(() => { webskill.workflow.verification_commands.reverse(); });
+  assert.throws(() => { webskill.workflow.bootstrap_paths.push('AGENTS.md'); });
+});
+
+const dormantRepo = 'zlpoot/agent-desktop';
+const selectedSets = [[HUB_REPO], [HUB_REPO, FUTURE_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO],
+  [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, dormantRepo]];
+const workflows = [
+  ['hub', 'c05', HUB_REPO, BRANCH],
+  ['hub', 'c06', HUB_REPO, 'codex/c06-project-profiles'],
+  ['hub', 'c07', HUB_REPO, 'codex/c07-webskill-profile'],
+  ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
+  ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
+];
+for (const installed of selectedSets) for (const [profile, workflow, repository, branch] of workflows) {
+  test(`selected-set ${installed.length} repositories / ${profile}/${workflow} narrows writes or stops at Human Gate`, async () => {
+    const f = fake({ repository, branch, installed: [...installed].reverse() });
+    if (!installed.includes(repository)) {
+      await assert.rejects(connectBuilder(f.deps, { profile, workflow }), /Human Gate/);
+      assert.equal(f.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
+    } else {
+      const b = await connectBuilder(f.deps, { profile, workflow });
+      assert.deepEqual(b.preflight().repositories, [...installed].sort());
+      const tokens = f.requests.filter(r => r.url.endsWith('/access_tokens'));
+      assert.equal(tokens.length, 2);
+      assert.deepEqual(JSON.parse(tokens[1].body), { repositories: [repository.split('/')[1]],
+        permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
+      await b.push();
+      assert(f.git.at(-1)[1].includes(`https://github.com/${repository}.git`));
+      assert.equal(f.git.at(-1)[1].at(-1), `HEAD:refs/heads/${branch}`);
+      await b.createPR('Title', 'Fixed Profile');
+      const create = f.requests.find(r => r.method === 'POST' && r.url.endsWith('/pulls'));
+      assert.equal(create.url, `https://api.github.com/repos/${repository}/pulls`);
+      assert.equal(JSON.parse(create.body).head, branch);
+      assert.equal(JSON.parse(create.body).base, 'main');
+      assert.equal(JSON.parse(create.body).draft, true);
+    }
+    const tokens = f.requests.filter(r => r.url.endsWith('/access_tokens'));
+    assert.deepEqual(JSON.parse(tokens[0].body), { permissions: { metadata: 'read' } });
+    const inspection = f.requests.find(r => r.url.includes('/installation/repositories'));
+    assert.equal(inspection.headers.Authorization, 'Bearer fake-inspection-secret');
+  });
+}
+
+test('selected-set permits exactly four complete sets and rejects partial, unexpected and malformed lists', async () => {
+  for (const installed of [[], [FUTURE_REPO], [WEBSKILL_REPO], [FUTURE_REPO, WEBSKILL_REPO],
+    [HUB_REPO, WEBSKILL_REPO], [HUB_REPO, HUB_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/other'],
+    [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, WEBSKILL_REPO], [HUB_REPO, FUTURE_REPO, 'other/webskill'],
+    [HUB_REPO, dormantRepo], [HUB_REPO, FUTURE_REPO, dormantRepo],
+    [...selectedSets[3], 'zlpoot/unknown-fifth'], [...selectedSets[3], dormantRepo],
+    [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'other/agent-desktop']]) {
+    const f = fake({ installed });
+    await assert.rejects(connectBuilder(f.deps, { profile: 'hub', workflow: 'c07' }), /set is not allowed/);
+    assert.equal(f.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
+  }
+  for (const [repositories, total] of [[null, 0], [[{}], 1], [[{ full_name: HUB_REPO }], 2],
+    [[{ full_name: HUB_REPO }], '1']]) assert.equal(allowedInstallation(repositories, total), false);
+  const incomplete = fake({ installed: selectedSets[2], response: (url, _, v) => url.includes('/installation/repositories')
+    ? { ...v, total_count: 4 } : v });
+  await assert.rejects(connectBuilder(incomplete.deps), /set is not allowed/);
+  assert.equal(incomplete.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
+});
+
+test('dormant agent-desktop has no Profile or write path in the four-repository installation', async () => {
+  assert.deepEqual(PROFILES.map(p => p.id), ['hub', 'future-ui', 'webskill']);
+  assert(PROFILES.every(p => p.repository !== dormantRepo));
+  for (const profile of ['agent-desktop', dormantRepo]) for (const workflow of ['bootstrap', 'c07']) {
+    const f = fake({ installed: selectedSets[3] });
+    assert.throws(() => selectWorkflow({ profile, workflow }), /Unsupported profile/);
+    await assert.rejects(connectBuilder(f.deps, { profile, workflow }), /Unsupported profile/);
+    assert.equal(f.requests.length, 0); assert.equal(f.git.length, 0);
+  }
+  for (const [profile, workflow, repository, branch] of workflows) {
+    const f = fake({ repository, branch, installed: selectedSets[3] });
+    const b = await connectBuilder(f.deps, { profile, workflow });
+    await b.push(); await b.createPR('Title', 'Fixed Profile');
+    const write = f.requests.filter(r => r.url.endsWith('/access_tokens') && JSON.parse(r.body).repositories);
+    assert.equal(write.length, 1);
+    assert.deepEqual(JSON.parse(write[0].body).repositories, [repository.split('/')[1]]);
+    assert(!f.requests.some(r => r.url.includes('/repos/' + dormantRepo)));
+    assert(!f.git.some(([, args]) => args.some(arg => arg.includes('github.com/' + dormantRepo))));
+    for (const repositories of [[dormantRepo], [repository, dormantRepo], selectedSets[3]]) {
+      const bad = fake({ repository, branch, installed: selectedSets[3], response: (url, options, data) =>
+        url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
+          ? { ...data, repositories: repositories.map(full_name => ({ full_name })) } : data });
+      await assert.rejects(connectBuilder(bad.deps, { profile, workflow }), /Write token must authorize only/);
+    }
+  }
+});
+
+test('triple installation rejects metadata inspection escalation and multi-repository WebSkill write response', async () => {
+  for (const repositoryResponse of [[HUB_REPO], [WEBSKILL_REPO, FUTURE_REPO], selectedSets[2], []]) {
+    const f = fake({ repository: WEBSKILL_REPO, installed: selectedSets[2], response: (url, options, v) =>
+      url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
+        ? { ...v, repositories: repositoryResponse.map(full_name => ({ full_name })) } : v });
+    await assert.rejects(connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' }), /Write token must authorize only/);
+  }
+  const escalated = fake({ installed: selectedSets[2], response: (url, options, v) =>
+    url.endsWith('/access_tokens') && !JSON.parse(options.body).repositories
+      ? { ...v, permissions: { metadata: 'read', contents: 'write' } } : v });
+  await assert.rejects(connectBuilder(escalated.deps), /token permissions/);
+  assert.equal(escalated.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
+  assert(!escalated.requests.some(r => r.url.includes('/installation/repositories')));
+});
+
+test('WebSkill bootstrap denies product and management-boundary changes locally and remotely', async () => {
+  for (const path of ['AGENTS.md', 'package.json', 'pnpm-lock.yaml', 'packages/runtime/index.ts', 'docs/management/grant.md']) {
+    const f = fake({ repository: WEBSKILL_REPO, branch: 'codex/awh-c07-webskill-bootstrap', installed: selectedSets[2] });
+    const spawn = f.deps.spawn;
+    f.deps.spawn = (...args) => args[1][0] === 'diff' ? { status: 0, stdout: path + '\0' } : spawn(...args);
+    await assert.rejects((await connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' })).push(), /push failed/);
+    assert(!f.git.some(([, args]) => args.includes('push')));
+  }
+  for (const files of [[], [{ filename: 'packages/runtime/index.ts', status: 'added' }],
+    [{ filename: 'docs/management/agent-workflow-hub.md', status: 'removed' }],
+    [{ filename: 'docs/management/agent-workflow-hub.md', status: 'renamed' }],
+    [{ filename: 'docs/management/agent-workflow-hub.md', status: 'added' }, { filename: 'AGENTS.md', status: 'modified' }]]) {
+    const f = fake({ repository: WEBSKILL_REPO, branch: 'codex/awh-c07-webskill-bootstrap', installed: selectedSets[2],
+      response: (url, _, v) => url.includes('/compare/') ? { status: 'ahead', files } : v });
+    await assert.rejects((await connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' })).createPR('Title', 'Body'), /docs-only/);
+    assert(!f.requests.some(r => r.method === 'POST' && r.url.endsWith('/pulls')));
+  }
+});
+
+test('WebSkill Ready binds Hub #8, ordered verification, bot evidence and exact head', async () => {
+  const handoff = structuredClone(record);
+  handoff.work_item.issue = 8;
+  const commands = ['pnpm check:foundations', 'pnpm lint', 'pnpm typecheck'];
+  handoff.verification.checks = commands.map(command => ({ command, exit_code: 0 }));
+  handoff.verification.evidence_refs = [`https://github.com/${WEBSKILL_REPO}/pull/5#issuecomment-9`];
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = fake({ repository: WEBSKILL_REPO, branch: 'codex/awh-c07-webskill-bootstrap', installed: selectedSets[2], handoffBody: body });
+  const b = await connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' });
+  for (const checks of [commands.slice(1), [...commands].reverse(), ['pnpm check'], [...commands, 'pnpm test']]) {
+    const invalid = structuredClone(handoff);
+    invalid.verification.checks = checks.map(command => ({ command, exit_code: 0 }));
+    await assert.rejects(b.ready(5, head, invalid, 10), /verification commands/);
+  }
+  for (const work_item of [{ repo: HUB_REPO, issue: 6 }, { repo: WEBSKILL_REPO, issue: 8 }, { repo: WEBSKILL_REPO, issue: 147 }])
+    await assert.rejects(b.ready(5, head, { ...handoff, work_item }, 10), /work item/);
+  await assert.rejects(b.ready(5, base, handoff, 10), /Confirmed Handoff/);
+  assert(!f.requests.some(r => r.url.endsWith('/graphql')));
+  assert.equal((await b.ready(5, head, handoff, 10)).draft, false);
+});
+
+test('WebSkill CLI cannot pass through arbitrary repo/base/branch/API/URL/Git before credentials', () => {
+  const cli = fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url));
+  for (const extra of ['--repo', '--base', '--branch', '--api', '--url', '--git']) {
+    const child = spawnSync(process.execPath, [cli, '--profile', 'webskill', '--workflow', 'bootstrap', 'push', extra, 'override'],
+      { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    assert.equal(child.status, 2); assert.equal(child.stdout, '');
+    assert.deepEqual(JSON.parse(child.stderr), { error: 'Unsupported Builder operation or arguments' });
+  }
+  const f = fake();
+  return assert.rejects(connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' }), /worktree root/)
+    .then(() => assert.equal(f.requests.length, 0));
 });

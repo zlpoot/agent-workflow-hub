@@ -1,5 +1,6 @@
 export const HUB_REPO = 'zlpoot/agent-workflow-hub';
 export const FUTURE_REPO = 'zlpoot/future-ui';
+export const WEBSKILL_REPO = 'zlpoot/webskill';
 
 export interface Workflow {
   readonly id: string;
@@ -25,15 +26,23 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
   Object.freeze({ id: 'hub', repository: HUB_REPO, base: 'main', workflows: Object.freeze([
     workflow('c05', 'codex/c05-github-app-builder', 4, ['pnpm check'], null),
     workflow('c06', 'codex/c06-project-profiles', 6, ['pnpm check'], null),
+    workflow('c07', 'codex/c07-webskill-profile', 8, ['pnpm check'], null),
   ]) }),
   Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([
     workflow('bootstrap', 'codex/awh-c06-bootstrap', 6,
       ['pnpm lint', 'pnpm typecheck', 'pnpm test'], ['docs/management/agent-workflow-hub.md']),
   ]) }),
+  Object.freeze({ id: 'webskill', repository: WEBSKILL_REPO, base: 'main', workflows: Object.freeze([
+    workflow('bootstrap', 'codex/awh-c07-webskill-bootstrap', 8,
+      ['pnpm check:foundations', 'pnpm lint', 'pnpm typecheck'], ['docs/management/agent-workflow-hub.md']),
+  ]) }),
 ]);
 export const DEFAULT_SELECTION: Readonly<BuilderSelection> = Object.freeze({ profile: 'hub', workflow: 'c05' });
 export const ALLOWED_INSTALLATION_SETS: readonly (readonly string[])[] = Object.freeze([
   Object.freeze([HUB_REPO]), Object.freeze([HUB_REPO, FUTURE_REPO].sort()),
+  Object.freeze([HUB_REPO, FUTURE_REPO, WEBSKILL_REPO].sort()),
+  // Dormant installation member only: no agent-desktop Profile or write workflow.
+  Object.freeze([HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/agent-desktop'].sort()),
 ]);
 
 export function selectWorkflow(selection: BuilderSelection = DEFAULT_SELECTION) {
