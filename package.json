@@ -1,0 +1,19 @@
+{
+  "name": "agent-workflow-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --test tests/*.test.mjs",
+    "check": "pnpm typecheck && pnpm build && pnpm test",
+    "handoff:check": "node dist/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "typescript": "5.9.3"
+  }
+}
