@@ -1,6 +1,6 @@
 # agent-workflow-hub
 
-当前实施 Issue [#13](https://github.com/zlpoot/agent-workflow-hub/issues/13)：C0.7-R2 receive-pack dry-run 与安全 suppression provenance，仅修改 AWH。#8 Phase A 和 #10 repair 已合并，WebSkill private read 已报告 PASS，push 仍被阻断；WebSkill candidate 严格冻结，等待本修复 independent Review + merge 后由 Mac 执行 live acceptance。C1 #3 继续暂停，agent-desktop 保持 dormant。
+当前实施 Issue [#16](https://github.com/zlpoot/agent-workflow-hub/issues/16)：C0.7-R3 安全兼容 exact GitHub-host scoped credential helper，仅修改 AWH。#8 Phase A、#10/#13 repair 已合并；最新 Mac run 在 pre-transport gate 被两个 `credential.https://github.com.helper` key 阻断，未读取 value，transport stages 全 NOTRUN。WebSkill candidate 严格冻结，等待本修复 independent Review + merge 后由 Mac 执行 live acceptance。#8/#10/#13 保持 OPEN，C1 #3 继续暂停，agent-desktop 保持 dormant。
 
 Issue [#4](https://github.com/zlpoot/agent-workflow-hub/issues/4) 已完成 C0.5 身份隔离，引入独立的 GitHub App Builder wrapper。C0 Handoff 校验器保持只读。C1 [#3](https://github.com/zlpoot/agent-workflow-hub/issues/3) 仍按当前路线暂停，不因 C0.5 完成而自动恢复。
 
@@ -77,6 +77,7 @@ Builder 在最终干净 head 上检查并发布原始验证输出；真实 hando
 | `hub` / `c07` | `zlpoot/agent-workflow-hub` | `main` / `codex/c07-webskill-profile` | `pnpm check` | 非 bootstrap，受 Issue #8 Phase A 范围约束 |
 | `hub` / `c07-r1` | `zlpoot/agent-workflow-hub` | `main` / `codex/c07-r1-git-transport` | `pnpm check` | 非 bootstrap，受 Issue #10 transport repair 范围约束 |
 | `hub` / `c07-r2` | `zlpoot/agent-workflow-hub` | `main` / `codex/c07-r2-receive-pack` | `pnpm check` | 非 bootstrap，受 Issue #13 transport repair 范围约束 |
+| `hub` / `c07-r3` | `zlpoot/agent-workflow-hub` | `main` / `codex/c07-r3-scoped-helper` | `pnpm check` | 非 bootstrap，受 Issue #16 scoped-helper repair 范围约束 |
 | `webskill` / `bootstrap` | `zlpoot/webskill` | `main` / `codex/awh-c07-webskill-bootstrap` | `pnpm check:foundations`、`pnpm lint`、`pnpm typecheck` | 仅 `docs/management/agent-workflow-hub.md` |
 | `future-ui` / `bootstrap` | `zlpoot/future-ui` | `main` / `codex/awh-c06-bootstrap` | `pnpm lint`、`pnpm typecheck`、`pnpm test` | 仅 `docs/management/agent-workflow-hub.md` |
 
@@ -117,15 +118,23 @@ pnpm builder --profile hub --workflow c07 pr-create 'C0.7 Phase A' .handoff/pr-b
 
 选择错误在读凭据或请求 GitHub 前失败。外部 Profile bootstrap push 会把当前远端 main 的完整 SHA 作为比较基准，检查 Git diff 仅含固定文档路径；PR 创建前及后续 PR 读写/Ready 也用 GitHub exact base/head compare 检查远端 candidate 只新增或修改该文档，阻止绕过 push 的产品代码 PR。检查不执行文档或评论中的命令。Handoff 的 `work_item` 指向任务所在仓库：c05 为 Hub #4，c06 与 future-ui bootstrap 为 Hub #6，c07 与 webskill bootstrap 为 Hub #8；交付仓库由所选 Profile、实际 PR 和该仓库证据 URL 绑定，不能把 future-ui #70 或 WebSkill #147 冒充本任务。Ready 还要求 checks 按该 workflow 固定顺序完整覆盖允许验证命令。
 
-**C0.7 Human Gate / 最新状态：** #8 Phase A 已合并；#8/#10 最新 Human 报告确认 Mac live preflight 和 private authenticated read PASS，frozen WebSkill push FAIL，当前 `BLOCKED: AWH_RECEIVE_PACK_DIAGNOSTIC_REQUIRED (#13)`。Windows #13 只交付 Hub 实现、自身 exact clean head 的 pnpm check、离线四仓库回归及真实 Hub App preflight；不验证 Mac 凭据、创建 WebSkill 影子工作区或运行 WebSkill 测试。离线 mock PASS 和 Hub 自身 push 不表示 private WebSkill acceptance PASS。Builder 发布 evidence 与 confirmed Handoff、转 Ready for ChatGPT Review 后停止；独立 Review PASS 后仍需 Human gate，不修改 installation、WebSkill 或 #147/#160，不进入模型、网站或付费流程。
+**C0.7 Human Gate / 最新状态：** #8 Phase A、#10/#13 repair 已合并；此前 Mac live preflight 和 private authenticated read 已报告 PASS，最新 Mac run 在 fixed-ref before 之前被 local scoped helper key 阻断，当前 `BLOCKED: AWH_SCOPED_CREDENTIAL_HELPER_COMPAT_REQUIRED (#16)`。Windows #16 只交付 Hub 实现、自身 exact clean head 的 pnpm check、离线四仓库回归及真实 Hub App preflight；不验证 Mac 凭据、创建 WebSkill 影子工作区或运行 WebSkill 测试。离线 mock PASS 和 Hub 自身 push 不表示 private WebSkill acceptance PASS。Builder 发布 evidence 与 confirmed Handoff、转 Ready for ChatGPT Review 后停止；独立 Review PASS 后仍需 Human gate，不修改 installation、WebSkill 或 #147/#160，不进入模型、网站或付费流程。
 
 进入 Phase B 必须由 Human 明确放行并满足 Issue #8 全部门槛：Human 将 WebSkill 加入现有 Selected repositories，在 Mac 的仓库外安全配置 App credential；Mac Codex executor 只读登记真实 WebSkill root、branch、HEAD、worktree，再重新 live preflight 确认 selected set 恰好为 Issue #8 允许的精确集合（当前负责人配置为 Hub + future-ui + webskill + dormant agent-desktop），write token 仅授权 WebSkill。任何项失败停止，不回退用户身份。若 #147 工作区占用或有未提交修改，后续 bootstrap 使用最新 main 的独立干净工作区，不 reset/clean/discard 其工作。Phase B 只新增固定管理文档，不改 AGENTS、产品代码/public contracts、依赖、lockfile 或 #147/#160 的范围及授权，不运行模型、网站、付费流程、Docker full 或 GitHub Actions。Profile 不绑定机器路径或具体 Agent，Mac executor 是本任务执行约定。
 
-参数个数严格固定，数字必须是正安全整数；body-file 是 UTF-8 文件，真实数据放在 gitignored 的 `.handoff/`。成功 stdout 一行 JSON，失败 stderr 一行脱敏 JSON、退出码 2。Git 子进程输出不透传，token 只经进程环境中的临时 HTTP Basic header 提供，不在命令行、Git remote 或磁盘配置中出现；Git 系统/用户配置、用户凭据 helper、trace、hooks 和 redirects 禁用。若本地仓库存在 URL rewrite、HTTP/proxy、credential 或 include 配置，则拒绝 push；push 必须从指定功能分支执行，不能 force、push main 或选择其他 remote。
+参数个数严格固定，数字必须是正安全整数；body-file 是 UTF-8 文件，真实数据放在 gitignored 的 `.handoff/`。成功 stdout 一行 JSON，失败 stderr 一行脱敏 JSON、退出码 2。Git 子进程输出不透传，token 只经进程环境中的临时 HTTP Basic header 提供，不在命令行、Git remote 或磁盘配置中出现；Git 系统/用户配置、用户凭据 helper、trace、hooks 和 redirects 禁用。本地仅允许上述 exact GitHub host helper key 并临时 neutralize；其他 credential、URL rewrite、HTTP/proxy 或 include 配置仍拒绝 push；push 必须从指定功能分支执行，不能 force、push main 或选择其他 remote。
+
+### C0.7-R3 scoped-helper compatibility
+
+[Issue #16](https://github.com/zlpoot/agent-workflow-hub/issues/16) 的 local config scanner 继续仅调用 `git config --local --name-only --list`，不读取 helper command/value。唯一允许的 credential key 为 case-insensitive 精确匹配的 `credential.https://github.com.helper`，可重复；generic `credential.helper`、username/useHttpPath、GitHub path scope、其他 host 或任何其他 credential key 均拒绝。现有 `http.*`、`https.*`、`url.*`、`include*`、`core.gitProxy`、`core.sshCommand` 继续 fail-closed。
+
+authenticated read、receive-pack dry-run 和 real push 使用同一个临时 child-process Git config，其中同时注入 `credential.helper=` 和 `credential.https://github.com.helper=`。Git 的 URL-scoped local helper 不会被 generic reset 覆盖，同 scope 的高优先级空值才能使 fixed GitHub URL 的 effective helper 为空。唯一 auth 仍为单一 `http.https://github.com/.extraheader` App installation Basic header。Builder 不写 local/global/system config，不删除用户配置，不读取/执行 helper，不调用 GCM，也不使用 gh/PAT/user fallback。
+
+真实 Git regression 只在测试临时 repo 写两个 dummy scoped helper：`git config --get-urlmatch credential.helper https://github.com/zlpoot/webskill.git` 在仅有 generic reset 时仍解析到 dummy helper，加入实际 Builder child env 的 scoped reset 后解析为空；测试只查询 config resolution，不执行 helper、不联网，并验证查询不修改临时 config。`hub/c07-r3` 固定绑定 Hub #16、`codex/c07-r3-scoped-helper`、`pnpm check` 和 exact-head pending → readback → confirmed → Ready 流程，保留已有 Profiles、selected-set、single-repository token、fixed-ref、expiry、secret/proxy guards。
 
 ### C0.7-R2 Git transport
 
-[Issue #10](https://github.com/zlpoot/agent-workflow-hub/issues/10) 的修复仅使用一个 `http.https://github.com/.extraheader`，值为 `AUTHORIZATION: basic <redacted>`；不再注入 generic/scoped 空 header reset。system/global config 已禁用，local transport override 仍拒绝，caller `GIT_*` / `GH_*` / `GITHUB_*` / `AWH_*`、`SSH_ASKPASS` / `SSH_ASKPASS_REQUIRE` 和 trace 仍过滤。`HTTP_PROXY`、`HTTPS_PROXY`、`http_proxy`、`https_proxy` 保留；不更改用户代理配置或 transport。
+[Issue #10](https://github.com/zlpoot/agent-workflow-hub/issues/10) 的修复仅使用一个 `http.https://github.com/.extraheader`，值为 `AUTHORIZATION: basic <redacted>`；不再注入 generic/scoped 空 header reset。system/global config 已禁用，local transport override 除上述 exact scoped-helper 例外仍拒绝，caller `GIT_*` / `GH_*` / `GITHUB_*` / `AWH_*`、`SSH_ASKPASS` / `SSH_ASKPASS_REQUIRE` 和 trace 仍过滤。`HTTP_PROXY`、`HTTPS_PROXY`、`http_proxy`、`https_proxy` 保留；不更改用户代理配置或 transport。
 
 固定 `push` 操作按顺序执行 authenticated `ls-remote --exit-code` 检查固定 base ref → `git push --dry-run <fixed-profile-url> HEAD:refs/heads/<fixed-profile-branch>` → real push。三个阶段使用同一 installation write token、同一个受限 child environment 和固定 Profile URL，均禁用 credential helper、hooks 与 redirects；Windows 保持 `NUL`，Mac 保持 `/dev/null`。read probe FAIL 时 dry-run/push NOTRUN，dry-run FAIL 时 real push NOTRUN。每个 transport 调用前检查 expiry，包括 dry-run PASS 后 real push 前。不接受 caller URL、ref 或 Git args，不自动重试。
 
@@ -143,10 +152,10 @@ Git stdout/stderr/error message 仅在进程内处理，永不透传。先检测
 
 `hub/c07-r2` 固定绑定 Hub #13、`pnpm check` 和 `codex/c07-r2-receive-pack`，沿用 pending → 回读 → confirmed 的 exact-head Handoff / Ready 门槛。`hub/c07-r1` 与所有已有 Profile 保留。此修复不改变外部 Profile、selected-set 或 App 权限；本次不运行 WebSkill push。离线 transport 测试和 Hub 自身 App push 不等于 private-repository live 验收。
 
-冻结 WebSkill base `e4035dcd40ce2b4788b990144024a73ae39fe7e8`、head `f65888dcc39148996c998df709e7824c4cbdd358`、branch `codex/awh-c07-webskill-bootstrap`，changed path 仅 `docs/management/agent-workflow-hub.md`，保留 #147/#160。#13 independent Review + merge 后，Mac executor 必须从 exact merged AWH source 显式 `pnpm build` 绑定 dist provenance，再 live preflight 验证精确 selected set、metadata-only inspection 和 WebSkill 单仓库 write token。只对同一 frozen candidate 执行一次 Builder push invocation；dry-run FAIL 则 push NOTRUN，独立回读确认 remote ref 未创建；real push FAIL 不做第二次 retry。Builder 内部在 dry-run 前后独立读取固定 remote ref，首次 bootstrap 仅 ABSENT→ABSENT 后才允许 real push；任何读不到或变化均停止。本修复不提供 arbitrary diagnostic/Git passthrough。Windows 交付后停止，Human 通知 ChatGPT 对 exact head 独立 Review，不代填 review，不 merge/close，不启动 agent-desktop/C1。
+冻结 WebSkill base `e4035dcd40ce2b4788b990144024a73ae39fe7e8`、head `f65888dcc39148996c998df709e7824c4cbdd358`、branch `codex/awh-c07-webskill-bootstrap`，changed path 仅 `docs/management/agent-workflow-hub.md`，保留 #147/#160。#16 independent Review + merge 后，Mac executor 必须从 exact merged AWH source 显式 `pnpm build` 绑定 dist provenance，再 live preflight 验证精确 selected set、metadata-only inspection 和 WebSkill 单仓库 write token。只对同一 frozen candidate 执行一次 Builder push invocation；dry-run FAIL 则 push NOTRUN，独立回读确认 remote ref 未创建；real push FAIL 不做第二次 retry。Builder 内部在 dry-run 前后独立读取固定 remote ref，首次 bootstrap 仅 ABSENT→ABSENT 后才允许 real push；任何读不到或变化均停止。本修复不提供 arbitrary diagnostic/Git passthrough。Windows 交付后停止，Human 通知 ChatGPT 对 exact head 独立 Review，不代填 review，不 merge/close，不启动 agent-desktop/C1。
 
 PR 创建固定 Draft。其后写入及评论回读均核对 App bot actor、目标仓库、指定分支与 main；不修改他人评论。`pr-ready` 复用 C0 校验器，核对所选 `workflow.work_item`（`hub/c05` 绑定 Hub #4；`hub/c06` 与 `future-ui/bootstrap` 绑定 Hub #6；`hub/c07` 与 `webskill/bootstrap` 绑定 Hub #8）、PR、base/head、该 workflow 的完整验证命令集、已发布且回读的 confirmed Handoff JSON 和 CLI 结果，以及当前 head 的独立 Builder evidence 评论（所有 evidence_refs 必须是同一 PR 上该 App 的另一条评论）。Handoff 评论正文格式为 `AWH-HANDOFF v0.1` 首行、首个 json fenced block 放交接 JSON，正文包含 C0 的单行 CLI 结果。Evidence 评论首行为 `Builder evidence`，含验证的完整 head SHA 和原始日志。转 Ready 前后再次核对远端版本；不确定的 Ready 发布结果会尝试恢复并回读 Draft，恢复也失败则明确报告，不能宣告交接成功。
 
 Builder evidence 属于 Builder 验证；Ready 仍不授予审批或合并权限。Contents write 技术上也能调用 merge API，Pull requests write 也覆盖 review API；本轮的禁止由 wrapper 的固定操作和协作 policy 强制，不能宣称是 GitHub permission-level 隔离。wrapper 不提供 approve、review decision、merge、administration、workflow mutation、关闭 Issue 或恢复 C1 的操作。ChatGPT 从 GitHub 独立核对 App bot 身份，并以自己的用户 principal 对 exact head 提交原生 APPROVE；该 Review gate 不由 Builder 代填。
 
-自动测试用运行时生成的 RSA key 和注入的 mock fetch/Git 子进程，覆盖 JWT 签名/时钟、安装查询、token 请求/有效期、权限/范围、脱敏失败、身份和版本检查、禁止操作及 Draft 恢复，不访问公网或使用真实秘密。私钥若意外进入日志或 Git 历史，停止并由 Human revoke/rotate；不能只删除日志继续。
+自动测试用运行时生成的 RSA key 、注入的 mock fetch/Git 子进程及临时 repo 的真实 Git config resolution，覆盖 JWT 签名/时钟、安装查询、token 请求/有效期、权限/范围、脱敏失败、身份和版本检查、禁止操作及 Draft 恢复，不访问公网或使用真实秘密。私钥若意外进入日志或 Git 历史，停止并由 Human revoke/rotate；不能只删除日志继续。

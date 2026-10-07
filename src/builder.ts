@@ -286,16 +286,20 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       const env = { ...inspectEnv };
       const config = [
         ['http.https://github.com/.extraheader', `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`],
-        ['credential.helper', ''], ['safe.directory', root.replaceAll('\\', '/')],
+        ['credential.helper', ''], ['credential.https://github.com.helper', ''],
+        ['safe.directory', root.replaceAll('\\', '/')],
       ];
       Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
         GIT_CONFIG_COUNT: String(config.length), GIT_TERMINAL_PROMPT: '0' });
       config.forEach(([k, v], i) => Object.assign(env, { [`GIT_CONFIG_KEY_${i}`]: k, [`GIT_CONFIG_VALUE_${i}`]: v }));
       try {
-        // Local URL rewrites, proxies and credential configuration could reroute the authenticated push.
+        // Inspect key names only. The exact GitHub host helper is neutralized in transport env;
+        // generic, path-scoped and other-host credentials still fail closed.
         const local = d.spawn('git', ['config', '--local', '--name-only', '--list'],
           { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
-        if (local.error || local.status !== 0 || /^(http\.|https\.|url\.|credential\.|include|core\.(gitproxy|sshcommand))/im.test(local.stdout))
+        if (local.error || local.status !== 0 || local.stdout.split(/\r?\n/).some(key =>
+          key.toLowerCase() !== 'credential.https://github.com.helper' &&
+          /^(http\.|https\.|url\.|credential\.|include|core\.(gitproxy|sshcommand))/i.test(key)))
           fail('Unsafe local Git transport configuration');
         const branch = d.spawn('git', ['branch', '--show-current'], { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
         if (branch.error || branch.status !== 0 || branch.stdout.trim() !== BRANCH) fail('Push requires the selected workflow feature branch');

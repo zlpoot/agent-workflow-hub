@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -252,6 +253,7 @@ test('Git token stays in child environment, fixed HTTPS branch, no logged-user c
   assert.equal(options.cwd, repoRoot);
   const config = Object.fromEntries(Array.from({ length: Number(options.env.GIT_CONFIG_COUNT) }, (_, i) => [options.env[`GIT_CONFIG_KEY_${i}`], options.env[`GIT_CONFIG_VALUE_${i}`]]));
   assert.equal(config['credential.helper'], '');
+  assert.equal(config['credential.https://github.com.helper'], '');
   assert.equal(config['http.https://github.com/.extraheader'], `AUTHORIZATION: basic ${Buffer.from('x-access-token:fake-installation-secret').toString('base64')}`);
 });
 
@@ -533,6 +535,7 @@ const workflows = [
   ['hub', 'c07', HUB_REPO, 'codex/c07-webskill-profile'],
   ['hub', 'c07-r1', HUB_REPO, 'codex/c07-r1-git-transport'],
   ['hub', 'c07-r2', HUB_REPO, 'codex/c07-r2-receive-pack'],
+  ['hub', 'c07-r3', HUB_REPO, 'codex/c07-r3-scoped-helper'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
@@ -714,6 +717,9 @@ test('transport: read PASS → fixed receive-pack dry-run PASS → push with ide
     ['http.https://github.com/.extraheader', `AUTHORIZATION: basic ${Buffer.from('x-access-token:fake-installation-secret').toString('base64')}`],
   ]);
   assert(!configs.some(([key]) => key === 'http.extraheader'));
+  assert.deepEqual(configs.filter(([key]) => key.startsWith('credential.')), [
+    ['credential.helper', ''], ['credential.https://github.com.helper', ''],
+  ]);
   for (const [, args] of [probe, dryRun, push]) {
     assert(!args.join(' ').includes('fake-installation-secret'));
     assert(!args.join(' ').includes('AUTHORIZATION'));
@@ -811,9 +817,10 @@ test('transport proxy preservation: HTTP(S) upper/lowercase survive while caller
     assert.equal(env.GIT_CONFIG_GLOBAL, process.platform === 'win32' ? 'NUL' : '/dev/null');
     assert.equal(env.GIT_CONFIG_NOSYSTEM, '1'); assert.equal(env.GIT_TERMINAL_PROMPT, '0');
     const keys = Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => env[`GIT_CONFIG_KEY_${i}`]);
-    assert(keys.every(key => ['safe.directory', 'credential.helper', 'http.https://github.com/.extraheader'].includes(key)));
+    assert(keys.every(key => ['safe.directory', 'credential.helper', 'credential.https://github.com.helper', 'http.https://github.com/.extraheader'].includes(key)));
     assert.equal(env[`GIT_CONFIG_VALUE_${keys.indexOf('credential.helper')}`], '');
     if (args.includes('ls-remote') || args.includes('push')) {
+      assert.equal(env[`GIT_CONFIG_VALUE_${keys.indexOf('credential.https://github.com.helper')}`], '');
       assert(args.includes(`core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`));
       assert(args.includes('http.followRedirects=false'));
     }
@@ -831,6 +838,99 @@ test('transport: unsafe local overrides fail before authenticated read or push',
     await assert.rejects((await connectBuilder(f.deps)).push(), /details suppressed/);
     assert.equal(transportCalls(f).length, 0);
   }
+});
+
+for (const [name, keys] of [
+  ['single', 'credential.https://github.com.helper\n'],
+  ['duplicate', 'credential.https://github.com.helper\ncredential.https://github.com.helper\n'],
+  ['case variation', 'CrEdEnTiAl.HtTpS://GitHub.CoM.HeLpEr\r\nCREDENTIAL.HTTPS://GITHUB.COM.HELPER\r\n'],
+]) test(`scoped-helper allowlist: ${name} exact GitHub host key passes key-only scan`, async () => {
+  const f = fake(), spawn = f.deps.spawn;
+  f.deps.spawn = (...args) => {
+    const result = spawn(...args);
+    return args[1].includes('--name-only') ? { status: 0, stdout: 'core.bare\n' + keys + 'remote.origin.url\n' } : result;
+  };
+  await (await connectBuilder(f.deps)).push();
+  assert.equal(transportCalls(f).length, 3);
+  assert.deepEqual(f.git.filter(([, args]) => args[0] === 'config').map(([, args]) => args), [
+    ['config', '--local', '--get', 'remote.origin.url'], ['config', '--local', '--name-only', '--list'],
+  ], 'only the fixed origin value and local key names are read; helper values are never queried');
+});
+
+for (const key of [
+  'credential.helper', 'credential.username', 'credential.useHttpPath',
+  'credential.https://github.com.username', 'credential.https://github.com.useHttpPath',
+  'credential.https://github.com/zlpoot/webskill.git.helper', 'credential.https://github.com/any-path.helper',
+  'credential.https://github.com/.helper', 'credential.https://gitlab.com.helper',
+  'credential.http://github.com.helper', 'credential.https://github.com:443.helper',
+  'credential.https://github.com.evil.helper', 'credential.https://github.com.helper.extra',
+  'http.proxy', 'https.proxy', 'url.evil.insteadof', 'include.path', 'includeif.gitdir.path',
+  'core.gitProxy', 'core.sshCommand',
+]) test(`scoped-helper allowlist: refuses ${key} even alongside allowed duplicate keys`, async () => {
+  const f = fake(), spawn = f.deps.spawn;
+  f.deps.spawn = (...args) => {
+    const result = spawn(...args);
+    return args[1].includes('--name-only') ? { status: 0,
+      stdout: `credential.https://github.com.helper\n${key.toUpperCase()}\ncredential.https://github.com.helper\n` } : result;
+  };
+  await assert.rejects((await connectBuilder(f.deps)).push(), /details suppressed/);
+  assert.equal(transportCalls(f).length, 0);
+  assert(!f.requests.some(r => r.url.includes('/git/ref/heads/')), 'unsafe local config stops before fixed-ref gate');
+});
+
+test('real Git precedence: generic reset leaves duplicate scoped helpers visible; Builder scoped reset empties effective helper', async () => {
+  const f = fake();
+  await (await connectBuilder(f.deps)).push();
+  const transportEnv = transportCalls(f)[0][2].env;
+  const fixture = mkdtempSync(join(tmpdir(), 'awh-scoped-helper-'));
+  try {
+    // Reuse the actual Builder transport environment. Every command is local config
+    // resolution only: no credential fill, helper invocation, Git network or App secret.
+    const git = (args, env = transportEnv) => {
+      const r = spawnSync('git', args, { cwd: fixture, env, encoding: 'utf8', timeout: 10000 });
+      assert.ifError(r.error); assert.equal(r.status, 0, r.stderr); return r.stdout;
+    };
+    git(['init', '--quiet']);
+    const key = 'credential.https://github.com.helper';
+    git(['config', '--local', '--add', key, 'awh-dummy-helper-one']);
+    git(['config', '--local', '--add', key, 'awh-dummy-helper-two']);
+    const configPath = join(fixture, '.git', 'config');
+    const before = readFileSync(configPath, 'utf8');
+    const genericEnv = { ...transportEnv };
+    const config = Array.from({ length: Number(genericEnv.GIT_CONFIG_COUNT) }, (_, i) =>
+      [genericEnv[`GIT_CONFIG_KEY_${i}`], genericEnv[`GIT_CONFIG_VALUE_${i}`]]).filter(([k]) => k !== key);
+    for (let i = 0; i < Number(genericEnv.GIT_CONFIG_COUNT); i++) {
+      delete genericEnv[`GIT_CONFIG_KEY_${i}`]; delete genericEnv[`GIT_CONFIG_VALUE_${i}`];
+    }
+    genericEnv.GIT_CONFIG_COUNT = String(config.length);
+    config.forEach(([k, v], i) => Object.assign(genericEnv, { [`GIT_CONFIG_KEY_${i}`]: k, [`GIT_CONFIG_VALUE_${i}`]: v }));
+    const query = ['config', '--get-urlmatch', 'credential.helper', 'https://github.com/zlpoot/webskill.git'];
+    assert.equal(git(query, genericEnv).trim(), 'awh-dummy-helper-two', 'generic empty helper cannot reset the local host scope');
+    assert.equal(git(query).trim(), '', 'same-scope Builder empty helper wins over both local entries');
+    assert.equal(readFileSync(configPath, 'utf8'), before, 'resolution must not mutate fixture config');
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('scoped-helper repair workflow binds Hub #16 and exact-head Ready; arbitrary transport options refused', async () => {
+  const selection = { profile: 'hub', workflow: 'c07-r3' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c07-r3', branch: 'codex/c07-r3-scoped-helper', work_item: { repo: HUB_REPO, issue: 16 },
+    verification_commands: ['pnpm check'], bootstrap_paths: null });
+  const handoff = structuredClone(record); handoff.work_item.issue = 16;
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
+  const builder = await connectBuilder(f.deps, selection);
+  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
+  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
+  for (const option of ['--url', '--ref', '--git-args', '--dry-run', '--force', '--repo', '--base', '--branch']) {
+    const child = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url)),
+      '--profile', 'hub', '--workflow', 'c07-r3', 'push', option, 'untrusted'],
+    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    assert.equal(child.status, 2); assert.equal(child.stdout, '');
+    assert.deepEqual(JSON.parse(child.stderr), { error: 'Unsupported Builder operation or arguments' });
+  }
+  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
 });
 
 test('transport: expired token after authenticated read cannot dispatch push', async () => {
