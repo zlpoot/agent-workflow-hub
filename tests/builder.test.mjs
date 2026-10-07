@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectBuilder, createJwt, BRANCH, REPO } from '../dist/builder.js';
-import { PROFILES, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO } from '../dist/profiles.js';
+import { PROFILES, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, AGENT_DESKTOP_REPO } from '../dist/profiles.js';
 
 // Ephemeral key generated in memory; no real credential and no saved key fixture.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -522,16 +522,17 @@ test('webskill/bootstrap fixes every boundary without an Agent or local clone pa
   assert.throws(() => { webskill.workflow.bootstrap_paths.push('AGENTS.md'); });
 });
 
-const dormantRepo = 'zlpoot/agent-desktop';
 const selectedSets = [[HUB_REPO], [HUB_REPO, FUTURE_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO],
-  [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, dormantRepo]];
+  [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, AGENT_DESKTOP_REPO]];
 const workflows = [
   ['hub', 'c05', HUB_REPO, BRANCH],
   ['hub', 'c06', HUB_REPO, 'codex/c06-project-profiles'],
   ['hub', 'c07', HUB_REPO, 'codex/c07-webskill-profile'],
   ['hub', 'c07-r1', HUB_REPO, 'codex/c07-r1-git-transport'],
+  ['hub', 'c08', HUB_REPO, 'codex/c08-agent-desktop-profile'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
+  ['agent-desktop', 'bootstrap', AGENT_DESKTOP_REPO, 'codex/awh-c08-agent-desktop-bootstrap'],
 ];
 for (const installed of selectedSets) for (const [profile, workflow, repository, branch] of workflows) {
   test(`selected-set ${installed.length} repositories / ${profile}/${workflow} narrows writes or stops at Human Gate`, async () => {
@@ -567,8 +568,8 @@ test('selected-set permits exactly four complete sets and rejects partial, unexp
   for (const installed of [[], [FUTURE_REPO], [WEBSKILL_REPO], [FUTURE_REPO, WEBSKILL_REPO],
     [HUB_REPO, WEBSKILL_REPO], [HUB_REPO, HUB_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/other'],
     [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, WEBSKILL_REPO], [HUB_REPO, FUTURE_REPO, 'other/webskill'],
-    [HUB_REPO, dormantRepo], [HUB_REPO, FUTURE_REPO, dormantRepo],
-    [...selectedSets[3], 'zlpoot/unknown-fifth'], [...selectedSets[3], dormantRepo],
+    [HUB_REPO, AGENT_DESKTOP_REPO], [HUB_REPO, FUTURE_REPO, AGENT_DESKTOP_REPO],
+    [...selectedSets[3], 'zlpoot/unknown-fifth'], [...selectedSets[3], AGENT_DESKTOP_REPO],
     [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'other/agent-desktop']]) {
     const f = fake({ installed });
     await assert.rejects(connectBuilder(f.deps, { profile: 'hub', workflow: 'c07' }), /set is not allowed/);
@@ -582,15 +583,18 @@ test('selected-set permits exactly four complete sets and rejects partial, unexp
   assert.equal(incomplete.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
 });
 
-test('dormant agent-desktop has no Profile or write path in the four-repository installation', async () => {
-  assert.deepEqual(PROFILES.map(p => p.id), ['hub', 'future-ui', 'webskill']);
-  assert(PROFILES.every(p => p.repository !== dormantRepo));
-  for (const profile of ['agent-desktop', dormantRepo]) for (const workflow of ['bootstrap', 'c07']) {
+test('unknown Profile/workflow fails before credentials, Git or token minting', async () => {
+  assert.deepEqual(PROFILES.map(p => p.id), ['hub', 'future-ui', 'webskill', 'agent-desktop']);
+  for (const [profile, workflow] of [['unknown', 'bootstrap'], [AGENT_DESKTOP_REPO, 'bootstrap'],
+    ['agent-desktop', 'c07'], ['agent-desktop', 'c08'], ['agent-desktop', 'merge'], ['agent-desktop', 'unknown']]) {
     const f = fake({ installed: selectedSets[3] });
     assert.throws(() => selectWorkflow({ profile, workflow }), /Unsupported profile/);
     await assert.rejects(connectBuilder(f.deps, { profile, workflow }), /Unsupported profile/);
     assert.equal(f.requests.length, 0); assert.equal(f.git.length, 0);
   }
+});
+
+test('all Profiles isolate writes in the four-repository installation, including active Agent Desktop', async () => {
   for (const [profile, workflow, repository, branch] of workflows) {
     const f = fake({ repository, branch, installed: selectedSets[3] });
     const b = await connectBuilder(f.deps, { profile, workflow });
@@ -598,15 +602,169 @@ test('dormant agent-desktop has no Profile or write path in the four-repository 
     const write = f.requests.filter(r => r.url.endsWith('/access_tokens') && JSON.parse(r.body).repositories);
     assert.equal(write.length, 1);
     assert.deepEqual(JSON.parse(write[0].body).repositories, [repository.split('/')[1]]);
-    assert(!f.requests.some(r => r.url.includes('/repos/' + dormantRepo)));
-    assert(!f.git.some(([, args]) => args.some(arg => arg.includes('github.com/' + dormantRepo))));
-    for (const repositories of [[dormantRepo], [repository, dormantRepo], selectedSets[3]]) {
+    if (repository !== AGENT_DESKTOP_REPO) {
+      assert(!f.requests.some(r => r.url.includes('/repos/' + AGENT_DESKTOP_REPO)));
+      assert(!f.git.some(([, args]) => args.some(arg => arg.includes('github.com/' + AGENT_DESKTOP_REPO))));
+    }
+    const other = repository === AGENT_DESKTOP_REPO ? HUB_REPO : AGENT_DESKTOP_REPO;
+    for (const repositories of [[other], [repository, other], [repository, repository], selectedSets[3], []]) {
       const bad = fake({ repository, branch, installed: selectedSets[3], response: (url, options, data) =>
         url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
           ? { ...data, repositories: repositories.map(full_name => ({ full_name })) } : data });
       await assert.rejects(connectBuilder(bad.deps, { profile, workflow }), /Write token must authorize only/);
     }
   }
+});
+
+test('agent-desktop/bootstrap fixes immutable repository, branch, work item, ordered commands and only docs path', async () => {
+  const desktop = selectWorkflow({ profile: 'agent-desktop', workflow: 'bootstrap' });
+  assert.equal(AGENT_DESKTOP_REPO, 'zlpoot/agent-desktop');
+  assert.deepEqual(desktop, {
+    profile: { id: 'agent-desktop', repository: AGENT_DESKTOP_REPO, base: 'main', workflows: [desktop.workflow] },
+    workflow: { id: 'bootstrap', branch: 'codex/awh-c08-agent-desktop-bootstrap',
+      work_item: { repo: HUB_REPO, issue: 12 },
+      verification_commands: ['npm run check', 'npm run test:offline', 'npm run test:python'],
+      bootstrap_paths: ['docs/management/agent-workflow-hub.md'] },
+  });
+  for (const key of ['repo', 'repository', 'base', 'branch', 'work_item', 'verification_commands', 'bootstrap_paths',
+    'url', 'api', 'git', 'gh', 'agent', 'root']) {
+    const f = fake();
+    assert.throws(() => selectWorkflow({ profile: 'agent-desktop', workflow: 'bootstrap', [key]: 'override' }));
+    await assert.rejects(connectBuilder(f.deps, { profile: 'agent-desktop', workflow: 'bootstrap', [key]: 'override' }));
+    assert.equal(f.requests.length, 0); assert.equal(f.git.length, 0);
+  }
+  assert.throws(() => { desktop.profile.repository = HUB_REPO; });
+  assert.throws(() => { desktop.profile.base = 'other'; });
+  assert.throws(() => { desktop.workflow.branch = 'other'; });
+  assert.throws(() => { desktop.workflow.work_item.issue = 8; });
+  assert.throws(() => { desktop.workflow.verification_commands.reverse(); });
+  assert.throws(() => { desktop.workflow.bootstrap_paths.push('AGENTS.md'); });
+});
+
+test('Agent Desktop Profile CLI accepts fixed selection and refuses overrides/forbidden operations before credentials', () => {
+  const cli = fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url));
+  const prefix = ['--profile', 'agent-desktop', '--workflow', 'bootstrap'];
+  const invoke = args => spawnSync(process.execPath, [cli, ...prefix, ...args],
+    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+  const selected = invoke(['preflight']);
+  assert.equal(selected.status, 2); assert.equal(selected.stdout, '');
+  assert.deepEqual(JSON.parse(selected.stderr), { error: 'Required App ID or private key path environment is missing' });
+  for (const args of [['approve'], ['merge'], ['review'], ['review-decision'], ['administration'], ['workflow-mutation'],
+    ...['--repo', '--repository', '--base', '--branch', '--url', '--api', '--git', '--gh'].map(flag => ['push', flag, 'override'])]) {
+    const refused = invoke(args);
+    assert.equal(refused.status, 2); assert.equal(refused.stdout, '');
+    assert.deepEqual(JSON.parse(refused.stderr), { error: 'Unsupported Builder operation or arguments' });
+  }
+});
+
+test('Agent Desktop refuses malformed write scope and metadata escalation without Git transport or PR writes', async () => {
+  for (const repositories of [undefined, null, [], [{ full_name: HUB_REPO }],
+    [{ full_name: AGENT_DESKTOP_REPO }, { full_name: HUB_REPO }],
+    [{ full_name: AGENT_DESKTOP_REPO }, { full_name: AGENT_DESKTOP_REPO }]]) {
+    const f = fake({ repository: AGENT_DESKTOP_REPO, installed: selectedSets[3], response: (url, options, data) =>
+      url.endsWith('/access_tokens') && JSON.parse(options.body).repositories ? { ...data, repositories } : data });
+    await assert.rejects(connectBuilder(f.deps, { profile: 'agent-desktop', workflow: 'bootstrap' }), /Write token must authorize only/);
+    assert(!f.git.some(([, args]) => args.includes('push') || args.includes('ls-remote')));
+    assert(!f.requests.some(r => r.url.endsWith('/pulls')));
+  }
+  for (const permissions of [{ metadata: 'read', contents: 'write' }, { metadata: 'write' }]) {
+    const f = fake({ repository: AGENT_DESKTOP_REPO, installed: selectedSets[3], response: (url, options, data) =>
+      url.endsWith('/access_tokens') && !JSON.parse(options.body).repositories ? { ...data, permissions } : data });
+    await assert.rejects(connectBuilder(f.deps, { profile: 'agent-desktop', workflow: 'bootstrap' }), /token permissions/);
+    assert.equal(f.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
+  }
+});
+
+test('Agent Desktop cannot authenticate from a Hub worktree', async () => {
+  const f = fake({ installed: selectedSets[3] });
+  await assert.rejects(connectBuilder(f.deps, { profile: 'agent-desktop', workflow: 'bootstrap' }), /worktree root/);
+  assert.equal(f.requests.length, 0);
+});
+
+const desktopSelection = { profile: 'agent-desktop', workflow: 'bootstrap' };
+const desktopCommands = ['npm run check', 'npm run test:offline', 'npm run test:python'];
+const desktopFake = overrides => fake({ repository: AGENT_DESKTOP_REPO, branch: 'codex/awh-c08-agent-desktop-bootstrap',
+  installed: selectedSets[3], ...overrides });
+const desktopHandoff = () => {
+  const handoff = structuredClone(record);
+  handoff.work_item.issue = 12;
+  handoff.verification.checks = desktopCommands.map(command => ({ command, exit_code: 0 }));
+  handoff.verification.evidence_refs = [`https://github.com/${AGENT_DESKTOP_REPO}/pull/5#issuecomment-9`];
+  return handoff;
+};
+
+test('Agent Desktop bootstrap blocks every product/management boundary before authenticated probe or push', async () => {
+  for (const path of ['AGENTS.md', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
+    'src/main.ts', 'tests/offline.test.ts', 'src/host/protocol.ts', 'src/guest/protocol.ts', 'src/workflow/schema.ts',
+    'docs/P7.md', 'docs/management/grant.md', 'docs/management/../AGENTS.md']) {
+    const f = desktopFake(), spawn = f.deps.spawn;
+    f.deps.spawn = (...args) => args[1][0] === 'diff' ? { status: 0, stdout: path + '\0' } : spawn(...args);
+    await assert.rejects((await connectBuilder(f.deps, desktopSelection)).push(), /push failed/);
+    assert(!f.git.some(([, args]) => args.includes('push') || args.includes('ls-remote')));
+  }
+  for (const stdout of ['', 'docs/management/agent-workflow-hub.md\0src/p7.ts\0']) {
+    const f = desktopFake(), spawn = f.deps.spawn;
+    f.deps.spawn = (...args) => args[1][0] === 'diff' ? { status: 0, stdout } : spawn(...args);
+    await assert.rejects((await connectBuilder(f.deps, desktopSelection)).push(), /push failed/);
+    assert(!f.git.some(([, args]) => args.includes('push') || args.includes('ls-remote')));
+  }
+});
+
+test('Agent Desktop remote bootstrap rejects unsafe paths/statuses before PR creation, updates, comments or Ready', async () => {
+  const handoff = desktopHandoff();
+  const filesets = [[], ...['AGENTS.md', 'package.json', 'package-lock.json', 'pnpm-lock.yaml',
+    'src/main.ts', 'tests/offline.test.ts', 'src/host/protocol.ts', 'src/guest/protocol.ts', 'src/workflow/schema.ts',
+    'docs/P7.md', 'docs/management/grant.md'].map(filename => [{ filename, status: 'modified' }]),
+    ...['removed', 'renamed', 'copied', 'unknown'].map(status => [{ filename: 'docs/management/agent-workflow-hub.md', status }]),
+    [{ filename: 'docs/management/agent-workflow-hub.md', status: 'added' }, { filename: 'src/p7.ts', status: 'modified' }]];
+  for (const files of filesets) {
+    const f = desktopFake({ response: (url, _, data) => url.includes('/compare/') ? { status: 'ahead', files } : data });
+    const b = await connectBuilder(f.deps, desktopSelection);
+    for (const operation of [() => b.createPR('Title', 'Body'), () => b.readPR(5),
+      () => b.updatePR(5, 'Title', 'Body'), () => b.createComment(5, 'Body'),
+      () => b.editComment(5, 10, 'Body'), () => b.ready(5, head, handoff, 10)])
+      await assert.rejects(operation(), /docs-only/);
+    assert(!f.requests.some(r => ['POST', 'PATCH'].includes(r.method) && !r.url.endsWith('/access_tokens')));
+  }
+});
+
+test('Agent Desktop Ready requires Hub #12, exact head, only ordered offline commands and its own bot evidence', async () => {
+  const handoff = desktopHandoff();
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = desktopFake({ handoffBody: body }), b = await connectBuilder(f.deps, desktopSelection);
+  for (const commands of [desktopCommands.slice(1), [...desktopCommands].reverse(), ['pnpm check'],
+    ...['npm run test:browser', 'npm run test:windows-live', 'npm run test:vm', 'npm run test:real-input',
+      'npm run test:real-model'].map(command => [...desktopCommands, command])]) {
+    const invalid = structuredClone(handoff);
+    invalid.verification.checks = commands.map(command => ({ command, exit_code: 0 }));
+    await assert.rejects(b.ready(5, head, invalid, 10), /verification commands/);
+  }
+  for (const work_item of [{ repo: HUB_REPO, issue: 8 }, { repo: AGENT_DESKTOP_REPO, issue: 12 }])
+    await assert.rejects(b.ready(5, head, { ...handoff, work_item }, 10), /work item/);
+  await assert.rejects(b.ready(5, base, handoff, 10), /Confirmed Handoff/);
+  const wrongEvidence = structuredClone(handoff);
+  wrongEvidence.verification.evidence_refs = record.verification.evidence_refs;
+  const wrongBody = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(wrongEvidence)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const wrong = desktopFake({ handoffBody: wrongBody });
+  await assert.rejects((await connectBuilder(wrong.deps, desktopSelection)).ready(5, head, wrongEvidence, 10), /Evidence must reference/);
+  assert(!f.requests.some(r => r.url.endsWith('/graphql')));
+  assert(!wrong.requests.some(r => r.url.endsWith('/graphql')));
+  assert.equal((await b.ready(5, head, handoff, 10)).draft, false);
+});
+
+test('hub/c08 delivery binds Hub #12, pnpm check and its own branch without starting Desktop bootstrap', async () => {
+  const selection = { profile: 'hub', workflow: 'c08' }, { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c08', branch: 'codex/c08-agent-desktop-profile',
+    work_item: { repo: HUB_REPO, issue: 12 }, verification_commands: ['pnpm check'], bootstrap_paths: null });
+  const handoff = structuredClone(record); handoff.work_item.issue = 12;
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = fake({ branch: workflow.branch, installed: selectedSets[3], handoffBody: body });
+  const b = await connectBuilder(f.deps, selection);
+  await assert.rejects(b.ready(5, head, record, 10), /work item/);
+  assert.equal((await b.ready(5, head, handoff, 10)).draft, false);
+  assert(!f.requests.some(r => r.url.includes('/repos/' + AGENT_DESKTOP_REPO)));
+  assert.equal(f.requests.filter(r => r.url.endsWith('/access_tokens')).length, 2);
 });
 
 test('triple installation rejects metadata inspection escalation and multi-repository WebSkill write response', async () => {
@@ -841,7 +999,7 @@ test('transport repair workflow binds Hub #10 and exact-head Ready without chang
   const builder = await connectBuilder(f.deps, selection);
   await assert.rejects(builder.ready(5, head, record, 10), /work item/);
   assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
-  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
+  assert.equal(selectWorkflow({ profile: 'webskill', workflow: 'bootstrap' }).workflow.branch, 'codex/awh-c07-webskill-bootstrap');
 });
 
 function transportCLI(mode) {
