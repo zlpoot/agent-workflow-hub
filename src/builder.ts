@@ -14,8 +14,12 @@ const INSPECTION_PERMISSIONS = { metadata: 'read' };
 function fail(message: string): never { throw new BuilderError(message); }
 type GitTransportCategory = 'git_network_or_proxy' | 'git_authentication' | 'git_remote_permission_or_policy' |
   'git_non_fast_forward_or_ref_conflict' | 'git_timeout' | 'git_transport_unknown';
+type GitTransportStage = 'authenticated_read_probe' | 'receive_pack_dry_run' | 'push';
+type SuppressionReason = 'known_private_key' | 'known_jwt' | 'known_installation_token' |
+  'known_basic_credential' | 'authorization_header' | 'github_token_pattern' | 'jwt_pattern' | 'spawn_exception';
 export class BuilderError extends Error {
-  constructor(message: string, readonly category?: GitTransportCategory) { super(message); }
+  constructor(message: string, readonly category?: GitTransportCategory, readonly stage?: GitTransportStage,
+    readonly suppression_reason?: readonly SuppressionReason[]) { super(message); }
 }
 type Json = Record<string, any>; // GitHub JSON is checked at each boundary before use.
 export interface Dependencies {
@@ -109,12 +113,59 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   catch { return fail('Private key file unavailable; check existence and read permissions'); }
   const jwt = createJwt(appId, pem, d.now());
   const secrets = [pem.toString(), jwt];
+  const knownSecrets: { value: string; reason: SuppressionReason }[] = [
+    { value: pem.toString(), reason: 'known_private_key' }, { value: jwt, reason: 'known_jwt' },
+  ];
   const secretLike = (v: string) => secrets.some(s => s && v.includes(s)) ||
     /-----BEGIN .*PRIVATE KEY-----|\b(?:gh[psuor]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|authorization\s*:\s*(?:basic|bearer)\s+\S+/i.test(v);
   const safeText = (v: unknown): string => {
     if (typeof v !== 'string' || secretLike(v))
       fail('Secret-like or invalid text refused');
     return v;
+  };
+  const sanitizeTransport = (text: string) => {
+    const reasons = new Set<SuppressionReason>();
+    const spans: { start: number; end: number }[] = [];
+    let safe = true;
+    const add = (start: number, end: number, reason?: SuppressionReason) => {
+      if (reason) reasons.add(reason);
+      spans.push({ start, end });
+    };
+    // Detect every match against the original text before replacing overlapping spans.
+    for (const { value, reason } of knownSecrets) {
+      if (!value) continue;
+      for (let start = text.indexOf(value); start !== -1; start = text.indexOf(value, start + 1))
+        add(start, start + value.length, reason);
+    }
+    for (const [pattern, reason] of [
+      [/authorization\s*:[^\r\n]*/gi, 'authorization_header'],
+      [/\b(?:gh[psuor]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b/gi, 'github_token_pattern'],
+      [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/gi, 'jwt_pattern'],
+    ] as const) {
+      for (const match of text.matchAll(pattern)) add(match.index, match.index + match[0].length, reason);
+    }
+    // A truncated/unknown PEM cannot be bounded safely, so report only provenance.
+    for (const match of text.matchAll(/-----BEGIN ([^\r\n]*PRIVATE KEY)-----/gi)) {
+      reasons.add('known_private_key');
+      const footer = `-----END ${match[1]}-----`;
+      const end = text.toLowerCase().indexOf(footer.toLowerCase(), match.index + match[0].length);
+      if (end === -1) safe = false;
+      else add(match.index, end + footer.length);
+    }
+    // Credential URLs are never diagnostic evidence, including unknown userinfo.
+    for (const match of text.matchAll(/https?:\/\/[^\s/]*@[^\s]*/gi))
+      add(match.index, match.index + match[0].length);
+    spans.sort((a, b) => a.start - b.start || a.end - b.end);
+    let sanitized = '', cursor = 0;
+    for (let i = 0; i < spans.length; i++) {
+      const start = spans[i]!.start;
+      let end = spans[i]!.end;
+      while (i + 1 < spans.length && spans[i + 1]!.start <= end) end = Math.max(end, spans[++i]!.end);
+      sanitized += text.slice(cursor, start) + '[suppressed]';
+      cursor = end;
+    }
+    sanitized += text.slice(cursor);
+    return { text: safe ? sanitized : null, reasons: [...reasons].sort() };
   };
   const request = async (path: string, credential: string, method = 'GET', body?: unknown): Promise<Json> => {
     let r: Response;
@@ -149,6 +200,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     });
     if (typeof v.token !== 'string' || !v.token || typeof v.expires_at !== 'string') fail('Invalid installation token response');
     secrets.push(v.token, Buffer.from(`x-access-token:${v.token}`).toString('base64'));
+    knownSecrets.push({ value: v.token, reason: 'known_installation_token' },
+      { value: Buffer.from(`x-access-token:${v.token}`).toString('base64'), reason: 'known_basic_credential' });
     const expiry = Date.parse(v.expires_at);
     // GitHub's clock can be slightly ahead of the local clock; never extend the returned expiry itself.
     if (!Number.isFinite(expiry) || expiry <= d.now() || expiry > d.now() + 3600000 + 60000)
@@ -230,21 +283,36 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
             fail('Bootstrap changes must stay in the fixed docs-only path');
         }
       } catch { fail('App HTTPS Git push failed (details suppressed)'); }
-      const transport = (operation: 'authenticated probe' | 'push', args: string[]) => {
-        const message = `App HTTPS Git ${operation} failed`;
-        const suppressed = () => { throw new BuilderError(`${message} (details suppressed)`); };
+      const transport = (stage: GitTransportStage, args: string[]) => {
+        const message = {
+          authenticated_read_probe: 'App HTTPS Git authenticated probe failed',
+          receive_pack_dry_run: 'App HTTPS Git receive-pack dry-run failed',
+          push: 'App HTTPS Git push failed',
+        }[stage];
+        const suppressed = (reasons: readonly SuppressionReason[]) => {
+          throw new BuilderError(`${message} (details suppressed)`, undefined, stage, reasons);
+        };
         let result;
         try {
           result = d.spawn('git', ['-c', 'credential.helper=',
             '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
             '-c', 'http.followRedirects=false', ...args],
           { cwd: root, env, encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024 });
-        } catch { return suppressed(); }
-        const text = [result.stdout, result.stderr, result.error?.message]
-          .map((v: unknown) => typeof v === 'string' ? v : Buffer.isBuffer(v) ? v.toString('utf8') : '').join('\n');
+        } catch { return suppressed(['spawn_exception']); }
+        let diagnostic;
+        try {
+          const output = [result.stdout, result.stderr, result.error?.message].map((v: unknown) => {
+            if (v === undefined || v === null) return '';
+            if (typeof v === 'string') return v;
+            if (Buffer.isBuffer(v)) return v.toString('utf8');
+            throw new Error();
+          }).join('\n');
+          diagnostic = sanitizeTransport(output);
+        } catch { return suppressed(['spawn_exception']); }
         // Scan even successful output, before selecting any diagnostic category.
-        if (secretLike(text)) return suppressed();
-        if (!result.error && result.status === 0) return;
+        if (diagnostic.text === null) return suppressed(diagnostic.reasons);
+        if (!result.error && result.status === 0 && !diagnostic.reasons.length) return;
+        const text = diagnostic.text; // Sanitized text is classifier input only; never publish it.
         let category: GitTransportCategory = 'git_transport_unknown';
         const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
         if (code === 'ETIMEDOUT' || /timed? out|timeout/i.test(text)) category = 'git_timeout';
@@ -257,11 +325,14 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
           category = 'git_non_fast_forward_or_ref_conflict';
         else if (/permission to .+ denied|write access .+ not granted|repository not found|returned error: 403|gh006|gh013|protected branch|repository rule|remote rejected|hook declined/i.test(text))
           category = 'git_remote_permission_or_policy';
-        throw new BuilderError(message, category);
+        throw new BuilderError(diagnostic.reasons.length ? `${message} (details suppressed)` : message,
+          category, stage, diagnostic.reasons.length ? diagnostic.reasons : undefined);
       };
       const url = `https://github.com/${REPO}.git`;
       live();
-      transport('authenticated probe', ['ls-remote', '--exit-code', url, `refs/heads/${profile.base}`]);
+      transport('authenticated_read_probe', ['ls-remote', '--exit-code', url, `refs/heads/${profile.base}`]);
+      live();
+      transport('receive_pack_dry_run', ['push', '--dry-run', url, `HEAD:refs/heads/${BRANCH}`]);
       live();
       transport('push', ['push', url, `HEAD:refs/heads/${BRANCH}`]);
       return { pushed: BRANCH, actor };
