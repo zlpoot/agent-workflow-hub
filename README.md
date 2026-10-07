@@ -1,6 +1,8 @@
 # agent-workflow-hub
 
-Issue [#8](https://github.com/zlpoot/agent-workflow-hub/issues/8) 的 C0.7 Phase A：扩展固定 webskill/bootstrap Profile 和完整 selected-set 检查，保留 Hub/future-ui 与 C0/C0.5 行为。当前只交付 Hub 实现与离线回归，独立 Review PASS 后停在 Human Gate；真实 WebSkill bootstrap 由 Human 后续放行。C1 #3 继续暂停。
+Issue [#12](https://github.com/zlpoot/agent-workflow-hub/issues/12) 的 C0.8 Phase A：把已有 installation member 接入为固定 `agent-desktop/bootstrap` Profile，保留 Hub/future-ui/webskill、C0/C0.5 和 C0.7-R1 transport 安全边界。仅修改 Hub、运行 Hub 离线验证并交付 App Builder evidence / confirmed Handoff；Ready 后停在独立 Review Gate。Agent Desktop bootstrap 尚未执行、产品代码未修改。C1 #3 继续暂停。
+
+C0.7 [#8](https://github.com/zlpoot/agent-workflow-hub/issues/8) 的 Hub Phase A（PR #9）和 transport repair（PR #11）已经合并。WebSkill private-repo live acceptance 独立推进；C0.8 不改变其冻结 candidate、branch、live retry 或 #8/#10 状态，收口前禁止 merge C0.8。
 
 Issue [#4](https://github.com/zlpoot/agent-workflow-hub/issues/4) 已完成 C0.5 身份隔离，引入独立的 GitHub App Builder wrapper。C0 Handoff 校验器保持只读。C1 [#3](https://github.com/zlpoot/agent-workflow-hub/issues/3) 仍按当前路线暂停，不因 C0.5 完成而自动恢复。
 
@@ -75,13 +77,15 @@ Builder 在最终干净 head 上检查并发布原始验证输出；真实 hando
 | `hub` / `c05`（默认） | `zlpoot/agent-workflow-hub` | `main` / `codex/c05-github-app-builder` | `pnpm check` | 非 bootstrap，受 Issue #4 范围约束 |
 | `hub` / `c06` | `zlpoot/agent-workflow-hub` | `main` / `codex/c06-project-profiles` | `pnpm check` | 非 bootstrap，受 Issue #6 范围约束 |
 | `hub` / `c07` | `zlpoot/agent-workflow-hub` | `main` / `codex/c07-webskill-profile` | `pnpm check` | 非 bootstrap，受 Issue #8 Phase A 范围约束 |
+| `hub` / `c08` | `zlpoot/agent-workflow-hub` | `main` / `codex/c08-agent-desktop-profile` | `pnpm check` | 非 bootstrap，受 Issue #12 Phase A 范围约束 |
 | `hub` / `c07-r1` | `zlpoot/agent-workflow-hub` | `main` / `codex/c07-r1-git-transport` | `pnpm check` | 非 bootstrap，受 Issue #10 transport repair 范围约束 |
 | `webskill` / `bootstrap` | `zlpoot/webskill` | `main` / `codex/awh-c07-webskill-bootstrap` | `pnpm check:foundations`、`pnpm lint`、`pnpm typecheck` | 仅 `docs/management/agent-workflow-hub.md` |
 | `future-ui` / `bootstrap` | `zlpoot/future-ui` | `main` / `codex/awh-c06-bootstrap` | `pnpm lint`、`pnpm typecheck`、`pnpm test` | 仅 `docs/management/agent-workflow-hub.md` |
+| `agent-desktop` / `bootstrap` | `zlpoot/agent-desktop` | `main` / `codex/awh-c08-agent-desktop-bootstrap` | `npm run check`、`npm run test:offline`、`npm run test:python` | 仅 `docs/management/agent-workflow-hub.md` |
 
-Profile 是仓库和工作流边界，不绑定机器路径或产品开发 Agent。future-ui 产品 Worker 仍为豆包工作，其 R1-004 / #70 范围独立有效。bootstrap 只证明接入闭环，不修改产品源码、public contracts、依赖、lockfile 或 #70 Grant。
+Profile 是仓库和工作流边界，不绑定机器路径或产品开发 Agent。future-ui 产品 Worker 仍为豆包工作，其 R1-004 / #70 范围独立有效。bootstrap 只证明接入闭环，不修改产品源码、public contracts、依赖、lockfile 或 #70 Grant。Agent Desktop bootstrap 绑定 Hub #12；其 docs-only PR 不允许修改 AGENTS.md、package.json、任何 lockfile、src/**、tests/**、Host/Guest protocol、Workflow schema、P7 代码或 Issue 范围。固定的三项 npm 命令只是 workflow 声明，本阶段只运行 Hub 的 pnpm check，不运行 Agent Desktop tests；未来 bootstrap 也不得追加 browser、Windows live、VM、real input 或 real model tests。
 
-Human 配置 private App：只使用 Selected repositories，C0.7 Phase A 不修改现有 installation；Contents、Pull requests、Issues 为 write，Metadata 为 read，其他权限均 No access。PEM 放在仓库之外，并用 Windows ACL 限制读者。PowerShell 示例（替换本地路径占位符，不复制私钥内容）：
+Human 配置 private App：只使用 Selected repositories，Phase A 不修改现有 installation；Contents、Pull requests、Issues 为 write，Metadata 为 read，其他权限均 No access。PEM 放在仓库之外，并用 Windows ACL 限制读者。PowerShell 示例（替换本地路径占位符，不复制私钥内容）：
 
 ```powershell
 $env:AWH_GITHUB_APP_ID = '5219770'
@@ -90,7 +94,7 @@ pnpm build
 pnpm builder preflight
 ```
 
-`AWH_GITHUB_INSTALLATION_ID` 可选；若提供，必须与 App JWT 对 Profile 目标仓库的 live 查询结果一致。每次命令先检查 App、installation 的 selected 范围、未暂停状态和精确权限，再签发仅 `metadata: read` 的检查 token 读取 installation 实际仓库列表（不限制 repositories，以免隐藏错误范围）。检查 token 不含任何 write 权限；完整集合仅允许 `{Hub}`、`{Hub, future-ui}`、`{Hub, future-ui, webskill}`、`{Hub, future-ui, webskill, agent-desktop}`，并必须包含所选 Profile 仓库。`{Hub, webskill}`、重复、缺少、unexpected repository、数量不一致及 All repositories 必须 fail-closed，失败时不签发 write token。随后才签发限定所选唯一仓库及三项 write 权限的 token，并核对返回的 token repositories 也恰好为该仓库。四仓库集合来自 [Issue #8 Spec disposition](https://github.com/zlpoot/agent-workflow-hub/issues/8#issuecomment-6033698220)。agent-desktop 仅为 dormant installation 成员，没有 Profile、write token 或 write path；不读写该仓库、不创建 bootstrap PR、不启动迁移。任意未知或第五仓库仍 fail-closed。多仓库 installation 不会签发多仓库 write token。token/JWT/PEM 仅在进程内使用，不打印、不缓存、不写 Handoff；命令在 GitHub 返回的 `expires_at` 到期后失败，需要重新运行。有效期合理性检查允许最多 60 秒本机/服务器时钟偏差，不延长返回的到期时间。
+`AWH_GITHUB_INSTALLATION_ID` 可选；若提供，必须与 App JWT 对 Profile 目标仓库的 live 查询结果一致。每次命令先检查 App、installation 的 selected 范围、未暂停状态和精确权限，再签发仅 `metadata: read` 的检查 token 读取 installation 实际仓库列表（不限制 repositories，以免隐藏错误范围）。检查 token 不含任何 write 权限；完整集合仅允许 `{Hub}`、`{Hub, future-ui}`、`{Hub, future-ui, webskill}`、`{Hub, future-ui, webskill, agent-desktop}`，并必须包含所选 Profile 仓库。`{Hub, webskill}`、重复、缺少、unexpected repository、数量不一致及 All repositories 必须 fail-closed，失败时不签发 write token。随后才签发限定所选唯一仓库及三项 write 权限的 token，并核对返回的 token repositories 也恰好为该仓库。四仓库集合来自 [Issue #8 Spec disposition](https://github.com/zlpoot/agent-workflow-hub/issues/8#issuecomment-6033698220)。C0.8 在不扩展集合的前提下把既有 agent-desktop 成员升级为正式 Profile；只有选择 agent-desktop/bootstrap 时，未来 Builder 才可请求并接受仅 zlpoot/agent-desktop 的 write token。选择其他 Profile 不获得 Agent Desktop 权限。Phase A live 操作只使用 Hub token，不签发真实 Agent Desktop write token，不读写或 bootstrap 该仓库。任意未知或第五仓库仍 fail-closed。多仓库 installation 不会签发多仓库 write token。token/JWT/PEM 仅在进程内使用，不打印、不缓存、不写 Handoff；命令在 GitHub 返回的 `expires_at` 到期后失败，需要重新运行。有效期合理性检查允许最多 60 秒本机/服务器时钟偏差，不延长返回的到期时间。
 
 读取 PEM 前，helper 从 canonical cwd 向上找最近的 `.git` 目录或 linked-worktree 文件，再用不含 App 凭据的 Git 子进程核实实际 worktree root，并确认 origin 是所选 Profile 的固定 GitHub repository（只接受对应 HTTPS 或 SSH origin）。允许子目录调用；不要求 helper 与目标仓库在同一目录，未来可从 future-ui worktree 调用 Hub 的 CLI。无法核实根目录或仓库不符则失败。私钥路径经 realpath 解析后与核实的完整根目录比较，不能因 cwd 位于子目录而允许仓库内的 PEM，也不能通过仓库外的符号链接指向仓库内的密钥。后续 Git 检查/push 固定在核实的根目录执行，safe.directory 也只设置为该根目录。实现无固定盘符或本机工作区路径。
 
@@ -109,14 +113,14 @@ pnpm builder pr-ready <pr-number> <expected-head> <confirmed-handoff-file> <hand
 显式选择必须在操作前完整给出两个固定标志；操作和其参数保持上述格式：
 
 ```sh
-pnpm builder --profile hub --workflow c07 preflight
-pnpm builder --profile hub --workflow c07 push
-pnpm builder --profile hub --workflow c07 pr-create 'C0.7 Phase A' .handoff/pr-body.md
+pnpm builder --profile hub --workflow c08 preflight
+pnpm builder --profile hub --workflow c08 push
+pnpm builder --profile hub --workflow c08 pr-create 'C0.8 Phase A' .handoff/pr-body.md
 ```
 
-选择错误在读凭据或请求 GitHub 前失败。外部 Profile bootstrap push 会把当前远端 main 的完整 SHA 作为比较基准，检查 Git diff 仅含固定文档路径；PR 创建前及后续 PR 读写/Ready 也用 GitHub exact base/head compare 检查远端 candidate 只新增或修改该文档，阻止绕过 push 的产品代码 PR。检查不执行文档或评论中的命令。Handoff 的 `work_item` 指向任务所在仓库：c05 为 Hub #4，c06 与 future-ui bootstrap 为 Hub #6，c07 与 webskill bootstrap 为 Hub #8；交付仓库由所选 Profile、实际 PR 和该仓库证据 URL 绑定，不能把 future-ui #70 或 WebSkill #147 冒充本任务。Ready 还要求 checks 按该 workflow 固定顺序完整覆盖允许验证命令。
+选择错误在读凭据或请求 GitHub 前失败。外部 Profile bootstrap push 会把当前远端 main 的完整 SHA 作为比较基准，检查 Git diff 仅含固定文档路径；PR 创建前及后续 PR 读写/Ready 也用 GitHub exact base/head compare 检查远端 candidate 只新增或修改该文档，阻止绕过 push 的产品代码 PR。检查不执行文档或评论中的命令。Handoff 的 `work_item` 指向任务所在仓库：c05 为 Hub #4，c06 与 future-ui bootstrap 为 Hub #6，c07 与 webskill bootstrap 为 Hub #8，c07-r1 为 Hub #10，c08 与 agent-desktop bootstrap 为 Hub #12；交付仓库由所选 Profile、实际 PR 和该仓库证据 URL 绑定，不能把 future-ui #70 或 WebSkill #147 冒充本任务。Ready 还要求 checks 按该 workflow 固定顺序完整覆盖允许验证命令。
 
-**C0.7 Phase A / Human Gate：** 当前只交付 Hub 实现、自身 exact clean head 的 pnpm check、离线四仓库回归及真实 Hub App preflight。Windows 不需要 WebSkill clone，也不创建影子工作区或运行 WebSkill 测试；离线 mock 的 PASS 不表示真实 WebSkill bootstrap/验证 PASS。当前 Gate：WebSkill in App installation: YES；Mac App credential: OWNER_REPORTED_YES / MAC_LIVE_VERIFY_PENDING。负责人配置声明不等于 Mac live 验证 PASS；Windows Phase A 不验证 Mac credential。Builder 发布 evidence 与 confirmed Handoff、转 Ready for ChatGPT Review 后停止；独立 Review PASS 后仍需 Human 放行。Phase A 不修改 installation 或 WebSkill，不触碰 #147 / PR #160，不进入真实模型、网站或付费流程。
+**C0.7 Phase A 历史 / Human Gate：** 该阶段只交付 Hub 实现、自身 exact clean head 的 pnpm check、离线四仓库回归及真实 Hub App preflight。Windows 不需要 WebSkill clone，也不创建影子工作区或运行 WebSkill 测试；离线 mock 的 PASS 不表示真实 WebSkill bootstrap/验证 PASS。当时 Gate：WebSkill in App installation: YES；Mac App credential: OWNER_REPORTED_YES / MAC_LIVE_VERIFY_PENDING。此历史状态不是当前 Mac live acceptance 状态，当前状态以 #8/#10 最新评论和交付 evidence 为准。负责人配置声明不等于 Mac live 验证 PASS；Windows Phase A 不验证 Mac credential。Builder 发布 evidence 与 confirmed Handoff、转 Ready for ChatGPT Review 后停止；独立 Review PASS 后仍需 Human 放行。Phase A 不修改 installation 或 WebSkill，不触碰 #147 / PR #160，不进入真实模型、网站或付费流程。
 
 进入 Phase B 必须由 Human 明确放行并满足 Issue #8 全部门槛：Human 将 WebSkill 加入现有 Selected repositories，在 Mac 的仓库外安全配置 App credential；Mac Codex executor 只读登记真实 WebSkill root、branch、HEAD、worktree，再重新 live preflight 确认 selected set 恰好为 Issue #8 允许的精确集合（当前负责人配置为 Hub + future-ui + webskill + dormant agent-desktop），write token 仅授权 WebSkill。任何项失败停止，不回退用户身份。若 #147 工作区占用或有未提交修改，后续 bootstrap 使用最新 main 的独立干净工作区，不 reset/clean/discard 其工作。Phase B 只新增固定管理文档，不改 AGENTS、产品代码/public contracts、依赖、lockfile 或 #147/#160 的范围及授权，不运行模型、网站、付费流程、Docker full 或 GitHub Actions。Profile 不绑定机器路径或具体 Agent，Mac executor 是本任务执行约定。
 
@@ -138,8 +142,18 @@ Git stdout/stderr/error message 只在进程内扫描与分类，永不透传。
 
 `hub/c07-r1` 固定绑定 Hub #10、`pnpm check` 和 repair branch，沿用 pending → 回读 → confirmed 的 exact-head Handoff / Ready 门槛。此修复不改变外部 Profile、selected-set 或 App 权限；WebSkill live retry 必须等 independent Review + merge 后另行执行，本次不运行 WebSkill push。离线 transport 测试不是 private-repository live 验收。
 
-PR 创建固定 Draft。其后写入及评论回读均核对 App bot actor、目标仓库、指定分支与 main；不修改他人评论。`pr-ready` 复用 C0 校验器，核对所选 `workflow.work_item`（`hub/c05` 绑定 Hub #4；`hub/c06` 与 `future-ui/bootstrap` 绑定 Hub #6；`hub/c07` 与 `webskill/bootstrap` 绑定 Hub #8）、PR、base/head、该 workflow 的完整验证命令集、已发布且回读的 confirmed Handoff JSON 和 CLI 结果，以及当前 head 的独立 Builder evidence 评论（所有 evidence_refs 必须是同一 PR 上该 App 的另一条评论）。Handoff 评论正文格式为 `AWH-HANDOFF v0.1` 首行、首个 json fenced block 放交接 JSON，正文包含 C0 的单行 CLI 结果。Evidence 评论首行为 `Builder evidence`，含验证的完整 head SHA 和原始日志。转 Ready 前后再次核对远端版本；不确定的 Ready 发布结果会尝试恢复并回读 Draft，恢复也失败则明确报告，不能宣告交接成功。
+PR 创建固定 Draft。其后写入及评论回读均核对 App bot actor、目标仓库、指定分支与 main；不修改他人评论。`pr-ready` 复用 C0 校验器，核对所选 `workflow.work_item`（`hub/c05` 绑定 Hub #4；`hub/c06` 与 `future-ui/bootstrap` 绑定 Hub #6；`hub/c07` 与 `webskill/bootstrap` 绑定 Hub #8；`hub/c07-r1` 绑定 Hub #10；`hub/c08` 与 `agent-desktop/bootstrap` 绑定 Hub #12）、PR、base/head、该 workflow 的完整验证命令集、已发布且回读的 confirmed Handoff JSON 和 CLI 结果，以及当前 head 的独立 Builder evidence 评论（所有 evidence_refs 必须是同一 PR 上该 App 的另一条评论）。Handoff 评论正文格式为 `AWH-HANDOFF v0.1` 首行、首个 json fenced block 放交接 JSON，正文包含 C0 的单行 CLI 结果。Evidence 评论首行为 `Builder evidence`，含验证的完整 head SHA 和原始日志。转 Ready 前后再次核对远端版本；不确定的 Ready 发布结果会尝试恢复并回读 Draft，恢复也失败则明确报告，不能宣告交接成功。
 
 Builder evidence 属于 Builder 验证；Ready 仍不授予审批或合并权限。Contents write 技术上也能调用 merge API，Pull requests write 也覆盖 review API；本轮的禁止由 wrapper 的固定操作和协作 policy 强制，不能宣称是 GitHub permission-level 隔离。wrapper 不提供 approve、review decision、merge、administration、workflow mutation、关闭 Issue 或恢复 C1 的操作。ChatGPT 从 GitHub 独立核对 App bot 身份，并以自己的用户 principal 对 exact head 提交原生 APPROVE；该 Review gate 不由 Builder 代填。
 
 自动测试用运行时生成的 RSA key 和注入的 mock fetch/Git 子进程，覆盖 JWT 签名/时钟、安装查询、token 请求/有效期、权限/范围、脱敏失败、身份和版本检查、禁止操作及 Draft 恢复，不访问公网或使用真实秘密。私钥若意外进入日志或 Git 历史，停止并由 Human revoke/rotate；不能只删除日志继续。
+
+## C0.8 Phase A / Independent Review Gate
+
+本轮只在 Hub 接入固定 Agent Desktop Profile 和 hub/c08 delivery workflow，selected sets 保持原来的四个完整集合。自动回归覆盖全部 32 个 workflow × selected-set 组合、Agent Desktop 单仓库 scope、其他 Profile 不获得额外权限、unknown/override 拒绝、bootstrap 本地与远端路径检查及 ordered verification / exact-head Ready。离线 mock PASS 不表示 Agent Desktop live preflight、bootstrap 或三项 npm 验证 PASS。
+
+交付顺序为 App Builder → exact clean head pnpm check → evidence → pending Handoff → readback → confirmed Handoff + CLI expected-head → readback 与 exact base/head/actor/changed-files 核对 → Ready for ChatGPT Review。Builder verification 属于 Builder；Human 通知 ChatGPT 对 exact head 独立 Review，Ready 不授予 approve 或 merge。
+
+WebSkill C0.7 与 #10 private-repo live acceptance 未收口前禁止 merge C0.8；不修改、重建或干扰当前冻结 WebSkill candidate、branch、live retry、#8/#10 或 #147/#160。若 WebSkill live acceptance 随后完成，只记录事实，仍停在 Independent Review Gate。当前状态在 publication 时通过 Hub #8/#10 最新评论重新核对并记录在 Builder evidence，避免把历史 SHA 或状态当成新事实。
+
+Ready 后停止。C0.8 Phase A 尚未 merge；Agent Desktop bootstrap 尚未执行；Agent Desktop 产品代码未修改。后续 Agent Desktop bootstrap 需要 Human 另行明确授权，C1 #3 继续暂停。
