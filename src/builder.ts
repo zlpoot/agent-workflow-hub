@@ -12,7 +12,11 @@ const PERMISSIONS = { contents: 'write', issues: 'write', metadata: 'read', pull
 const WRITE_PERMISSIONS = { contents: 'write', issues: 'write', pull_requests: 'write' };
 const INSPECTION_PERMISSIONS = { metadata: 'read' };
 function fail(message: string): never { throw new BuilderError(message); }
-export class BuilderError extends Error {}
+type GitTransportCategory = 'git_network_or_proxy' | 'git_authentication' | 'git_remote_permission_or_policy' |
+  'git_non_fast_forward_or_ref_conflict' | 'git_timeout' | 'git_transport_unknown';
+export class BuilderError extends Error {
+  constructor(message: string, readonly category?: GitTransportCategory) { super(message); }
+}
 type Json = Record<string, any>; // GitHub JSON is checked at each boundary before use.
 export interface Dependencies {
   env: NodeJS.ProcessEnv;
@@ -34,7 +38,7 @@ const equalPermissions = (p: unknown, expected: Record<string, string> = PERMISS
 // Root inspection has no App credentials. Authenticate Git only after the root and key boundary are proven.
 function gitEnvironment(source: NodeJS.ProcessEnv, root: string): NodeJS.ProcessEnv {
   const env = Object.fromEntries(Object.entries(source).filter(([k]) =>
-    !/^(GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$|NODE_EXTRA_CA_CERTS$)/i.test(k)));
+    !/^(GIT_|GH_|GITHUB_|AWH_|SSH_ASKPASS$|SSH_ASKPASS_REQUIRE$|NODE_OPTIONS$|NODE_EXTRA_CA_CERTS$)/i.test(k)));
   return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
     GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: root.replaceAll('\\', '/'),
     GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '', GIT_TERMINAL_PROMPT: '0' };
@@ -105,9 +109,10 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   catch { return fail('Private key file unavailable; check existence and read permissions'); }
   const jwt = createJwt(appId, pem, d.now());
   const secrets = [pem.toString(), jwt];
+  const secretLike = (v: string) => secrets.some(s => s && v.includes(s)) ||
+    /-----BEGIN .*PRIVATE KEY-----|\b(?:gh[psuor]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|authorization\s*:\s*(?:basic|bearer)\s+\S+/i.test(v);
   const safeText = (v: unknown): string => {
-    if (typeof v !== 'string' || secrets.some(s => s && v.includes(s)) ||
-      /-----BEGIN .*PRIVATE KEY-----|\b(?:gh[psuor]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(v))
+    if (typeof v !== 'string' || secretLike(v))
       fail('Secret-like or invalid text refused');
     return v;
   };
@@ -201,8 +206,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       const inspectEnv = gitEnvironment(d.env, root);
       const env = { ...inspectEnv };
       const config = [
-        ['http.extraheader', ''], ['http.https://github.com/.extraheader', ''],
-        ['http.https://github.com/.extraheader', `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`],
+        ['http.https://github.com/.extraheader', `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`],
         ['credential.helper', ''], ['safe.directory', root.replaceAll('\\', '/')],
       ];
       Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
@@ -225,11 +229,41 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
           if (changed.error || changed.status !== 0 || !paths.length || paths.some(p => !workflow.bootstrap_paths!.includes(p)))
             fail('Bootstrap changes must stay in the fixed docs-only path');
         }
-        const r = d.spawn('git', ['-c', 'credential.helper=', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
-          '-c', 'http.followRedirects=false', 'push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${BRANCH}`],
-        { cwd: root, env, encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024 });
-        if (r.error || r.status !== 0) fail('App HTTPS Git push failed (details suppressed)');
       } catch { fail('App HTTPS Git push failed (details suppressed)'); }
+      const transport = (operation: 'authenticated probe' | 'push', args: string[]) => {
+        const message = `App HTTPS Git ${operation} failed`;
+        const suppressed = () => { throw new BuilderError(`${message} (details suppressed)`); };
+        let result;
+        try {
+          result = d.spawn('git', ['-c', 'credential.helper=',
+            '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+            '-c', 'http.followRedirects=false', ...args],
+          { cwd: root, env, encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024 });
+        } catch { return suppressed(); }
+        const text = [result.stdout, result.stderr, result.error?.message]
+          .map((v: unknown) => typeof v === 'string' ? v : Buffer.isBuffer(v) ? v.toString('utf8') : '').join('\n');
+        // Scan even successful output, before selecting any diagnostic category.
+        if (secretLike(text)) return suppressed();
+        if (!result.error && result.status === 0) return;
+        let category: GitTransportCategory = 'git_transport_unknown';
+        const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+        if (code === 'ETIMEDOUT' || /timed? out|timeout/i.test(text)) category = 'git_timeout';
+        else if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH'].includes(code ?? '') ||
+          /could not resolve (?:host|proxy)|failed to connect|couldn't connect|connection (?:refused|reset)|proxy (?:connect|authentication)|returned error: 407|ssl certificate|tls|ssl_connect|network is unreachable|unable to get local issuer/i.test(text))
+          category = 'git_network_or_proxy';
+        else if (/authentication failed|could not read (?:username|password)|terminal prompts disabled|invalid username or (?:password|token)|http basic: access denied|returned error: 401/i.test(text))
+          category = 'git_authentication';
+        else if (/non-fast-forward|fetch first|cannot lock ref|failed to update ref|reference already exists|stale info/i.test(text))
+          category = 'git_non_fast_forward_or_ref_conflict';
+        else if (/permission to .+ denied|write access .+ not granted|repository not found|returned error: 403|gh006|gh013|protected branch|repository rule|remote rejected|hook declined/i.test(text))
+          category = 'git_remote_permission_or_policy';
+        throw new BuilderError(message, category);
+      };
+      const url = `https://github.com/${REPO}.git`;
+      live();
+      transport('authenticated probe', ['ls-remote', '--exit-code', url, `refs/heads/${profile.base}`]);
+      live();
+      transport('push', ['push', url, `HEAD:refs/heads/${BRANCH}`]);
       return { pushed: BRANCH, actor };
     },
     createPR: async (title: string, body: string) => {

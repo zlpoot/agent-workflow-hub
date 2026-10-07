@@ -250,7 +250,7 @@ test('Git token stays in child environment, fixed HTTPS branch, no logged-user c
   assert.equal(options.cwd, repoRoot);
   const config = Object.fromEntries(Array.from({ length: Number(options.env.GIT_CONFIG_COUNT) }, (_, i) => [options.env[`GIT_CONFIG_KEY_${i}`], options.env[`GIT_CONFIG_VALUE_${i}`]]));
   assert.equal(config['credential.helper'], '');
-  assert.equal(config['http.https://github.com/.extraheader'], `Authorization: Basic ${Buffer.from('x-access-token:fake-installation-secret').toString('base64')}`);
+  assert.equal(config['http.https://github.com/.extraheader'], `AUTHORIZATION: basic ${Buffer.from('x-access-token:fake-installation-secret').toString('base64')}`);
 });
 
 test('unsafe local Git transport, wrong branch and Git errors are refused safely', async () => {
@@ -529,6 +529,7 @@ const workflows = [
   ['hub', 'c05', HUB_REPO, BRANCH],
   ['hub', 'c06', HUB_REPO, 'codex/c06-project-profiles'],
   ['hub', 'c07', HUB_REPO, 'codex/c07-webskill-profile'],
+  ['hub', 'c07-r1', HUB_REPO, 'codex/c07-r1-git-transport'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
@@ -674,4 +675,242 @@ test('WebSkill CLI cannot pass through arbitrary repo/base/branch/API/URL/Git be
   const f = fake();
   return assert.rejects(connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' }), /worktree root/)
     .then(() => assert.equal(f.requests.length, 0));
+});
+
+// Both transport stages use the official push operation; no generic Git/API seam is exposed.
+function failingTransport(stage, result, overrides = {}) {
+  const f = fake(overrides), spawn = f.deps.spawn;
+  f.deps.spawn = (...args) => {
+    const normal = spawn(...args);
+    return args[1].includes(stage) ? result : normal;
+  };
+  return f;
+}
+const transportCalls = f => f.git.filter(([, args]) => args.includes('ls-remote') || args.includes('push'));
+
+test('transport: single scoped auth header and authenticated read PASS precedes push with identical environment', async () => {
+  const f = fake();
+  await (await connectBuilder(f.deps)).push();
+  const [probe, push] = transportCalls(f);
+  assert.equal(transportCalls(f).length, 2);
+  assert.deepEqual(probe[1], ['-c', 'credential.helper=', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+    '-c', 'http.followRedirects=false', 'ls-remote', '--exit-code', `https://github.com/${REPO}.git`, 'refs/heads/main']);
+  assert(push[1].includes('push'));
+  assert.strictEqual(probe[2].env, push[2].env);
+  const env = probe[2].env;
+  const configs = Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`], env[`GIT_CONFIG_VALUE_${i}`]]);
+  assert.deepEqual(configs.filter(([key]) => /extraheader/i.test(key)), [
+    ['http.https://github.com/.extraheader', `AUTHORIZATION: basic ${Buffer.from('x-access-token:fake-installation-secret').toString('base64')}`],
+  ]);
+  assert(!configs.some(([key]) => key === 'http.extraheader'));
+  for (const [, args] of [probe, push]) {
+    assert(!args.join(' ').includes('fake-installation-secret'));
+    assert(!args.join(' ').includes('AUTHORIZATION'));
+    assert(!args.some(arg => arg.includes('x-access-token@')));
+  }
+});
+
+test('transport: authenticated read auth FAIL leaves push NOTRUN', async () => {
+  const f = failingTransport('ls-remote', { status: 128, stdout: '', stderr: 'fatal: Authentication failed' });
+  await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+    assert.equal(e.message, 'App HTTPS Git authenticated probe failed');
+    assert.equal(e.category, 'git_authentication'); return true;
+  });
+  assert.equal(transportCalls(f).length, 1);
+  assert(!f.git.some(([, args]) => args.includes('push')));
+});
+
+const diagnosticCases = [
+  ['git_network_or_proxy', { status: 128, stderr: 'Failed to connect to 127.0.0.1 port 7890' }],
+  ['git_network_or_proxy', { status: 128, stderr: 'Could not resolve proxy: proxy.invalid' }],
+  ['git_network_or_proxy', { status: 128, stderr: 'SSL certificate problem: unable to get local issuer certificate' }],
+  ['git_authentication', { status: 128, stderr: 'fatal: Authentication failed for fixed repository' }],
+  ['git_authentication', { status: 128, stderr: "fatal: could not read Username: terminal prompts disabled" }],
+  ['git_remote_permission_or_policy', { status: 128, stderr: 'remote: Write access to repository not granted.' }],
+  ['git_remote_permission_or_policy', { status: 1, stderr: 'remote: error: GH013: Repository rule violations found' }],
+  ['git_non_fast_forward_or_ref_conflict', { status: 1, stderr: '! [rejected] HEAD -> branch (non-fast-forward)' }],
+  ['git_non_fast_forward_or_ref_conflict', { status: 1, stderr: 'error: cannot lock ref: reference already exists' }],
+  ['git_timeout', { status: null, error: Object.assign(new Error('spawnSync git ETIMEDOUT'), { code: 'ETIMEDOUT' }) }],
+  ['git_timeout', { status: 128, stderr: 'Operation timed out after 60000 milliseconds' }],
+  ['git_transport_unknown', { status: 128, stdout: 'unrecognized upstream text', stderr: 'unexpected failure with untrusted detail' }],
+];
+for (const stage of ['ls-remote', 'push']) test(`transport: ${stage} classifies all six failure categories without raw output`, async () => {
+  for (const [category, result] of diagnosticCases) {
+    const f = failingTransport(stage, { stdout: '', stderr: '', ...result });
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.category, category);
+      assert.equal(e.message, `App HTTPS Git ${stage === 'push' ? 'push' : 'authenticated probe'} failed`);
+      assert(!e.message.includes(result.stderr || result.stdout || 'untrusted detail')); return true;
+    });
+    assert.equal(transportCalls(f).length, stage === 'push' ? 2 : 1);
+  }
+});
+
+for (const stage of ['ls-remote', 'push']) test(`transport secret redaction: ${stage} scans stdout/stderr before classification even on exit zero`, async () => {
+  const jwt = createJwt('123', pem, now);
+  const secrets = [pem, jwt, 'fake-installation-secret', 'fake-inspection-secret',
+    Buffer.from('x-access-token:fake-installation-secret').toString('base64'),
+    'ghs_unrecognizedToken', 'github_pat_unknownSecret', 'AUTHORIZATION: basic unrecognizedCredential'];
+  for (const secret of secrets) for (const stream of ['stdout', 'stderr']) for (const status of [0, 128]) {
+    const f = failingTransport(stage, { status, stdout: '', stderr: 'fatal: Authentication failed', [stream]: String(secret) });
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.message, `App HTTPS Git ${stage === 'push' ? 'push' : 'authenticated probe'} failed (details suppressed)`);
+      assert.equal(e.category, undefined);
+      assert(!JSON.stringify(e).includes(String(secret))); return true;
+    });
+    assert.equal(transportCalls(f).length, stage === 'push' ? 2 : 1);
+  }
+});
+
+test('transport secret redaction: spawn errors do not expose credentials or a misleading category', async () => {
+  for (const thrown of [true, false]) {
+    const f = fake(), spawn = f.deps.spawn;
+    f.deps.spawn = (...args) => {
+      const result = spawn(...args);
+      if (!args[1].includes('ls-remote')) return result;
+      const error = Object.assign(new Error('Authentication failed: fake-installation-secret'), { code: 'ETIMEDOUT' });
+      if (thrown) throw error;
+      return { status: null, error, stdout: '', stderr: '' };
+    };
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.message, 'App HTTPS Git authenticated probe failed (details suppressed)');
+      assert.equal(e.category, undefined); return true;
+    });
+    assert.equal(transportCalls(f).length, 1);
+  }
+});
+
+test('transport proxy preservation: HTTP(S) upper/lowercase survive while caller credentials, config and debug do not', async () => {
+  const f = fake();
+  const proxies = { HTTP_PROXY: 'http://127.0.0.1:7890', HTTPS_PROXY: 'http://127.0.0.1:7890',
+    http_proxy: 'http://127.0.0.1:7890', https_proxy: 'http://127.0.0.1:7890' };
+  Object.assign(f.deps.env, proxies, { GIT_CURL_VERBOSE: '1', GIT_TRACE_CURL: '1', GIT_CONFIG_GLOBAL: 'user-config',
+    GIT_CONFIG_SYSTEM: 'user-config', GIT_ASKPASS: 'user-helper', GH_ENTERPRISE_TOKEN: 'user-token',
+    GITHUB_OTHER: 'user-token', AWH_OTHER: 'secret-config', SSH_ASKPASS: 'user-helper', SSH_ASKPASS_REQUIRE: 'force' });
+  await (await connectBuilder(f.deps)).push();
+  for (const [, args, { env }] of f.git) {
+    for (const [key, value] of Object.entries(proxies)) assert.equal(env[key], value);
+    for (const key of ['GIT_CURL_VERBOSE', 'GIT_TRACE_CURL', 'GIT_TRACE', 'GIT_ASKPASS', 'GIT_CONFIG_SYSTEM',
+      'GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_OTHER', 'AWH_OTHER', 'AWH_GITHUB_APP_ID',
+      'SSH_ASKPASS', 'SSH_ASKPASS_REQUIRE']) assert.equal(env[key], undefined);
+    assert.equal(env.GIT_CONFIG_GLOBAL, process.platform === 'win32' ? 'NUL' : '/dev/null');
+    assert.equal(env.GIT_CONFIG_NOSYSTEM, '1'); assert.equal(env.GIT_TERMINAL_PROMPT, '0');
+    const keys = Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => env[`GIT_CONFIG_KEY_${i}`]);
+    assert(keys.every(key => ['safe.directory', 'credential.helper', 'http.https://github.com/.extraheader'].includes(key)));
+    assert.equal(env[`GIT_CONFIG_VALUE_${keys.indexOf('credential.helper')}`], '');
+    if (args.includes('ls-remote') || args.includes('push')) {
+      assert(args.includes(`core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`));
+      assert(args.includes('http.followRedirects=false'));
+    }
+  }
+});
+
+test('transport: unsafe local overrides fail before authenticated read or push', async () => {
+  for (const config of ['http.proxy', 'https.proxy', 'url.evil.insteadof', 'credential.helper', 'include.path',
+    'includeif.gitdir.path', 'core.gitproxy', 'core.sshcommand']) {
+    const f = fake(), spawn = f.deps.spawn;
+    f.deps.spawn = (...args) => {
+      const result = spawn(...args);
+      return args[1].includes('--name-only') ? { status: 0, stdout: config + '\n' } : result;
+    };
+    await assert.rejects((await connectBuilder(f.deps)).push(), /details suppressed/);
+    assert.equal(transportCalls(f).length, 0);
+  }
+});
+
+test('transport: expired token after authenticated read cannot dispatch push', async () => {
+  const f = fake(), spawn = f.deps.spawn;
+  f.deps.spawn = (...args) => {
+    const result = spawn(...args);
+    if (args[1].includes('ls-remote')) f.advance(3600000);
+    return result;
+  };
+  await assert.rejects((await connectBuilder(f.deps)).push(), /token expired/);
+  assert.equal(transportCalls(f).length, 1);
+});
+
+test('transport repair workflow binds Hub #10 and exact-head Ready without changing external Profiles', async () => {
+  const selection = { profile: 'hub', workflow: 'c07-r1' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c07-r1', branch: 'codex/c07-r1-git-transport',
+    work_item: { repo: HUB_REPO, issue: 10 }, verification_commands: ['pnpm check'], bootstrap_paths: null });
+  const handoff = structuredClone(record); handoff.work_item.issue = 10;
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
+  const builder = await connectBuilder(f.deps, selection);
+  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
+  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
+  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
+});
+
+function transportCLI(mode) {
+  const script = `
+    import { generateKeyPairSync } from 'node:crypto';
+    import fs from 'node:fs/promises';
+    import cp from 'node:child_process';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { tmpdir } from 'node:os';
+    import { join } from 'node:path';
+    const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({type:'pkcs8',format:'pem'});
+    const realpath = fs.realpath;
+    fs.realpath = async path => String(path).endsWith('generated-memory-key.pem') ? path : realpath(path);
+    fs.readFile = async () => Buffer.from(key);
+    let jwt;
+    const mode = ${JSON.stringify(mode)};
+    cp.spawnSync = (_, args) => {
+      if (args[0] === 'rev-parse') return {status:0,stdout:${JSON.stringify(repoRoot)}};
+      if (args.includes('--get')) return {status:0,stdout:'https://github.com/${REPO}.git'};
+      if (args[0] === 'config') return {status:0,stdout:'remote.origin.url'};
+      if (args[0] === 'branch') return {status:0,stdout:${JSON.stringify(BRANCH)}};
+      if (args.includes('ls-remote')) return {status:0,stdout:'${base}\\trefs/heads/main\\n',stderr:''};
+      const leaked = mode === 'pem' ? key : mode === 'jwt' ? jwt : mode === 'token' ? 'fake-installation-secret' :
+        mode === 'basic' ? Buffer.from('x-access-token:fake-installation-secret').toString('base64') :
+        mode === 'token-like' ? 'github_pat_untrustedToken' : undefined;
+      return {status:mode === 'success' ? 0 : 128,stdout:leaked || '',stderr:leaked ? 'Authentication failed' : mode === 'success' ? '' : mode};
+    };
+    syncBuiltinESMExports();
+    process.env.AWH_GITHUB_APP_ID = '123';
+    process.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH = join(tmpdir(), 'generated-memory-key.pem');
+    const permissions = ${JSON.stringify(permissions)};
+    globalThis.fetch = async (url, options) => {
+      if (url.endsWith('/app')) jwt = options.headers.Authorization.slice(7);
+      const v = url.endsWith('/app') ? {id:123,slug:'test-builder'} : url.endsWith('/installation') ?
+        {id:456,app_id:123,account:{login:'zlpoot'},repository_selection:'selected',suspended_at:null,permissions} :
+        url.includes('/installation/repositories') ? {total_count:1,repositories:[{full_name:'${REPO}'}]} :
+        {token:'fake-installation-secret',expires_at:new Date(Date.now()+3599000).toISOString(),permissions:JSON.parse(options.body).repositories?permissions:{metadata:'read'},repositories:[{full_name:'${REPO}'}]};
+      return new Response(JSON.stringify(v));
+    };
+    process.argv = [process.execPath, 'builder-cli.js', 'push'];
+    await import('./dist/builder-cli.js');
+  `;
+  return spawnSync(process.execPath, ['--input-type=module', '-e', script],
+    { cwd: repoRoot, encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+}
+
+test('transport real CLI emits only error and machine-readable category for all six classes', () => {
+  for (const [mode, category] of [
+    ['Failed to connect to proxy', 'git_network_or_proxy'], ['Authentication failed', 'git_authentication'],
+    ['remote: Write access to repository not granted', 'git_remote_permission_or_policy'],
+    ['non-fast-forward', 'git_non_fast_forward_or_ref_conflict'], ['Operation timed out', 'git_timeout'],
+    ['untrusted arbitrary upstream text', 'git_transport_unknown'],
+  ]) {
+    const child = transportCLI(mode);
+    assert.equal(child.status, 2); assert.equal(child.stdout, '');
+    assert.deepEqual(JSON.parse(child.stderr), { error: 'App HTTPS Git push failed', category });
+  }
+});
+
+test('transport real CLI completely suppresses PEM/JWT/token/basic/token-like output before classification', () => {
+  for (const mode of ['pem', 'jwt', 'token', 'basic', 'token-like']) {
+    const child = transportCLI(mode);
+    assert.equal(child.status, 2); assert.equal(child.stdout, '');
+    assert.deepEqual(JSON.parse(child.stderr), { error: 'App HTTPS Git push failed (details suppressed)' });
+  }
+});
+
+test('transport real CLI success stdout does not disclose credentials or Git output', () => {
+  const child = transportCLI('success');
+  assert.equal(child.status, 0); assert.equal(child.stderr, '');
+  assert.deepEqual(JSON.parse(child.stdout), { pushed: BRANCH, actor });
 });

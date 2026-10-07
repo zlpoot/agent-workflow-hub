@@ -75,6 +75,7 @@ Builder 在最终干净 head 上检查并发布原始验证输出；真实 hando
 | `hub` / `c05`（默认） | `zlpoot/agent-workflow-hub` | `main` / `codex/c05-github-app-builder` | `pnpm check` | 非 bootstrap，受 Issue #4 范围约束 |
 | `hub` / `c06` | `zlpoot/agent-workflow-hub` | `main` / `codex/c06-project-profiles` | `pnpm check` | 非 bootstrap，受 Issue #6 范围约束 |
 | `hub` / `c07` | `zlpoot/agent-workflow-hub` | `main` / `codex/c07-webskill-profile` | `pnpm check` | 非 bootstrap，受 Issue #8 Phase A 范围约束 |
+| `hub` / `c07-r1` | `zlpoot/agent-workflow-hub` | `main` / `codex/c07-r1-git-transport` | `pnpm check` | 非 bootstrap，受 Issue #10 transport repair 范围约束 |
 | `webskill` / `bootstrap` | `zlpoot/webskill` | `main` / `codex/awh-c07-webskill-bootstrap` | `pnpm check:foundations`、`pnpm lint`、`pnpm typecheck` | 仅 `docs/management/agent-workflow-hub.md` |
 | `future-ui` / `bootstrap` | `zlpoot/future-ui` | `main` / `codex/awh-c06-bootstrap` | `pnpm lint`、`pnpm typecheck`、`pnpm test` | 仅 `docs/management/agent-workflow-hub.md` |
 
@@ -120,6 +121,22 @@ pnpm builder --profile hub --workflow c07 pr-create 'C0.7 Phase A' .handoff/pr-b
 进入 Phase B 必须由 Human 明确放行并满足 Issue #8 全部门槛：Human 将 WebSkill 加入现有 Selected repositories，在 Mac 的仓库外安全配置 App credential；Mac Codex executor 只读登记真实 WebSkill root、branch、HEAD、worktree，再重新 live preflight 确认 selected set 恰好为 Issue #8 允许的精确集合（当前负责人配置为 Hub + future-ui + webskill + dormant agent-desktop），write token 仅授权 WebSkill。任何项失败停止，不回退用户身份。若 #147 工作区占用或有未提交修改，后续 bootstrap 使用最新 main 的独立干净工作区，不 reset/clean/discard 其工作。Phase B 只新增固定管理文档，不改 AGENTS、产品代码/public contracts、依赖、lockfile 或 #147/#160 的范围及授权，不运行模型、网站、付费流程、Docker full 或 GitHub Actions。Profile 不绑定机器路径或具体 Agent，Mac executor 是本任务执行约定。
 
 参数个数严格固定，数字必须是正安全整数；body-file 是 UTF-8 文件，真实数据放在 gitignored 的 `.handoff/`。成功 stdout 一行 JSON，失败 stderr 一行脱敏 JSON、退出码 2。Git 子进程输出不透传，token 只经进程环境中的临时 HTTP Basic header 提供，不在命令行、Git remote 或磁盘配置中出现；Git 系统/用户配置、用户凭据 helper、trace、hooks 和 redirects 禁用。若本地仓库存在 URL rewrite、HTTP/proxy、credential 或 include 配置，则拒绝 push；push 必须从指定功能分支执行，不能 force、push main 或选择其他 remote。
+
+### C0.7-R1 Git transport
+
+[Issue #10](https://github.com/zlpoot/agent-workflow-hub/issues/10) 的修复仅使用一个 `http.https://github.com/.extraheader`，值为 `AUTHORIZATION: basic <redacted>`；不再注入 generic/scoped 空 header reset。system/global config 已禁用，local transport override 仍拒绝，caller `GIT_*` / `GH_*` / `GITHUB_*` / `AWH_*`、`SSH_ASKPASS` / `SSH_ASKPASS_REQUIRE` 和 trace 仍过滤。`HTTP_PROXY`、`HTTPS_PROXY`、`http_proxy`、`https_proxy` 保留；不更改用户代理配置或 transport。
+
+固定 `push` 操作先用同一 write token、同一 child environment 和 Profile HTTPS URL 执行 `ls-remote --exit-code` 检查固定 base ref；只读 probe 通过后才 push 固定 feature branch。两个阶段都禁用 credential helper、hooks 与 redirects；Windows 保持 `NUL`，Mac 保持 `/dev/null`。token 到期后不得继续 push。
+
+Git stdout/stderr/error message 只在进程内扫描与分类，永不透传。非秘密失败仍为 exit 2；原有 `error` 字段保留，新增可选 `category` 字段：`git_network_or_proxy`、`git_authentication`、`git_remote_permission_or_policy`、`git_non_fast_forward_or_ref_conflict`、`git_timeout`、`git_transport_unknown`。例如：
+
+```json
+{"error":"App HTTPS Git authenticated probe failed","category":"git_authentication"}
+```
+
+分类仅表示观察到的有限错误特征，不证明远端写入状态。stdout/stderr（包括 exit 0）含 PEM、JWT、已知 token/Basic base64 credential 或 token-like 内容时，只返回 generic suppressed `error`，不返回 `category`；未识别错误不返回上游细节。probe 失败时 push NOTRUN；push 失败后不自动重试，必须先独立核对远端状态。
+
+`hub/c07-r1` 固定绑定 Hub #10、`pnpm check` 和 repair branch，沿用 pending → 回读 → confirmed 的 exact-head Handoff / Ready 门槛。此修复不改变外部 Profile、selected-set 或 App 权限；WebSkill live retry 必须等 independent Review + merge 后另行执行，本次不运行 WebSkill push。离线 transport 测试不是 private-repository live 验收。
 
 PR 创建固定 Draft。其后写入及评论回读均核对 App bot actor、目标仓库、指定分支与 main；不修改他人评论。`pr-ready` 复用 C0 校验器，核对所选 `workflow.work_item`（`hub/c05` 绑定 Hub #4；`hub/c06` 与 `future-ui/bootstrap` 绑定 Hub #6；`hub/c07` 与 `webskill/bootstrap` 绑定 Hub #8）、PR、base/head、该 workflow 的完整验证命令集、已发布且回读的 confirmed Handoff JSON 和 CLI 结果，以及当前 head 的独立 Builder evidence 评论（所有 evidence_refs 必须是同一 PR 上该 App 的另一条评论）。Handoff 评论正文格式为 `AWH-HANDOFF v0.1` 首行、首个 json fenced block 放交接 JSON，正文包含 C0 的单行 CLI 结果。Evidence 评论首行为 `Builder evidence`，含验证的完整 head SHA 和原始日志。转 Ready 前后再次核对远端版本；不确定的 Ready 发布结果会尝试恢复并回读 Draft，恢复也失败则明确报告，不能宣告交接成功。
 

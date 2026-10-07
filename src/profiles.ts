@@ -27,6 +27,7 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
     workflow('c05', 'codex/c05-github-app-builder', 4, ['pnpm check'], null),
     workflow('c06', 'codex/c06-project-profiles', 6, ['pnpm check'], null),
     workflow('c07', 'codex/c07-webskill-profile', 8, ['pnpm check'], null),
+    workflow('c07-r1', 'codex/c07-r1-git-transport', 10, ['pnpm check'], null),
   ]) }),
   Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([
     workflow('bootstrap', 'codex/awh-c06-bootstrap', 6,
