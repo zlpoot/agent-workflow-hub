@@ -2,3 +2,10 @@ node_modules/
 .pnpm-store/
 dist/
 .handoff/
+*.pem
+*.key
+.env
+.env.*
+credentials/
+*.token
+*.jwt
