@@ -221,6 +221,32 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   const { token, expiry } = await mint(true);
   const live = () => { if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
   const call = (path: string, method = 'GET', body?: unknown) => { live(); return request(path, token, method, body); };
+  // No caller ref/path: independently read only this workflow's feature branch.
+  // null means controlled ABSENT; PRESENT is a validated commit SHA.
+  const readFeatureRefState = async (): Promise<string | null> => {
+    live();
+    let response: Response;
+    try {
+      response = await d.fetch(`${API}${ROOT}/git/ref/heads/${BRANCH}`, {
+        method: 'GET', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000),
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28', 'Cache-Control': 'no-cache' },
+      });
+    } catch { return fail('Fixed feature ref state unavailable (details suppressed)'); }
+    live();
+    if (response.status === 404) return null;
+    if (response.status !== 200) fail('Fixed feature ref state unavailable (details suppressed)');
+    let value: Json;
+    try { value = await response.json(); }
+    catch { return fail('Invalid fixed feature ref state (details suppressed)'); }
+    live();
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      value.ref !== `refs/heads/${BRANCH}` || value.url !== `${API}${ROOT}/git/refs/heads/${BRANCH}` ||
+      value.object?.type !== 'commit' || !sha(value.object?.sha) ||
+      value.object.url !== `${API}${ROOT}/git/commits/${value.object.sha}`)
+      fail('Invalid fixed feature ref state (details suppressed)');
+    return value.object.sha as string;
+  };
   const id = (v: number) => { if (!positive(v)) fail('Invalid GitHub object number'); return v; };
   const prSummary = (p: Json) => {
     if (!positive(p.number) || p.user?.login !== actor || p.user?.type !== 'Bot' || !sha(p.head?.sha) ||
@@ -329,10 +355,13 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
           category, stage, diagnostic.reasons.length ? diagnostic.reasons : undefined);
       };
       const url = `https://github.com/${REPO}.git`;
+      const before = await readFeatureRefState();
       live();
       transport('authenticated_read_probe', ['ls-remote', '--exit-code', url, `refs/heads/${profile.base}`]);
       live();
       transport('receive_pack_dry_run', ['push', '--dry-run', url, `HEAD:refs/heads/${BRANCH}`]);
+      const after = await readFeatureRefState();
+      if (before !== after) fail('Fixed feature ref changed during receive-pack dry-run; push refused');
       live();
       transport('push', ['push', url, `HEAD:refs/heads/${BRANCH}`]);
       return { pushed: BRANCH, actor };

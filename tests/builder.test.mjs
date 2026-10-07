@@ -59,7 +59,9 @@ function fake(overrides = {}) {
       }
       else if (url.includes('/installation/repositories')) data = { total_count: installed.length, repositories: installed.map(full_name => ({ full_name })) };
       else if (url.endsWith('/git/ref/heads/main')) data = { object: { sha: base } };
-      else if (url.includes('/git/ref/heads/')) data = { object: { sha: head } };
+      else if (url.includes('/git/ref/heads/')) data = { ref: `refs/heads/${targetBranch}`,
+        url: `https://api.github.com/repos/${targetRepo}/git/refs/heads/${targetBranch}`,
+        object: { type: 'commit', sha: head, url: `https://api.github.com/repos/${targetRepo}/git/commits/${head}` } };
       else if (url.includes('/compare/')) data = { status: 'ahead', files: [{ filename: 'docs/management/agent-workflow-hub.md', status: 'added' }] };
       else if (url.endsWith('/graphql')) { ready = true; data = { data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }; }
       else if (url.endsWith('/issues/comments/10')) data = comment(10, overrides.handoffBody ?? handoffBody, targetRepo);
@@ -895,6 +897,8 @@ function transportCLI(mode, stage = 'dry-run') {
       const v = url.endsWith('/app') ? {id:123,slug:'test-builder'} : url.endsWith('/installation') ?
         {id:456,app_id:123,account:{login:'zlpoot'},repository_selection:'selected',suspended_at:null,permissions} :
         url.includes('/installation/repositories') ? {total_count:1,repositories:[{full_name:'${REPO}'}]} :
+        url.includes('/git/ref/heads/') ? {ref:'refs/heads/${BRANCH}',url:'https://api.github.com/repos/${REPO}/git/refs/heads/${BRANCH}',
+          object:{type:'commit',sha:'${head}',url:'https://api.github.com/repos/${REPO}/git/commits/${head}'}} :
         {token:'fake-installation-secret',expires_at:new Date(Date.now()+3599000).toISOString(),permissions:JSON.parse(options.body).repositories?permissions:{metadata:'read'},repositories:[{full_name:'${REPO}'}]};
       return new Response(JSON.stringify(v));
     };
@@ -1078,4 +1082,136 @@ test('receive-pack repair workflow binds Hub #13 and exact-head Ready; arbitrary
     assert.deepEqual(JSON.parse(child.stderr), { error: 'Unsupported Builder operation or arguments' });
   }
   assert(PROFILES.every(p => p.id !== 'agent-desktop'));
+});
+
+const fixedRefResponse = (repository = REPO, branch = BRANCH, commit = head) => ({
+  ref: `refs/heads/${branch}`, url: `https://api.github.com/repos/${repository}/git/refs/heads/${branch}`,
+  object: { type: 'commit', sha: commit, url: `https://api.github.com/repos/${repository}/git/commits/${commit}` },
+});
+const absentRef = () => new Response('untrusted 404 body fake-installation-secret', { status: 404 });
+const presentRef = (commit = head, repository = REPO, branch = BRANCH) => () => new Response(JSON.stringify(fixedRefResponse(repository, branch, commit)));
+function refGate(states, overrides = {}) {
+  const f = fake(overrides), fetch = f.deps.fetch, spawn = f.deps.spawn, events = [];
+  const url = `https://api.github.com/repos/${overrides.repository ?? REPO}/git/ref/heads/${overrides.branch ?? BRANCH}`;
+  let reads = 0;
+  f.deps.fetch = async (target, options) => {
+    if (target !== url) return fetch(target, options);
+    f.requests.push({ url: target, ...options }); events.push(reads === 0 ? 'ref_before' : 'ref_after');
+    assert(reads < states.length, 'Unexpected extra fixed-ref read');
+    return states[reads++](f);
+  };
+  f.deps.spawn = (...args) => {
+    if (args[1].includes('ls-remote')) events.push('read');
+    else if (args[1].includes('--dry-run')) events.push('dry-run');
+    else if (args[1].includes('push')) events.push('push');
+    return spawn(...args);
+  };
+  return { ...f, events, refURL: url };
+}
+
+test('ref-state gate: ABSENT → dry-run → ABSENT permits push via independent App API reads', async () => {
+  const f = refGate([absentRef, absentRef]);
+  assert.deepEqual(await (await connectBuilder(f.deps)).push(), { pushed: BRANCH, actor });
+  assert.deepEqual(f.events, ['ref_before', 'read', 'dry-run', 'ref_after', 'push']);
+  const reads = f.requests.filter(r => r.url === f.refURL);
+  assert.equal(reads.length, 2);
+  for (const r of reads) {
+    assert.equal(r.method, 'GET'); assert.equal(r.redirect, 'error'); assert.equal(r.cache, 'no-store');
+    assert.equal(r.headers['Cache-Control'], 'no-cache'); assert(r.signal instanceof AbortSignal);
+    assert.equal(r.headers.Authorization, 'Bearer fake-installation-secret'); assert.equal(r.body, undefined);
+  }
+});
+
+test('ref-state gate: PRESENT SHA A → dry-run → same SHA A permits push', async () => {
+  const f = refGate([presentRef(), presentRef()]);
+  await (await connectBuilder(f.deps)).push();
+  assert.deepEqual(f.events, ['ref_before', 'read', 'dry-run', 'ref_after', 'push']);
+});
+
+test('ref-state gate: created, updated or deleted remote ref blocks real push', async () => {
+  for (const states of [[absentRef, presentRef()], [presentRef(), presentRef(base)], [presentRef(), absentRef]]) {
+    const f = refGate(states);
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.message, 'Fixed feature ref changed during receive-pack dry-run; push refused');
+      assert.equal(e.stage, undefined); assert.equal(e.category, undefined); return true;
+    });
+    assert.deepEqual(f.events, ['ref_before', 'read', 'dry-run', 'ref_after']);
+    assert(!transportCalls(f).some(([, args]) => matchesTransport(args, 'push')));
+  }
+});
+
+test('ref-state gate: malformed JSON, wrong ref/repository/type/SHA and unexpected success status fail closed before or after dry-run', async () => {
+  const valid = fixedRefResponse();
+  const malformed = [null, [], {}, { ...valid, ref: 'refs/heads/main' }, { ...valid, ref: 'refs/tags/' + BRANCH },
+    { ...valid, url: 'https://api.github.com/repos/evil/repo/git/refs/heads/' + BRANCH },
+    { ...valid, object: null }, { ...valid, object: { ...valid.object, type: 'tree' } },
+    ...['a'.repeat(39), 'g'.repeat(40), 'fake-installation-secret', null, 123].map(sha => ({ ...valid, object: { ...valid.object, sha } })),
+    { ...valid, object: { ...valid.object, url: 'https://api.github.com/repos/evil/repo/git/commits/' + head } },
+  ].map(value => () => new Response(JSON.stringify(value)));
+  malformed.push(() => new Response('invalid JSON Authorization: Bearer fake-installation-secret'),
+    () => new Response(JSON.stringify(valid), { status: 201 }));
+  for (const bad of malformed) for (const at of ['before', 'after']) {
+    const f = refGate(at === 'before' ? [bad] : [presentRef(), bad]);
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert(e.message === 'Invalid fixed feature ref state (details suppressed)' || e.message === 'Fixed feature ref state unavailable (details suppressed)');
+      assert.equal(e.stage, undefined); assert.equal(e.category, undefined); assert(!e.message.includes('fake-installation-secret')); return true;
+    });
+    assert.deepEqual(f.events, at === 'before' ? ['ref_before'] : ['ref_before', 'read', 'dry-run', 'ref_after']);
+  }
+});
+
+test('ref-state gate: API/network/redirect failures before or after dry-run block real push with no upstream diagnostics', async () => {
+  const failures = [401, 403, 409, 422, 500].map(status => () => new Response('Authorization: Bearer fake-installation-secret', { status }));
+  failures.push(() => { throw new Error('network timeout fake-installation-secret'); },
+    () => { throw new TypeError('redirect to https://user:fake-installation-secret@evil.invalid'); });
+  for (const bad of failures) for (const at of ['before', 'after']) {
+    const f = refGate(at === 'before' ? [bad] : [presentRef(), bad]);
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.message, 'Fixed feature ref state unavailable (details suppressed)');
+      assert.equal(e.stage, undefined); assert.equal(e.category, undefined); assert.equal(e.suppression_reason, undefined); return true;
+    });
+    assert.deepEqual(f.events, at === 'before' ? ['ref_before'] : ['ref_before', 'read', 'dry-run', 'ref_after']);
+  }
+});
+
+test('ref-state gate: token expiry during either ref read, JSON decode or after readback blocks push', async () => {
+  for (const at of ['before', 'after']) for (const point of ['response', 'json']) {
+    const expire = f => {
+      if (point === 'response') { f.advance(3600000); return absentRef(); }
+      const r = presentRef()();
+      const json = r.json.bind(r); r.json = async () => { const value = await json(); f.advance(3600000); return value; };
+      return r;
+    };
+    const f = refGate(at === 'before' ? [expire] : [presentRef(), expire]);
+    await assert.rejects((await connectBuilder(f.deps)).push(), /token expired/);
+    assert.deepEqual(f.events, at === 'before' ? ['ref_before'] : ['ref_before', 'read', 'dry-run', 'ref_after']);
+  }
+});
+
+test('ref-state gate: each Profile always uses its fixed repository/feature branch and single write token', async () => {
+  for (const profile of PROFILES) for (const workflow of profile.workflows) {
+    const f = refGate([absentRef, absentRef], { repository: profile.repository, branch: workflow.branch, installed: selectedSets[3] });
+    const b = await connectBuilder(f.deps, { profile: profile.id, workflow: workflow.id });
+    assert.equal(b.readFeatureRefState, undefined); assert.equal(b.refState, undefined);
+    // JS arguments cannot override this no-argument fixed operation.
+    await b.push({ ref: 'refs/heads/main', url: 'https://evil.invalid', repository: 'evil/repo' });
+    const reads = f.requests.filter(r => r.url === f.refURL);assert.equal(reads.length, 2);
+    assert(reads.every(r => r.url === `https://api.github.com/repos/${profile.repository}/git/ref/heads/${workflow.branch}`));
+    assert.deepEqual(f.events, ['ref_before', 'read', 'dry-run', 'ref_after', 'push']);
+    assert.deepEqual(JSON.parse(f.requests.find(r => r.url.endsWith('/access_tokens') && JSON.parse(r.body).repositories).body).repositories,
+      [profile.repository.split('/')[1]]);
+    assert(!f.requests.some(r => r.url.includes('evil.invalid') || r.url.includes('evil/repo')));
+  }
+});
+
+test('ref-state gate: read or dry-run failure skips the after-ref read and real push', async () => {
+  for (const stage of ['ls-remote', 'dry-run']) {
+    const f = refGate([absentRef]), spawn = f.deps.spawn;
+    f.deps.spawn = (...args) => {
+      const normal = spawn(...args);
+      return matchesTransport(args[1], stage) ? { status: 128, stdout: '', stderr: 'Authentication failed' } : normal;
+    };
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => e.stage === stageName(stage));
+    assert.deepEqual(f.events, stage === 'ls-remote' ? ['ref_before', 'read'] : ['ref_before', 'read', 'dry-run']);
+  }
 });
