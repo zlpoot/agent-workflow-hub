@@ -41,6 +41,8 @@ export const DEFAULT_SELECTION: Readonly<BuilderSelection> = Object.freeze({ pro
 export const ALLOWED_INSTALLATION_SETS: readonly (readonly string[])[] = Object.freeze([
   Object.freeze([HUB_REPO]), Object.freeze([HUB_REPO, FUTURE_REPO].sort()),
   Object.freeze([HUB_REPO, FUTURE_REPO, WEBSKILL_REPO].sort()),
+  // Dormant installation member only: no agent-desktop Profile or write workflow.
+  Object.freeze([HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/agent-desktop'].sort()),
 ]);
 
 export function selectWorkflow(selection: BuilderSelection = DEFAULT_SELECTION) {

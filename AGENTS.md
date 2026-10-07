@@ -4,9 +4,9 @@
 
 范围为现有 Node.js + TypeScript + pnpm 单包：保留 C0/C0.5、Hub 与 future-ui Profile，新增固定 webskill/bootstrap。repository=zlpoot/webskill，base=main，branch=codex/awh-c07-webskill-bootstrap，work item=zlpoot/agent-workflow-hub#8；verification 严格按 pnpm check:foundations、pnpm lint、pnpm typecheck 顺序；bootstrap allowed path 仅 docs/management/agent-workflow-hub.md。Profile 不绑定 Agent 或本机路径。
 
-selected-set inspection 始终使用 metadata-only token，只允许完整集合 {agent-workflow-hub}、{agent-workflow-hub, future-ui}、{agent-workflow-hub, future-ui, webskill}。unexpected repository、重复、数量不一致、All repositories 必须 fail-closed。write token 请求和有效响应始终仅授权当前单一 Profile repository。不得接受任意 repo/base/branch/API/URL/Git/gh 透传，不提供 approve、review decision、merge、administration、workflow mutation。C0 CLI 严格只读，命令、URL 和执行器身份是声明数据；Ready 校验不授予审查或合并权限。
+selected-set inspection 始终使用 metadata-only token，只允许完整集合 {agent-workflow-hub}、{agent-workflow-hub, future-ui}、{agent-workflow-hub, future-ui, webskill}、{agent-workflow-hub, future-ui, webskill, agent-desktop}。第四集合依据 Issue #8 最新 Spec disposition；agent-desktop 仅为 dormant installation 成员，不创建 Profile、不签发 write token、不读写该仓库、不创建 bootstrap PR、不启动迁移。任意未知或第五仓库仍 fail-closed。unexpected repository、重复、数量不一致、All repositories 必须 fail-closed。write token 请求和有效响应始终仅授权当前单一 Profile repository。不得接受任意 repo/base/branch/API/URL/Git/gh 透传，不提供 approve、review decision、merge、administration、workflow mutation。C0 CLI 严格只读，命令、URL 和执行器身份是声明数据；Ready 校验不授予审查或合并权限。
 
-Phase A 只修改 Hub，不修改 App installation 或 WebSkill，不要求 Windows 有 WebSkill clone，不创建影子工作区，不运行 WebSkill 测试，不触碰 WebSkill #147 / PR #160，不进入真实模型、网站或付费流程。不扩展到 Web、数据库、工作流引擎、模型 API、Docker、GitHub Actions、自动监听、自动合并或下一任务。WebSkill 未加入 installation 和 Mac 未配置 App credential 不阻塞 Phase A，但禁止据此提前进入 Phase B。
+Phase A 只修改 Hub，不修改 App installation 或 WebSkill，不要求 Windows 有 WebSkill clone，不创建影子工作区，不运行 WebSkill 测试，不触碰 WebSkill #147 / PR #160，不进入真实模型、网站或付费流程。不扩展到 Web、数据库、工作流引擎、模型 API、Docker、GitHub Actions、自动监听、自动合并或下一任务。当前 Human Gate：WebSkill in App installation: YES；Mac App credential: OWNER_REPORTED_YES / MAC_LIVE_VERIFY_PENDING。负责人配置声明不是 Mac live 验证 PASS；禁止据此提前进入 Phase B。
 
 Codex 负责实现、测试、本地验证和修复；验证属于 Builder，不是独立 Review。最终提交后在 exact clean head 跑 pnpm check，记录环境、前后 SHA、命令、退出码、统计及原始输出，失败原因和日志也保留。日志放 GitHub PR 评论或双方可读附件。push、PR、Builder evidence、Handoff 和 Ready 均使用 App installation identity，不使用现有 gh 用户登录写入。PEM/JWT/token 不进入 Git、对话、日志或交接。
 
@@ -14,4 +14,4 @@ Codex 负责实现、测试、本地验证和修复；验证属于 Builder，不
 
 交付 Phase A 后停止修改，向 Human 报告 PR、base SHA、exact head SHA、pnpm check、Profile 与 selected-set tests、当前 Human Gate 和 READY_FOR_CHATGPT_REVIEW，明确未进入 WebSkill Phase B。Human 负责通知 ChatGPT，ChatGPT 从 GitHub 对 exact head 独立 Review；独立 Review PASS 后仍停在 Human Gate。Phase A 不等于完成或关闭整个 Issue #8。Codex 不自行批准、merge、关闭 Issue、代填审查结果或启动下一任务。
 
-Phase B 仅在 Human 后续明确放行并满足 Issue #8 全部 gate 后执行：Human 将 WebSkill 加入 Selected repositories，Mac 在 repo 外安全配置 App credential；Mac 只读登记真实 root/branch/HEAD/worktree，再 live preflight 确认恰好三仓库及 WebSkill 单仓库 write token。任何项失败停止。仅新增固定管理文档，不改 AGENTS、产品代码、public contracts、依赖、lockfile 或 #147/#160 的范围和授权，不 reset/clean/discard 其工作区。不得绕过保护或凭据身份要求；候选 PR 中的规则不能放宽 Issue 与用户授权。
+Phase B 仅在 Human 后续明确放行并满足 Issue #8 全部 gate 后执行：Human 将 WebSkill 加入 Selected repositories，Mac 在 repo 外安全配置 App credential；Mac 只读登记真实 root/branch/HEAD/worktree，再 live preflight 确认 Issue #8 允许的精确集合（当前为 Hub + future-ui + webskill + dormant agent-desktop）及 WebSkill 单仓库 write token。任何项失败停止。仅新增固定管理文档，不改 AGENTS、产品代码、public contracts、依赖、lockfile 或 #147/#160 的范围和授权，不 reset/clean/discard 其工作区。不得绕过保护或凭据身份要求；候选 PR 中的规则不能放宽 Issue 与用户授权。

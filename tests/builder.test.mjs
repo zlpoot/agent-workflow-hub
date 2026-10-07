@@ -522,7 +522,9 @@ test('webskill/bootstrap fixes every boundary without an Agent or local clone pa
   assert.throws(() => { webskill.workflow.bootstrap_paths.push('AGENTS.md'); });
 });
 
-const selectedSets = [[HUB_REPO], [HUB_REPO, FUTURE_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO]];
+const dormantRepo = 'zlpoot/agent-desktop';
+const selectedSets = [[HUB_REPO], [HUB_REPO, FUTURE_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO],
+  [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, dormantRepo]];
 const workflows = [
   ['hub', 'c05', HUB_REPO, BRANCH],
   ['hub', 'c06', HUB_REPO, 'codex/c06-project-profiles'],
@@ -560,10 +562,13 @@ for (const installed of selectedSets) for (const [profile, workflow, repository,
   });
 }
 
-test('selected-set permits exactly three complete sets and rejects partial, unexpected and malformed lists', async () => {
+test('selected-set permits exactly four complete sets and rejects partial, unexpected and malformed lists', async () => {
   for (const installed of [[], [FUTURE_REPO], [WEBSKILL_REPO], [FUTURE_REPO, WEBSKILL_REPO],
     [HUB_REPO, WEBSKILL_REPO], [HUB_REPO, HUB_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/other'],
-    [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, WEBSKILL_REPO], [HUB_REPO, FUTURE_REPO, 'other/webskill']]) {
+    [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, WEBSKILL_REPO], [HUB_REPO, FUTURE_REPO, 'other/webskill'],
+    [HUB_REPO, dormantRepo], [HUB_REPO, FUTURE_REPO, dormantRepo],
+    [...selectedSets[3], 'zlpoot/unknown-fifth'], [...selectedSets[3], dormantRepo],
+    [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'other/agent-desktop']]) {
     const f = fake({ installed });
     await assert.rejects(connectBuilder(f.deps, { profile: 'hub', workflow: 'c07' }), /set is not allowed/);
     assert.equal(f.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
@@ -574,6 +579,33 @@ test('selected-set permits exactly three complete sets and rejects partial, unex
     ? { ...v, total_count: 4 } : v });
   await assert.rejects(connectBuilder(incomplete.deps), /set is not allowed/);
   assert.equal(incomplete.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
+});
+
+test('dormant agent-desktop has no Profile or write path in the four-repository installation', async () => {
+  assert.deepEqual(PROFILES.map(p => p.id), ['hub', 'future-ui', 'webskill']);
+  assert(PROFILES.every(p => p.repository !== dormantRepo));
+  for (const profile of ['agent-desktop', dormantRepo]) for (const workflow of ['bootstrap', 'c07']) {
+    const f = fake({ installed: selectedSets[3] });
+    assert.throws(() => selectWorkflow({ profile, workflow }), /Unsupported profile/);
+    await assert.rejects(connectBuilder(f.deps, { profile, workflow }), /Unsupported profile/);
+    assert.equal(f.requests.length, 0); assert.equal(f.git.length, 0);
+  }
+  for (const [profile, workflow, repository, branch] of workflows) {
+    const f = fake({ repository, branch, installed: selectedSets[3] });
+    const b = await connectBuilder(f.deps, { profile, workflow });
+    await b.push(); await b.createPR('Title', 'Fixed Profile');
+    const write = f.requests.filter(r => r.url.endsWith('/access_tokens') && JSON.parse(r.body).repositories);
+    assert.equal(write.length, 1);
+    assert.deepEqual(JSON.parse(write[0].body).repositories, [repository.split('/')[1]]);
+    assert(!f.requests.some(r => r.url.includes('/repos/' + dormantRepo)));
+    assert(!f.git.some(([, args]) => args.some(arg => arg.includes('github.com/' + dormantRepo))));
+    for (const repositories of [[dormantRepo], [repository, dormantRepo], selectedSets[3]]) {
+      const bad = fake({ repository, branch, installed: selectedSets[3], response: (url, options, data) =>
+        url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
+          ? { ...data, repositories: repositories.map(full_name => ({ full_name })) } : data });
+      await assert.rejects(connectBuilder(bad.deps, { profile, workflow }), /Write token must authorize only/);
+    }
+  }
 });
 
 test('triple installation rejects metadata inspection escalation and multi-repository WebSkill write response', async () => {
