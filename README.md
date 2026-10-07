@@ -1,5 +1,7 @@
 # agent-workflow-hub
 
+Issue [#4](https://github.com/zlpoot/agent-workflow-hub/issues/4) adds a separate GitHub App Builder wrapper for C0.5 identity isolation. The C0 handoff validator remains read-only. C1 (#3) remains paused until the independent Reviewer completes the C0.5 gate.
+
 Issue [#1](https://github.com/zlpoot/agent-workflow-hub/issues/1) 的最小自举工具：读取 `builder_handoff` JSON，校验结构、候选版本与 Ready 声明的一致性。当前是单包 Node.js + TypeScript CLI，无运行时依赖；尚未实现工作流平台。
 
 ## 安装与检查
