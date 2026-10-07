@@ -3,7 +3,8 @@ import test from 'node:test';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { connectBuilder, createJwt, BRANCH, REPO } from '../dist/builder.js';
 
 // Ephemeral key generated in memory; no real credential and no saved key fixture.
@@ -11,6 +12,8 @@ const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 20
 const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
 const now = 1800000000123;
 const permissions = { contents: 'write', issues: 'write', metadata: 'read', pull_requests: 'write' };
+const inspectionPermissions = { metadata: 'read' };
+const repoRoot = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const actor = 'test-builder[bot]';
 const head = 'a'.repeat(40), base = 'b'.repeat(40);
 const pr = { number: 5, user: { login: actor, type: 'Bot' }, head: { sha: head, ref: BRANCH, repo: { full_name: REPO } },
@@ -29,6 +32,8 @@ function fake(overrides = {}) {
     env: { AWH_GITHUB_APP_ID: '123', AWH_GITHUB_APP_PRIVATE_KEY_PATH: join(tmpdir(), 'awh-test-only.pem'),
       PATH: process.env.PATH, GIT_TRACE: '1', GIT_CONFIG_COUNT: '99', GH_TOKEN: 'user-session', GITHUB_TOKEN: 'user-session', NODE_OPTIONS: '--inspect' },
     now: () => clock,
+    cwd: () => repoRoot,
+    realpath: async path => resolve(path),
     read: async () => Buffer.from(pem),
     fetch: async (url, options) => {
       requests.push({ url, ...options });
@@ -38,7 +43,11 @@ function fake(overrides = {}) {
       let data;
       if (url.endsWith('/app')) data = { id: 123, slug: 'test-builder' };
       else if (url.endsWith('/installation')) data = { id: 456, app_id: 123, account: { login: 'zlpoot' }, repository_selection: 'selected', suspended_at: null, permissions };
-      else if (url.endsWith('/access_tokens')) data = { token: 'fake-installation-secret', expires_at: new Date(now + 3600000).toISOString(), permissions };
+      else if (url.endsWith('/access_tokens')) {
+        const inspect = !Object.hasOwn(JSON.parse(options.body), 'repositories');
+        data = { token: inspect ? 'fake-inspection-secret' : 'fake-installation-secret',
+          expires_at: new Date(now + 3600000).toISOString(), permissions: inspect ? inspectionPermissions : permissions };
+      }
       else if (url.includes('/installation/repositories')) data = { total_count: 1, repositories: [{ full_name: REPO }] };
       else if (url.endsWith('/graphql')) { ready = true; data = { data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }; }
       else if (url.endsWith('/issues/comments/10')) data = comment(10, handoffBody);
@@ -50,6 +59,7 @@ function fake(overrides = {}) {
     },
     spawn: (...args) => {
       git.push(args);
+      if (args[1][0] === 'rev-parse') return { status: 0, stdout: repoRoot + '\n' };
       if (args[1][0] === 'config') return { status: 0, stdout: 'core.bare\nremote.origin.url\n' };
       if (args[1][0] === 'branch') return { status: 0, stdout: BRANCH + '\n' };
       return { status: 0, stdout: '', stderr: '' };
@@ -86,9 +96,9 @@ test('automatic installation resolution, exact request headers/body and narrowed
     assert.equal(r.headers['X-GitHub-Api-Version'], '2022-11-28');
     assert.match(r.headers.Authorization, /^Bearer eyJ/);
   }
-  assert.deepEqual(JSON.parse(f.requests[2].body), { permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
+  assert.deepEqual(JSON.parse(f.requests[2].body), { permissions: { metadata: 'read' } });
   assert.deepEqual(JSON.parse(f.requests[4].body), { repositories: ['agent-workflow-hub'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
-  assert.equal(f.requests[3].headers.Authorization, 'Bearer fake-installation-secret');
+  assert.equal(f.requests[3].headers.Authorization, 'Bearer fake-inspection-secret');
   assert(!JSON.stringify(b.preflight()).includes('fake-installation-secret'));
 });
 
@@ -122,7 +132,60 @@ test('actual installation repository list is checked before narrowing', async ()
     const f = fake({ response: (url, _, v) => url.includes('/installation/repositories') ? response : v });
     await assert.rejects(connectBuilder(f.deps), /only the target/);
     assert.equal(f.requests.length, 4);
+    const minted = f.requests.filter(r => r.url.endsWith('/access_tokens'));
+    assert.equal(minted.length, 1, 'no write token may be minted before scope passes');
+    assert.deepEqual(JSON.parse(minted[0].body), { permissions: { metadata: 'read' } });
+    assert(!Object.values(JSON.parse(minted[0].body).permissions).includes('write'));
   }
+});
+
+test('inspection token with unexpected write permission fails before scope lookup or write mint', async () => {
+  const f = fake({ response: (url, _, v) => url.endsWith('/access_tokens') ? { ...v, permissions } : v });
+  await assert.rejects(connectBuilder(f.deps), /token permissions mismatch/);
+  assert.equal(f.requests.length, 3);
+});
+
+test('nested invocation rejects a key in the worktree root before key read or authentication', async () => {
+  let readCount = 0;
+  const f = fake({ deps: { cwd: () => join(repoRoot, 'src'), read: async () => { readCount++; return Buffer.from(pem); } } });
+  f.deps.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH = join(repoRoot, 'root-secret.pem');
+  await assert.rejects(connectBuilder(f.deps), /outside the repository/);
+  assert.equal(readCount, 0); assert.equal(f.requests.length, 0);
+  const [cmd, args, options] = f.git[0];
+  assert.equal(cmd, 'git'); assert.deepEqual(args, ['rev-parse', '--show-toplevel']);
+  assert.equal(options.cwd, join(repoRoot, 'src'));
+  assert.equal(options.env.GIT_CONFIG_VALUE_0, repoRoot.replaceAll('\\', '/'));
+  assert.equal(options.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH, undefined);
+  assert(!JSON.stringify(options).includes('fake-installation-secret'));
+});
+
+test('nested invocation with an external key uses the verified root for safe.directory and push cwd', async () => {
+  const f = fake({ deps: { cwd: () => join(repoRoot, 'src') } });
+  const b = await connectBuilder(f.deps); b.push();
+  for (const [, args, options] of f.git.slice(1)) {
+    assert.equal(options.cwd, repoRoot);
+    const safeKey = Array.from({ length: Number(options.env.GIT_CONFIG_COUNT) }, (_, i) => i)
+      .find(i => options.env[`GIT_CONFIG_KEY_${i}`] === 'safe.directory');
+    assert.equal(options.env[`GIT_CONFIG_VALUE_${safeKey}`], repoRoot.replaceAll('\\', '/'));
+    if (args[0] !== '-c') assert(!JSON.stringify(options.env).includes('fake-installation-secret'));
+  }
+});
+
+test('unverifiable or different worktree root fails before reading the key', async () => {
+  for (const result of [{ status: 128, stdout: '', stderr: pem }, { status: 0, stdout: 'relative/path' },
+    { status: 0, stdout: tmpdir() }]) {
+    let readCount = 0;
+    const f = fake({ deps: { spawn: () => result, read: async () => { readCount++; return Buffer.from(pem); } } });
+    await assert.rejects(connectBuilder(f.deps), e => /worktree root/.test(e.message) && !e.message.includes(pem));
+    assert.equal(readCount, 0); assert.equal(f.requests.length, 0);
+  }
+});
+
+test('canonical key path in the worktree is refused even through an outside symlink', async () => {
+  const f = fake({ deps: { realpath: async path => resolve(path) === resolve(join(tmpdir(), 'awh-test-only.pem'))
+    ? join(repoRoot, 'hidden-secret.pem') : resolve(path) } });
+  await assert.rejects(connectBuilder(f.deps), /outside the repository/);
+  assert.equal(f.requests.length, 0);
 });
 
 test('missing environment, unavailable file and wrong key produce safe failures', async () => {
@@ -169,6 +232,7 @@ test('Git token stays in child environment, fixed HTTPS branch, no logged-user c
   for (const k of ['GIT_TRACE', 'GH_TOKEN', 'GITHUB_TOKEN', 'NODE_OPTIONS', 'AWH_GITHUB_APP_PRIVATE_KEY_PATH']) assert.equal(options.env[k], undefined);
   assert.equal(options.env.GIT_CONFIG_NOSYSTEM, '1');
   assert.equal(options.env.GIT_TERMINAL_PROMPT, '0');
+  assert.equal(options.cwd, repoRoot);
   const config = Object.fromEntries(Array.from({ length: Number(options.env.GIT_CONFIG_COUNT) }, (_, i) => [options.env[`GIT_CONFIG_KEY_${i}`], options.env[`GIT_CONFIG_VALUE_${i}`]]));
   assert.equal(config['credential.helper'], '');
   assert.equal(config['http.https://github.com/.extraheader'], `Authorization: Basic ${Buffer.from('x-access-token:fake-installation-secret').toString('base64')}`);
@@ -176,12 +240,12 @@ test('Git token stays in child environment, fixed HTTPS branch, no logged-user c
 
 test('unsafe local Git transport, wrong branch and Git errors are refused safely', async () => {
   for (const unsafe of ['url.evil.insteadof', 'http.proxy', 'credential.helper', 'include.path']) {
-    const f = fake({ deps: { spawn: () => ({ status: 0, stdout: unsafe }) } });
+    const f = fake({ deps: { spawn: (_, args) => ({ status: 0, stdout: args[0] === 'rev-parse' ? repoRoot : unsafe }) } });
     assert.throws((await connectBuilder(f.deps)).push, /push failed/);
   }
-  const f = fake({ deps: { spawn: (_, a) => a[0] === 'config' ? { status: 0, stdout: '' } : { status: 0, stdout: 'main' } } });
+  const f = fake({ deps: { spawn: (_, a) => ({ status: 0, stdout: a[0] === 'rev-parse' ? repoRoot : a[0] === 'config' ? '' : 'main' }) } });
   assert.throws((await connectBuilder(f.deps)).push, /push failed/);
-  const bad = fake({ deps: { spawn: () => { throw new Error(pem); } } });
+  const bad = fake({ deps: { spawn: (_, args) => { if (args[0] === 'rev-parse') return { status: 0, stdout: repoRoot }; throw new Error(pem); } } });
   assert.throws((await connectBuilder(bad.deps)).push, e => !e.message.includes(pem));
 });
 
@@ -243,16 +307,18 @@ test('successful real CLI never prints PEM, signed JWT, token or API response ex
     import { tmpdir } from 'node:os';
     import { join } from 'node:path';
     const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({type:'pkcs8',format:'pem'});
+    const realpath = fs.realpath;
+    fs.realpath = async path => String(path).endsWith('generated-memory-key.pem') ? path : realpath(path);
     fs.readFile = async () => Buffer.from(key);
     syncBuiltinESMExports();
     process.env.AWH_GITHUB_APP_ID = '123';
     process.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH = join(tmpdir(), 'generated-memory-key.pem');
     const permissions = ${JSON.stringify(permissions)};
-    globalThis.fetch = async url => {
+    globalThis.fetch = async (url, options) => {
       let v = url.endsWith('/app') ? {id:123,slug:'test-builder'} : url.endsWith('/installation') ?
         {id:456,app_id:123,account:{login:'zlpoot'},repository_selection:'selected',suspended_at:null,permissions} :
         url.includes('/installation/repositories') ? {total_count:1,repositories:[{full_name:'${REPO}'}]} :
-        {token:'fake-installation-secret',expires_at:new Date(Date.now()+3599000).toISOString(),permissions};
+        {token:'fake-installation-secret',expires_at:new Date(Date.now()+3599000).toISOString(),permissions:JSON.parse(options.body).repositories?permissions:{metadata:'read'}};
       return new Response(JSON.stringify({...v,untrusted_echo:key}));
     };
     process.argv = [process.execPath, 'builder-cli.js', 'preflight'];
@@ -264,6 +330,28 @@ test('successful real CLI never prints PEM, signed JWT, token or API response ex
   assert.equal(child.stdout.trim().split('\n').length, 1);
   assert.equal(JSON.parse(child.stdout).actor, actor);
   assert(!/BEGIN|eyJ|fake-installation-secret|untrusted_echo/.test(child.stdout));
+});
+
+test('real CLI from a nested directory resolves the Git root and refuses an in-repo key before read', () => {
+  const cli = new URL('../dist/builder-cli.js', import.meta.url).href;
+  const keyPath = join(repoRoot, 'root-secret.pem');
+  const script = `
+    import fs from 'node:fs/promises';
+    import { syncBuiltinESMExports } from 'node:module';
+    const actualRealpath = fs.realpath;
+    fs.realpath = async path => path === ${JSON.stringify(keyPath)} ? path : actualRealpath(path);
+    fs.readFile = async () => { throw new Error('Key read must not occur'); };
+    syncBuiltinESMExports();
+    process.env.AWH_GITHUB_APP_ID = '123';
+    process.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH = ${JSON.stringify(keyPath)};
+    globalThis.fetch = async () => { throw new Error('Network must not occur'); };
+    process.argv = [process.execPath, 'builder-cli.js', 'preflight'];
+    await import(${JSON.stringify(cli)});
+  `;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script],
+    { cwd: join(repoRoot, 'src'), encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+  assert.equal(child.status, 2); assert.equal(child.stdout, '');
+  assert.deepEqual(JSON.parse(child.stderr), { error: 'Private key must be outside the repository' });
 });
 
 test('uncertain Ready mutation restores and reads back Draft', async () => {

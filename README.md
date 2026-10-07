@@ -77,7 +77,9 @@ pnpm build
 pnpm builder preflight
 ```
 
-`AWH_GITHUB_INSTALLATION_ID` 可选；若提供，必须与 App JWT 对目标仓库的 live 查询结果一致。每次命令先检查 App、installation 的 selected 范围、未暂停状态和精确权限，再用短时 token 读取 installation 实际仓库列表，确认仅一个目标仓库，最后签发限定该仓库及三项 write 权限的 token。token/JWT/PEM 仅在进程内使用，不打印、不缓存、不写 Handoff；命令在 GitHub 返回的 `expires_at` 到期后失败，需要重新运行。有效期合理性检查允许最多 60 秒本机/服务器时钟偏差，不延长返回的到期时间。
+`AWH_GITHUB_INSTALLATION_ID` 可选；若提供，必须与 App JWT 对目标仓库的 live 查询结果一致。每次命令先检查 App、installation 的 selected 范围、未暂停状态和精确权限，再签发仅 `metadata: read` 的检查 token 读取 installation 实际仓库列表（不限制 repositories，以免隐藏错误范围）。检查 token 不含任何 write 权限；仅确认只有目标仓库后，才签发限定该仓库及三项 write 权限的 token。token/JWT/PEM 仅在进程内使用，不打印、不缓存、不写 Handoff；命令在 GitHub 返回的 `expires_at` 到期后失败，需要重新运行。有效期合理性检查允许最多 60 秒本机/服务器时钟偏差，不延长返回的到期时间。
+
+读取 PEM 前，helper 先用不含 App 凭据的 Git 子进程解析调用位置的实际 worktree root，并核对它是 helper 所在的 worktree。允许从该 worktree 的子目录调用；其他仓库或无法核实根目录时失败。私钥路径经 realpath 解析后与核实的完整根目录比较，不能因 cwd 位于子目录而允许仓库内的 PEM，也不能通过仓库外的符号链接指向仓库内的密钥。后续 Git 检查/push 固定在核实的根目录执行，safe.directory 也只设置为该根目录。
 
 ```text
 pnpm builder preflight

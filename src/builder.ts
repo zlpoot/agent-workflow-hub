@@ -1,7 +1,8 @@
 import { createPrivateKey, sign } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { resolve, relative, isAbsolute } from 'node:path';
+import { relative, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { validateHandoff } from './validator.js';
 
 export const REPO = 'zlpoot/agent-workflow-hub';
@@ -10,6 +11,7 @@ const API = 'https://api.github.com';
 const ROOT = `/repos/${REPO}`;
 const PERMISSIONS = { contents: 'write', issues: 'write', metadata: 'read', pull_requests: 'write' };
 const WRITE_PERMISSIONS = { contents: 'write', issues: 'write', pull_requests: 'write' };
+const INSPECTION_PERMISSIONS = { metadata: 'read' };
 function fail(message: string): never { throw new BuilderError(message); }
 export class BuilderError extends Error {}
 type Json = Record<string, any>; // GitHub JSON is checked at each boundary before use.
@@ -19,12 +21,24 @@ export interface Dependencies {
   read: typeof readFile;
   fetch: typeof fetch;
   spawn: typeof spawnSync;
+  cwd: () => string;
+  realpath: typeof realpath;
 }
-const defaults: Dependencies = { env: process.env, now: Date.now, read: readFile, fetch, spawn: spawnSync };
+const defaults: Dependencies = { env: process.env, now: Date.now, read: readFile, fetch, spawn: spawnSync,
+  cwd: process.cwd, realpath };
 const positive = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
 const sha = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{40}$/i.test(v);
-const equalPermissions = (p: unknown) => p !== null && typeof p === 'object' &&
-  JSON.stringify(Object.entries(p).sort()) === JSON.stringify(Object.entries(PERMISSIONS).sort());
+const equalPermissions = (p: unknown, expected: Record<string, string> = PERMISSIONS) => p !== null && typeof p === 'object' &&
+  JSON.stringify(Object.entries(p).sort()) === JSON.stringify(Object.entries(expected).sort());
+
+// Root inspection has no App credentials. Authenticate Git only after the root and key boundary are proven.
+function gitEnvironment(source: NodeJS.ProcessEnv, root: string): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(Object.entries(source).filter(([k]) =>
+    !/^(GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$|NODE_EXTRA_CA_CERTS$)/i.test(k)));
+  return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: root.replaceAll('\\', '/'),
+    GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '', GIT_TERMINAL_PROMPT: '0' };
+}
 
 export function createJwt(appId: string, pem: Buffer | string, now: number): string {
   if (!/^[1-9]\d*$/.test(appId) || !Number.isSafeInteger(Number(appId))) fail('Invalid App ID');
@@ -48,11 +62,26 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
   const override = d.env.AWH_GITHUB_INSTALLATION_ID;
   if (override && (!/^[1-9]\d*$/.test(override) || !positive(Number(override)))) fail('Invalid installation ID override');
   if (!isAbsolute(keyPath)) fail('Private key path must be absolute and outside the repository');
-  const rel = relative(resolve('.'), resolve(keyPath));
+  let root: string;
+  try {
+    // The helper lives in src/ or dist/ of its worktree. Trust only that directory for the Git root query.
+    const helperRoot = await d.realpath(fileURLToPath(new URL('../', import.meta.url)));
+    const query = d.spawn('git', ['rev-parse', '--show-toplevel'], {
+      cwd: d.cwd(), env: gitEnvironment(d.env, helperRoot), encoding: 'utf8', timeout: 10000,
+    });
+    if (query.error || query.status !== 0 || !query.stdout.trim() || !isAbsolute(query.stdout.trim()))
+      fail('Cannot resolve repository worktree root');
+    root = await d.realpath(query.stdout.trim());
+    if (root !== helperRoot) fail('Builder must run within its own repository worktree');
+  } catch { return fail('Cannot verify repository worktree root (details suppressed)'); }
+  let canonicalKeyPath: string;
+  try { canonicalKeyPath = await d.realpath(keyPath); }
+  catch { return fail('Private key file unavailable; check existence and read permissions'); }
+  const rel = relative(root, canonicalKeyPath);
   if (!rel || (!rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel)))
     fail('Private key must be outside the repository');
   let pem: Buffer;
-  try { pem = await d.read(keyPath) as Buffer; }
+  try { pem = await d.read(canonicalKeyPath) as Buffer; }
   catch { return fail('Private key file unavailable; check existence and read permissions'); }
   const jwt = createJwt(appId, pem, d.now());
   const secrets = [pem.toString(), jwt];
@@ -90,7 +119,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
     (override !== undefined && Number(override) !== inst.id)) fail('Installation identity, scope or permissions mismatch');
   const mint = async (restricted: boolean) => {
     const v = await request(`/app/installations/${inst.id}/access_tokens`, jwt, 'POST', {
-      ...(restricted ? { repositories: ['agent-workflow-hub'] } : {}), permissions: WRITE_PERMISSIONS,
+      ...(restricted ? { repositories: ['agent-workflow-hub'] } : {}),
+      permissions: restricted ? WRITE_PERMISSIONS : INSPECTION_PERMISSIONS,
     });
     if (typeof v.token !== 'string' || !v.token || typeof v.expires_at !== 'string') fail('Invalid installation token response');
     secrets.push(v.token, Buffer.from(`x-access-token:${v.token}`).toString('base64'));
@@ -98,10 +128,10 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
     // GitHub's clock can be slightly ahead of the local clock; never extend the returned expiry itself.
     if (!Number.isFinite(expiry) || expiry <= d.now() || expiry > d.now() + 3600000 + 60000)
       fail('Invalid installation token expiry');
-    if (!equalPermissions(v.permissions)) fail('Installation token permissions mismatch');
+    if (!equalPermissions(v.permissions, restricted ? PERMISSIONS : INSPECTION_PERMISSIONS)) fail('Installation token permissions mismatch');
     return { token: v.token as string, expiry };
   };
-  // An unrestricted token lists the *actual* installation scope; a narrowed token would hide extra repositories.
+  // Metadata-only inspection covers the *actual* installation scope without granting writes to extra repositories.
   const scopeToken = await mint(false);
   const repositories = await request('/installation/repositories?per_page=100', scopeToken.token);
   if (repositories.total_count !== 1 || !Array.isArray(repositories.repositories) ||
@@ -133,29 +163,27 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
       repository_selection: 'selected', repositories: [REPO], permissions: { ...PERMISSIONS } }),
     push: () => {
       live();
-      const env = Object.fromEntries(Object.entries(d.env).filter(([k]) =>
-        !/^(GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$|NODE_EXTRA_CA_CERTS$)/i.test(k)));
+      const inspectEnv = gitEnvironment(d.env, root);
+      const env = { ...inspectEnv };
       const config = [
         ['http.extraheader', ''], ['http.https://github.com/.extraheader', ''],
         ['http.https://github.com/.extraheader', `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`],
-        ['credential.helper', ''], ['safe.directory', resolve('.').replaceAll('\\', '/')],
+        ['credential.helper', ''], ['safe.directory', root.replaceAll('\\', '/')],
       ];
       Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
         GIT_CONFIG_COUNT: String(config.length), GIT_TERMINAL_PROMPT: '0' });
       config.forEach(([k, v], i) => Object.assign(env, { [`GIT_CONFIG_KEY_${i}`]: k, [`GIT_CONFIG_VALUE_${i}`]: v }));
       try {
         // Local URL rewrites, proxies and credential configuration could reroute the authenticated push.
-        const inspectEnv = { ...env, GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'safe.directory',
-          GIT_CONFIG_VALUE_0: resolve('.').replaceAll('\\', '/'), GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '' };
         const local = d.spawn('git', ['config', '--local', '--name-only', '--list'],
-          { env: inspectEnv, encoding: 'utf8', timeout: 10000 });
+          { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
         if (local.error || local.status !== 0 || /^(http\.|https\.|url\.|credential\.|include|core\.(gitproxy|sshcommand))/im.test(local.stdout))
           fail('Unsafe local Git transport configuration');
-        const branch = d.spawn('git', ['branch', '--show-current'], { env: inspectEnv, encoding: 'utf8', timeout: 10000 });
+        const branch = d.spawn('git', ['branch', '--show-current'], { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
         if (branch.error || branch.status !== 0 || branch.stdout.trim() !== BRANCH) fail('Push requires the C0.5 feature branch');
         const r = d.spawn('git', ['-c', 'credential.helper=', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
           '-c', 'http.followRedirects=false', 'push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${BRANCH}`],
-        { env, encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024 });
+        { cwd: root, env, encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024 });
         if (r.error || r.status !== 0) fail('App HTTPS Git push failed (details suppressed)');
       } catch { fail('App HTTPS Git push failed (details suppressed)'); }
       return { pushed: BRANCH, actor };
