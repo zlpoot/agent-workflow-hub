@@ -59,7 +59,9 @@ function fake(overrides = {}) {
       }
       else if (url.includes('/installation/repositories')) data = { total_count: installed.length, repositories: installed.map(full_name => ({ full_name })) };
       else if (url.endsWith('/git/ref/heads/main')) data = { object: { sha: base } };
-      else if (url.includes('/git/ref/heads/')) data = { object: { sha: head } };
+      else if (url.includes('/git/ref/heads/')) data = { ref: `refs/heads/${targetBranch}`,
+        url: `https://api.github.com/repos/${targetRepo}/git/refs/heads/${targetBranch}`,
+        object: { type: 'commit', sha: head, url: `https://api.github.com/repos/${targetRepo}/git/commits/${head}` } };
       else if (url.includes('/compare/')) data = { status: 'ahead', files: [{ filename: 'docs/management/agent-workflow-hub.md', status: 'added' }] };
       else if (url.endsWith('/graphql')) { ready = true; data = { data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }; }
       else if (url.endsWith('/issues/comments/10')) data = comment(10, overrides.handoffBody ?? handoffBody, targetRepo);
@@ -530,6 +532,7 @@ const workflows = [
   ['hub', 'c06', HUB_REPO, 'codex/c06-project-profiles'],
   ['hub', 'c07', HUB_REPO, 'codex/c07-webskill-profile'],
   ['hub', 'c07-r1', HUB_REPO, 'codex/c07-r1-git-transport'],
+  ['hub', 'c07-r2', HUB_REPO, 'codex/c07-r2-receive-pack'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
@@ -677,25 +680,33 @@ test('WebSkill CLI cannot pass through arbitrary repo/base/branch/API/URL/Git be
     .then(() => assert.equal(f.requests.length, 0));
 });
 
-// Both transport stages use the official push operation; no generic Git/API seam is exposed.
+// All three transport stages use the fixed push operation; no generic Git/API seam is exposed.
+const matchesTransport = (args, stage) => stage === 'push' ? args.includes('push') && !args.includes('--dry-run') :
+  stage === 'dry-run' ? args.includes('--dry-run') : args.includes('ls-remote');
+const stageName = stage => ({ 'ls-remote': 'authenticated_read_probe', 'dry-run': 'receive_pack_dry_run', push: 'push' })[stage];
+const stageMessage = stage => `App HTTPS Git ${{ 'ls-remote': 'authenticated probe', 'dry-run': 'receive-pack dry-run', push: 'push' }[stage]} failed`;
+const stageCount = stage => ({ 'ls-remote': 1, 'dry-run': 2, push: 3 })[stage];
 function failingTransport(stage, result, overrides = {}) {
   const f = fake(overrides), spawn = f.deps.spawn;
   f.deps.spawn = (...args) => {
     const normal = spawn(...args);
-    return args[1].includes(stage) ? result : normal;
+    return matchesTransport(args[1], stage) ? result : normal;
   };
   return f;
 }
 const transportCalls = f => f.git.filter(([, args]) => args.includes('ls-remote') || args.includes('push'));
 
-test('transport: single scoped auth header and authenticated read PASS precedes push with identical environment', async () => {
+test('transport: read PASS → fixed receive-pack dry-run PASS → push with identical token environment', async () => {
   const f = fake();
   await (await connectBuilder(f.deps)).push();
-  const [probe, push] = transportCalls(f);
-  assert.equal(transportCalls(f).length, 2);
+  const [probe, dryRun, push] = transportCalls(f);
+  assert.equal(transportCalls(f).length, 3);
   assert.deepEqual(probe[1], ['-c', 'credential.helper=', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
     '-c', 'http.followRedirects=false', 'ls-remote', '--exit-code', `https://github.com/${REPO}.git`, 'refs/heads/main']);
   assert(push[1].includes('push'));
+  assert.deepEqual(dryRun[1], [...probe[1].slice(0, 6), 'push', '--dry-run', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${BRANCH}`]);
+  assert.deepEqual(push[1], [...probe[1].slice(0, 6), 'push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${BRANCH}`]);
+  assert.strictEqual(probe[2].env, dryRun[2].env);
   assert.strictEqual(probe[2].env, push[2].env);
   const env = probe[2].env;
   const configs = Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`], env[`GIT_CONFIG_VALUE_${i}`]]);
@@ -703,7 +714,7 @@ test('transport: single scoped auth header and authenticated read PASS precedes 
     ['http.https://github.com/.extraheader', `AUTHORIZATION: basic ${Buffer.from('x-access-token:fake-installation-secret').toString('base64')}`],
   ]);
   assert(!configs.some(([key]) => key === 'http.extraheader'));
-  for (const [, args] of [probe, push]) {
+  for (const [, args] of [probe, dryRun, push]) {
     assert(!args.join(' ').includes('fake-installation-secret'));
     assert(!args.join(' ').includes('AUTHORIZATION'));
     assert(!args.some(arg => arg.includes('x-access-token@')));
@@ -734,19 +745,19 @@ const diagnosticCases = [
   ['git_timeout', { status: 128, stderr: 'Operation timed out after 60000 milliseconds' }],
   ['git_transport_unknown', { status: 128, stdout: 'unrecognized upstream text', stderr: 'unexpected failure with untrusted detail' }],
 ];
-for (const stage of ['ls-remote', 'push']) test(`transport: ${stage} classifies all six failure categories without raw output`, async () => {
+for (const stage of ['ls-remote', 'dry-run', 'push']) test(`transport: ${stage} classifies all six failure categories without raw output`, async () => {
   for (const [category, result] of diagnosticCases) {
     const f = failingTransport(stage, { stdout: '', stderr: '', ...result });
     await assert.rejects((await connectBuilder(f.deps)).push(), e => {
       assert.equal(e.category, category);
-      assert.equal(e.message, `App HTTPS Git ${stage === 'push' ? 'push' : 'authenticated probe'} failed`);
+      assert.equal(e.message, stageMessage(stage)); assert.equal(e.stage, stageName(stage));
       assert(!e.message.includes(result.stderr || result.stdout || 'untrusted detail')); return true;
     });
-    assert.equal(transportCalls(f).length, stage === 'push' ? 2 : 1);
+    assert.equal(transportCalls(f).length, stageCount(stage));
   }
 });
 
-for (const stage of ['ls-remote', 'push']) test(`transport secret redaction: ${stage} scans stdout/stderr before classification even on exit zero`, async () => {
+for (const stage of ['ls-remote', 'dry-run', 'push']) test(`transport secret redaction: ${stage} scans stdout/stderr before sanitized classification even on exit zero`, async () => {
   const jwt = createJwt('123', pem, now);
   const secrets = [pem, jwt, 'fake-installation-secret', 'fake-inspection-secret',
     Buffer.from('x-access-token:fake-installation-secret').toString('base64'),
@@ -754,11 +765,13 @@ for (const stage of ['ls-remote', 'push']) test(`transport secret redaction: ${s
   for (const secret of secrets) for (const stream of ['stdout', 'stderr']) for (const status of [0, 128]) {
     const f = failingTransport(stage, { status, stdout: '', stderr: 'fatal: Authentication failed', [stream]: String(secret) });
     await assert.rejects((await connectBuilder(f.deps)).push(), e => {
-      assert.equal(e.message, `App HTTPS Git ${stage === 'push' ? 'push' : 'authenticated probe'} failed (details suppressed)`);
-      assert.equal(e.category, undefined);
+      assert.equal(e.message, stageMessage(stage) + ' (details suppressed)');
+      assert.equal(e.stage, stageName(stage));
+      assert.equal(e.category, stream === 'stdout' ? 'git_authentication' : 'git_transport_unknown');
+      assert(e.suppression_reason.length > 0);
       assert(!JSON.stringify(e).includes(String(secret))); return true;
     });
-    assert.equal(transportCalls(f).length, stage === 'push' ? 2 : 1);
+    assert.equal(transportCalls(f).length, stageCount(stage));
   }
 });
 
@@ -774,7 +787,9 @@ test('transport secret redaction: spawn errors do not expose credentials or a mi
     };
     await assert.rejects((await connectBuilder(f.deps)).push(), e => {
       assert.equal(e.message, 'App HTTPS Git authenticated probe failed (details suppressed)');
-      assert.equal(e.category, undefined); return true;
+      assert.equal(e.stage, 'authenticated_read_probe');
+      assert.equal(e.category, thrown ? undefined : 'git_timeout');
+      assert.deepEqual(e.suppression_reason, thrown ? ['spawn_exception'] : ['known_installation_token']); return true;
     });
     assert.equal(transportCalls(f).length, 1);
   }
@@ -844,7 +859,7 @@ test('transport repair workflow binds Hub #10 and exact-head Ready without chang
   assert(PROFILES.every(p => p.id !== 'agent-desktop'));
 });
 
-function transportCLI(mode) {
+function transportCLI(mode, stage = 'dry-run') {
   const script = `
     import { generateKeyPairSync } from 'node:crypto';
     import fs from 'node:fs/promises';
@@ -858,16 +873,20 @@ function transportCLI(mode) {
     fs.readFile = async () => Buffer.from(key);
     let jwt;
     const mode = ${JSON.stringify(mode)};
+    const stage = ${JSON.stringify(stage)};
     cp.spawnSync = (_, args) => {
       if (args[0] === 'rev-parse') return {status:0,stdout:${JSON.stringify(repoRoot)}};
       if (args.includes('--get')) return {status:0,stdout:'https://github.com/${REPO}.git'};
       if (args[0] === 'config') return {status:0,stdout:'remote.origin.url'};
       if (args[0] === 'branch') return {status:0,stdout:${JSON.stringify(BRANCH)}};
-      if (args.includes('ls-remote')) return {status:0,stdout:'${base}\\trefs/heads/main\\n',stderr:''};
+      const isTarget = stage === 'ls-remote' ? args.includes('ls-remote') : stage === 'dry-run' ? args.includes('--dry-run') : args.includes('push') && !args.includes('--dry-run');
+      if (!isTarget) return {status:0,stdout:'${base}\\trefs/heads/main\\n',stderr:''};
       const leaked = mode === 'pem' ? key : mode === 'jwt' ? jwt : mode === 'token' ? 'fake-installation-secret' :
         mode === 'basic' ? Buffer.from('x-access-token:fake-installation-secret').toString('base64') :
-        mode === 'token-like' ? 'github_pat_untrustedToken' : undefined;
-      return {status:mode === 'success' ? 0 : 128,stdout:leaked || '',stderr:leaked ? 'Authentication failed' : mode === 'success' ? '' : mode};
+        mode === 'token-like' ? 'github_pat_untrustedToken' : mode === 'header' ? 'AUTHORIZATION: basic untrustedCredential' :
+        mode === 'jwt-pattern' ? 'eyJunknown.payload.signature' : mode === 'partial-pem' ? '-----BEGIN PRIVATE KEY-----\\nunbounded secret' : undefined;
+      if (mode === 'spawn') throw new Error('fake-installation-secret Authentication failed');
+      return {status:mode === 'success' || mode === 'secret-success' ? 0 : 128,stdout:mode === 'secret-success' ? 'fake-installation-secret' : leaked || 'untrusted-success-output',stderr:leaked ? 'Authentication failed' : mode === 'success' || mode === 'secret-success' ? '' : mode};
     };
     syncBuiltinESMExports();
     process.env.AWH_GITHUB_APP_ID = '123';
@@ -878,6 +897,8 @@ function transportCLI(mode) {
       const v = url.endsWith('/app') ? {id:123,slug:'test-builder'} : url.endsWith('/installation') ?
         {id:456,app_id:123,account:{login:'zlpoot'},repository_selection:'selected',suspended_at:null,permissions} :
         url.includes('/installation/repositories') ? {total_count:1,repositories:[{full_name:'${REPO}'}]} :
+        url.includes('/git/ref/heads/') ? {ref:'refs/heads/${BRANCH}',url:'https://api.github.com/repos/${REPO}/git/refs/heads/${BRANCH}',
+          object:{type:'commit',sha:'${head}',url:'https://api.github.com/repos/${REPO}/git/commits/${head}'}} :
         {token:'fake-installation-secret',expires_at:new Date(Date.now()+3599000).toISOString(),permissions:JSON.parse(options.body).repositories?permissions:{metadata:'read'},repositories:[{full_name:'${REPO}'}]};
       return new Response(JSON.stringify(v));
     };
@@ -888,7 +909,7 @@ function transportCLI(mode) {
     { cwd: repoRoot, encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
 }
 
-test('transport real CLI emits only error and machine-readable category for all six classes', () => {
+test('transport real CLI emits only fixed error, stage and machine-readable category for all six classes', () => {
   for (const [mode, category] of [
     ['Failed to connect to proxy', 'git_network_or_proxy'], ['Authentication failed', 'git_authentication'],
     ['remote: Write access to repository not granted', 'git_remote_permission_or_policy'],
@@ -897,15 +918,18 @@ test('transport real CLI emits only error and machine-readable category for all 
   ]) {
     const child = transportCLI(mode);
     assert.equal(child.status, 2); assert.equal(child.stdout, '');
-    assert.deepEqual(JSON.parse(child.stderr), { error: 'App HTTPS Git push failed', category });
+    assert.deepEqual(JSON.parse(child.stderr), { error: stageMessage('dry-run'), stage: stageName('dry-run'), category });
   }
 });
 
-test('transport real CLI completely suppresses PEM/JWT/token/basic/token-like output before classification', () => {
-  for (const mode of ['pem', 'jwt', 'token', 'basic', 'token-like']) {
-    const child = transportCLI(mode);
+test('transport real CLI exposes only safe suppression provenance and sanitized category', () => {
+  for (const stage of ['ls-remote', 'dry-run', 'push']) for (const [mode, suppression_reason] of [ ['pem', ['known_private_key']], ['jwt', ['jwt_pattern', 'known_jwt']],
+    ['token', ['known_installation_token']], ['basic', ['known_basic_credential']], ['token-like', ['github_token_pattern']],
+    ['header', ['authorization_header']], ['jwt-pattern', ['jwt_pattern']] ]) {
+    const child = transportCLI(mode, stage);
     assert.equal(child.status, 2); assert.equal(child.stdout, '');
-    assert.deepEqual(JSON.parse(child.stderr), { error: 'App HTTPS Git push failed (details suppressed)' });
+    assert.deepEqual(JSON.parse(child.stderr), { error: stageMessage(stage) + ' (details suppressed)',
+      stage: stageName(stage), category: 'git_authentication', suppression_reason });
   }
 });
 
@@ -913,4 +937,281 @@ test('transport real CLI success stdout does not disclose credentials or Git out
   const child = transportCLI('success');
   assert.equal(child.status, 0); assert.equal(child.stderr, '');
   assert.deepEqual(JSON.parse(child.stdout), { pushed: BRANCH, actor });
+});
+
+test('receive-pack dry-run FAIL leaves real push NOTRUN; expiry after dry-run also blocks push', async () => {
+  const failed = failingTransport('dry-run', { status: 1, stdout: '', stderr: 'remote rejected: hook declined' });
+  await assert.rejects((await connectBuilder(failed.deps)).push(), e => {
+    assert.equal(e.stage, 'receive_pack_dry_run');
+    assert.equal(e.category, 'git_remote_permission_or_policy'); return true;
+  });
+  assert.equal(transportCalls(failed).length, 2);
+  assert(!transportCalls(failed).some(([, args]) => matchesTransport(args, 'push')));
+  const expired = fake(), spawn = expired.deps.spawn;
+  expired.deps.spawn = (...args) => {
+    const result = spawn(...args);
+    if (args[1].includes('--dry-run')) expired.advance(3600000);
+    return result;
+  };
+  await assert.rejects((await connectBuilder(expired.deps)).push(), e => {
+    assert.match(e.message, /token expired/);
+    assert.equal(e.stage, undefined); assert.equal(e.category, undefined); assert.equal(e.suppression_reason, undefined);
+    return true;
+  });
+  assert.equal(transportCalls(expired).length, 2);
+});
+
+test('suppression provenance: every detector, overlaps and duplicates use sorted enums only', async () => {
+  const jwt = createJwt('123', pem, now);
+  const cases = [
+    [pem, ['known_private_key']], [jwt, ['jwt_pattern', 'known_jwt']],
+    ['fake-installation-secret fake-inspection-secret', ['known_installation_token']],
+    [Buffer.from('x-access-token:fake-installation-secret').toString('base64'), ['known_basic_credential']],
+    ['Authorization: custom credential', ['authorization_header']],
+    ['ghs_unknown github_pat_unknownSecret', ['github_token_pattern']],
+    ['eyJunknown.payload.signature', ['jwt_pattern']],
+    [`Authorization: Bearer ${jwt}\nAuthorization: basic ${Buffer.from('x-access-token:fake-installation-secret').toString('base64')}\nfake-installation-secret ghs_unknown\n${pem}`,
+      ['authorization_header', 'github_token_pattern', 'jwt_pattern', 'known_basic_credential', 'known_installation_token', 'known_jwt', 'known_private_key']],
+  ];
+  for (const [secret, reasons] of cases) {
+    const f = failingTransport('dry-run', { status: 1, stdout: String(secret), stderr: 'remote: Write access to repository not granted.' });
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.deepEqual(e.suppression_reason, reasons);
+      assert.equal(e.category, 'git_remote_permission_or_policy');
+      assert.deepEqual(Object.keys(e).sort(), ['category', 'stage', 'suppression_reason']);
+      assert(!JSON.stringify(e).includes(String(secret))); return true;
+    });
+  }
+});
+
+test('sanitized classifier ignores category words inside credentials, headers, PEM and credential URLs', async () => {
+  for (const text of [
+    'Authorization: Basic Authentication failed',
+    'Authorization: custom Operation timed out',
+    '-----BEGIN RSA PRIVATE KEY-----\nGH013 non-fast-forward\n-----END RSA PRIVATE KEY-----',
+    '-----begin private key-----\nAuthentication failed\n-----end private key-----',
+    'https://user:Authentication_failed@github.com/private/repo.git',
+  ]) {
+    const f = failingTransport('dry-run', { status: 1, stdout: text, stderr: 'unrecognized failure' });
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.category, 'git_transport_unknown'); assert.equal(e.stage, 'receive_pack_dry_run');
+      assert(!JSON.stringify(e).includes(text)); return true;
+    });
+  }
+  // Known secret contents must be removed before applying the matcher too.
+  for (const token of ['Authentication failed', 'Operation timed out', 'non-fast-forward']) {
+    const f = failingTransport('dry-run', { status: 1, stdout: token, stderr: 'unrecognized failure' }, {
+      response: (url, options, data) => url.endsWith('/access_tokens') && JSON.parse(options.body).repositories ? { ...data, token } : data,
+    });
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.category, 'git_transport_unknown'); assert.deepEqual(e.suppression_reason, ['known_installation_token']); return true;
+    });
+  }
+});
+
+for (const stage of ['ls-remote', 'dry-run', 'push']) test(`suppression provenance: ${stage} unsafe sanitize and direct spawn exception omit category`, async () => {
+  const f = failingTransport(stage, { status: 128, stdout: '-----BEGIN PRIVATE KEY-----\nunbounded secret ghs_unknown',
+    stderr: 'Authorization: Bearer fake-installation-secret\nAuthentication failed' });
+  await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+    assert.equal(e.category, undefined); assert.equal(e.stage, stageName(stage));
+    assert.deepEqual(e.suppression_reason, ['authorization_header', 'github_token_pattern', 'known_installation_token', 'known_private_key']);
+    return true;
+  });
+  const thrown = fake(), spawn = thrown.deps.spawn;
+  thrown.deps.spawn = (...args) => {
+    const result = spawn(...args);
+    if (matchesTransport(args[1], stage)) throw new Error('Authorization: Bearer fake-installation-secret upstream arbitrary stage');
+    return result;
+  };
+  await assert.rejects((await connectBuilder(thrown.deps)).push(), e => {
+    assert.equal(e.message, stageMessage(stage) + ' (details suppressed)');
+    assert.equal(e.category, undefined); assert.equal(e.stage, stageName(stage));
+    assert.deepEqual(e.suppression_reason, ['spawn_exception']); return true;
+  });
+  assert.equal(transportCalls(thrown).length, stageCount(stage));
+});
+
+test('transport CLI secret raw never appears on either stream for all three fixed stages', () => {
+  for (const stage of ['ls-remote', 'dry-run', 'push']) for (const [mode, reasons] of [
+    ['spawn', ['spawn_exception']], ['partial-pem', ['known_private_key']],
+  ]) {
+    const child = transportCLI(mode, stage);
+    assert.equal(child.status, 2); assert.equal(child.stdout, '');
+    assert.deepEqual(JSON.parse(child.stderr), { error: stageMessage(stage) + ' (details suppressed)', stage: stageName(stage), suppression_reason: reasons });
+  }
+  for (const stage of ['ls-remote', 'dry-run', 'push']) {
+    const child = transportCLI('secret-success', stage);
+    assert.equal(child.status, 2); assert.equal(child.stdout, '');
+    assert.deepEqual(JSON.parse(child.stderr), { error: stageMessage(stage) + ' (details suppressed)', stage: stageName(stage),
+      category: 'git_transport_unknown', suppression_reason: ['known_installation_token'] });
+  }
+});
+
+test('fixed receive-pack URL/ref and WebSkill-only write token across all existing Profiles', async () => {
+  for (const profile of PROFILES) for (const workflow of profile.workflows) {
+    const f = fake({ repository: profile.repository, branch: workflow.branch, installed: selectedSets[3] });
+    await (await connectBuilder(f.deps, { profile: profile.id, workflow: workflow.id })).push();
+    const [read, dry, push] = transportCalls(f);
+    assert.deepEqual(dry[1].slice(6), ['push', '--dry-run', `https://github.com/${profile.repository}.git`, `HEAD:refs/heads/${workflow.branch}`]);
+    assert.deepEqual(push[1].slice(6), ['push', `https://github.com/${profile.repository}.git`, `HEAD:refs/heads/${workflow.branch}`]);
+    assert.strictEqual(read[2].env, dry[2].env); assert.strictEqual(dry[2].env, push[2].env);
+    const mint = f.requests.filter(r => r.url.endsWith('/access_tokens'));
+    assert.deepEqual(JSON.parse(mint[0].body), { permissions: { metadata: 'read' } });
+    assert.deepEqual(JSON.parse(mint[1].body).repositories, [profile.repository.split('/')[1]]);
+    if (profile.id === 'webskill') assert.deepEqual(JSON.parse(mint[1].body).repositories, ['webskill']);
+  }
+});
+
+test('receive-pack repair workflow binds Hub #13 and exact-head Ready; arbitrary transport options refused', async () => {
+  const selection = { profile: 'hub', workflow: 'c07-r2' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c07-r2', branch: 'codex/c07-r2-receive-pack', work_item: { repo: HUB_REPO, issue: 13 },
+    verification_commands: ['pnpm check'], bootstrap_paths: null });
+  const handoff = structuredClone(record); handoff.work_item.issue = 13;
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
+  const builder = await connectBuilder(f.deps, selection);
+  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
+  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
+  for (const option of ['--url', '--ref', '--git-args', '--dry-run', '--force', '--repo', '--base', '--branch']) {
+    const child = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url)),
+      '--profile', 'hub', '--workflow', 'c07-r2', 'push', option, 'untrusted'],
+    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    assert.equal(child.status, 2); assert.equal(child.stdout, '');
+    assert.deepEqual(JSON.parse(child.stderr), { error: 'Unsupported Builder operation or arguments' });
+  }
+  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
+});
+
+const fixedRefResponse = (repository = REPO, branch = BRANCH, commit = head) => ({
+  ref: `refs/heads/${branch}`, url: `https://api.github.com/repos/${repository}/git/refs/heads/${branch}`,
+  object: { type: 'commit', sha: commit, url: `https://api.github.com/repos/${repository}/git/commits/${commit}` },
+});
+const absentRef = () => new Response('untrusted 404 body fake-installation-secret', { status: 404 });
+const presentRef = (commit = head, repository = REPO, branch = BRANCH) => () => new Response(JSON.stringify(fixedRefResponse(repository, branch, commit)));
+function refGate(states, overrides = {}) {
+  const f = fake(overrides), fetch = f.deps.fetch, spawn = f.deps.spawn, events = [];
+  const url = `https://api.github.com/repos/${overrides.repository ?? REPO}/git/ref/heads/${overrides.branch ?? BRANCH}`;
+  let reads = 0;
+  f.deps.fetch = async (target, options) => {
+    if (target !== url) return fetch(target, options);
+    f.requests.push({ url: target, ...options }); events.push(reads === 0 ? 'ref_before' : 'ref_after');
+    assert(reads < states.length, 'Unexpected extra fixed-ref read');
+    return states[reads++](f);
+  };
+  f.deps.spawn = (...args) => {
+    if (args[1].includes('ls-remote')) events.push('read');
+    else if (args[1].includes('--dry-run')) events.push('dry-run');
+    else if (args[1].includes('push')) events.push('push');
+    return spawn(...args);
+  };
+  return { ...f, events, refURL: url };
+}
+
+test('ref-state gate: ABSENT → dry-run → ABSENT permits push via independent App API reads', async () => {
+  const f = refGate([absentRef, absentRef]);
+  assert.deepEqual(await (await connectBuilder(f.deps)).push(), { pushed: BRANCH, actor });
+  assert.deepEqual(f.events, ['ref_before', 'read', 'dry-run', 'ref_after', 'push']);
+  const reads = f.requests.filter(r => r.url === f.refURL);
+  assert.equal(reads.length, 2);
+  for (const r of reads) {
+    assert.equal(r.method, 'GET'); assert.equal(r.redirect, 'error'); assert.equal(r.cache, 'no-store');
+    assert.equal(r.headers['Cache-Control'], 'no-cache'); assert(r.signal instanceof AbortSignal);
+    assert.equal(r.headers.Authorization, 'Bearer fake-installation-secret'); assert.equal(r.body, undefined);
+  }
+});
+
+test('ref-state gate: PRESENT SHA A → dry-run → same SHA A permits push', async () => {
+  const f = refGate([presentRef(), presentRef()]);
+  await (await connectBuilder(f.deps)).push();
+  assert.deepEqual(f.events, ['ref_before', 'read', 'dry-run', 'ref_after', 'push']);
+});
+
+test('ref-state gate: created, updated or deleted remote ref blocks real push', async () => {
+  for (const states of [[absentRef, presentRef()], [presentRef(), presentRef(base)], [presentRef(), absentRef]]) {
+    const f = refGate(states);
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.message, 'Fixed feature ref changed during receive-pack dry-run; push refused');
+      assert.equal(e.stage, undefined); assert.equal(e.category, undefined); return true;
+    });
+    assert.deepEqual(f.events, ['ref_before', 'read', 'dry-run', 'ref_after']);
+    assert(!transportCalls(f).some(([, args]) => matchesTransport(args, 'push')));
+  }
+});
+
+test('ref-state gate: malformed JSON, wrong ref/repository/type/SHA and unexpected success status fail closed before or after dry-run', async () => {
+  const valid = fixedRefResponse();
+  const malformed = [null, [], {}, { ...valid, ref: 'refs/heads/main' }, { ...valid, ref: 'refs/tags/' + BRANCH },
+    { ...valid, url: 'https://api.github.com/repos/evil/repo/git/refs/heads/' + BRANCH },
+    { ...valid, object: null }, { ...valid, object: { ...valid.object, type: 'tree' } },
+    ...['a'.repeat(39), 'g'.repeat(40), 'fake-installation-secret', null, 123].map(sha => ({ ...valid, object: { ...valid.object, sha } })),
+    { ...valid, object: { ...valid.object, url: 'https://api.github.com/repos/evil/repo/git/commits/' + head } },
+  ].map(value => () => new Response(JSON.stringify(value)));
+  malformed.push(() => new Response('invalid JSON Authorization: Bearer fake-installation-secret'),
+    () => new Response(JSON.stringify(valid), { status: 201 }));
+  for (const bad of malformed) for (const at of ['before', 'after']) {
+    const f = refGate(at === 'before' ? [bad] : [presentRef(), bad]);
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert(e.message === 'Invalid fixed feature ref state (details suppressed)' || e.message === 'Fixed feature ref state unavailable (details suppressed)');
+      assert.equal(e.stage, undefined); assert.equal(e.category, undefined); assert(!e.message.includes('fake-installation-secret')); return true;
+    });
+    assert.deepEqual(f.events, at === 'before' ? ['ref_before'] : ['ref_before', 'read', 'dry-run', 'ref_after']);
+  }
+});
+
+test('ref-state gate: API/network/redirect failures before or after dry-run block real push with no upstream diagnostics', async () => {
+  const failures = [401, 403, 409, 422, 500].map(status => () => new Response('Authorization: Bearer fake-installation-secret', { status }));
+  failures.push(() => { throw new Error('network timeout fake-installation-secret'); },
+    () => { throw new TypeError('redirect to https://user:fake-installation-secret@evil.invalid'); });
+  for (const bad of failures) for (const at of ['before', 'after']) {
+    const f = refGate(at === 'before' ? [bad] : [presentRef(), bad]);
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => {
+      assert.equal(e.message, 'Fixed feature ref state unavailable (details suppressed)');
+      assert.equal(e.stage, undefined); assert.equal(e.category, undefined); assert.equal(e.suppression_reason, undefined); return true;
+    });
+    assert.deepEqual(f.events, at === 'before' ? ['ref_before'] : ['ref_before', 'read', 'dry-run', 'ref_after']);
+  }
+});
+
+test('ref-state gate: token expiry during either ref read, JSON decode or after readback blocks push', async () => {
+  for (const at of ['before', 'after']) for (const point of ['response', 'json']) {
+    const expire = f => {
+      if (point === 'response') { f.advance(3600000); return absentRef(); }
+      const r = presentRef()();
+      const json = r.json.bind(r); r.json = async () => { const value = await json(); f.advance(3600000); return value; };
+      return r;
+    };
+    const f = refGate(at === 'before' ? [expire] : [presentRef(), expire]);
+    await assert.rejects((await connectBuilder(f.deps)).push(), /token expired/);
+    assert.deepEqual(f.events, at === 'before' ? ['ref_before'] : ['ref_before', 'read', 'dry-run', 'ref_after']);
+  }
+});
+
+test('ref-state gate: each Profile always uses its fixed repository/feature branch and single write token', async () => {
+  for (const profile of PROFILES) for (const workflow of profile.workflows) {
+    const f = refGate([absentRef, absentRef], { repository: profile.repository, branch: workflow.branch, installed: selectedSets[3] });
+    const b = await connectBuilder(f.deps, { profile: profile.id, workflow: workflow.id });
+    assert.equal(b.readFeatureRefState, undefined); assert.equal(b.refState, undefined);
+    // JS arguments cannot override this no-argument fixed operation.
+    await b.push({ ref: 'refs/heads/main', url: 'https://evil.invalid', repository: 'evil/repo' });
+    const reads = f.requests.filter(r => r.url === f.refURL);assert.equal(reads.length, 2);
+    assert(reads.every(r => r.url === `https://api.github.com/repos/${profile.repository}/git/ref/heads/${workflow.branch}`));
+    assert.deepEqual(f.events, ['ref_before', 'read', 'dry-run', 'ref_after', 'push']);
+    assert.deepEqual(JSON.parse(f.requests.find(r => r.url.endsWith('/access_tokens') && JSON.parse(r.body).repositories).body).repositories,
+      [profile.repository.split('/')[1]]);
+    assert(!f.requests.some(r => r.url.includes('evil.invalid') || r.url.includes('evil/repo')));
+  }
+});
+
+test('ref-state gate: read or dry-run failure skips the after-ref read and real push', async () => {
+  for (const stage of ['ls-remote', 'dry-run']) {
+    const f = refGate([absentRef]), spawn = f.deps.spawn;
+    f.deps.spawn = (...args) => {
+      const normal = spawn(...args);
+      return matchesTransport(args[1], stage) ? { status: 128, stdout: '', stderr: 'Authentication failed' } : normal;
+    };
+    await assert.rejects((await connectBuilder(f.deps)).push(), e => e.stage === stageName(stage));
+    assert.deepEqual(f.events, stage === 'ls-remote' ? ['ref_before', 'read'] : ['ref_before', 'read', 'dry-run']);
+  }
 });

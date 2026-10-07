@@ -43,6 +43,8 @@ try {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } catch (e) {
   process.stderr.write(`${JSON.stringify({ error: e instanceof BuilderError || e instanceof ProfileError ? e.message : 'Builder command failed (details suppressed)',
-    ...(e instanceof BuilderError && e.category ? { category: e.category } : {}) })}\n`);
+    ...(e instanceof BuilderError && e.stage ? { stage: e.stage } : {}),
+    ...(e instanceof BuilderError && e.category ? { category: e.category } : {}),
+    ...(e instanceof BuilderError && e.suppression_reason ? { suppression_reason: e.suppression_reason } : {}) })}\n`);
   process.exitCode = 2;
 }
