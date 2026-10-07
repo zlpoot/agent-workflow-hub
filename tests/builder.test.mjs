@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectBuilder, createJwt, BRANCH, REPO } from '../dist/builder.js';
+import { PROFILES, selectWorkflow, HUB_REPO, FUTURE_REPO } from '../dist/profiles.js';
 
 // Ephemeral key generated in memory; no real credential and no saved key fixture.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -18,7 +19,7 @@ const actor = 'test-builder[bot]';
 const head = 'a'.repeat(40), base = 'b'.repeat(40);
 const pr = { number: 5, user: { login: actor, type: 'Bot' }, head: { sha: head, ref: BRANCH, repo: { full_name: REPO } },
   base: { sha: base, ref: 'main', repo: { full_name: REPO } }, draft: true, state: 'open', node_id: 'PR_test' };
-const comment = (id, body) => ({ id, body, user: { login: actor, type: 'Bot' }, issue_url: `https://api.github.com/repos/${REPO}/issues/5` });
+const comment = (id, body, repo = REPO) => ({ id, body, user: { login: actor, type: 'Bot' }, issue_url: `https://api.github.com/repos/${repo}/issues/5` });
 const record = { schema_version: '0.1', kind: 'builder_handoff', work_item: { repo: REPO, issue: 4 },
   candidate: { pr: 5, base_sha: base, head_sha: head }, producer: { executor: 'Codex Builder', run_id: 'offline' },
   verification: { subject_sha: head, lifecycle: 'completed', outcome: 'pass', checks: [{ command: 'pnpm check', exit_code: 0 }],
@@ -27,6 +28,9 @@ const validation = { schema_valid: true, ready_claim_valid: true, authority_veri
 const handoffBody = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(record)}\n\`\`\`\n\n${JSON.stringify(validation)}`;
 function fake(overrides = {}) {
   const requests = [], git = [];
+  const targetRepo = overrides.repository ?? REPO;
+  const targetBranch = overrides.branch ?? BRANCH;
+  const installed = overrides.installed ?? [REPO];
   let clock = now, ready = false;
   const deps = {
     env: { AWH_GITHUB_APP_ID: '123', AWH_GITHUB_APP_PRIVATE_KEY_PATH: join(tmpdir(), 'awh-test-only.pem'),
@@ -34,6 +38,10 @@ function fake(overrides = {}) {
     now: () => clock,
     cwd: () => repoRoot,
     realpath: async path => resolve(path),
+    stat: async path => {
+      if (resolve(path) === join(repoRoot, '.git')) return { isDirectory: () => true, isFile: () => false };
+      throw Object.assign(new Error('No marker'), { code: 'ENOENT' });
+    },
     read: async () => Buffer.from(pem),
     fetch: async (url, options) => {
       requests.push({ url, ...options });
@@ -46,22 +54,29 @@ function fake(overrides = {}) {
       else if (url.endsWith('/access_tokens')) {
         const inspect = !Object.hasOwn(JSON.parse(options.body), 'repositories');
         data = { token: inspect ? 'fake-inspection-secret' : 'fake-installation-secret',
-          expires_at: new Date(now + 3600000).toISOString(), permissions: inspect ? inspectionPermissions : permissions };
+          expires_at: new Date(now + 3600000).toISOString(), permissions: inspect ? inspectionPermissions : permissions,
+          repositories: (inspect ? installed : [targetRepo]).map(full_name => ({ full_name })) };
       }
-      else if (url.includes('/installation/repositories')) data = { total_count: 1, repositories: [{ full_name: REPO }] };
+      else if (url.includes('/installation/repositories')) data = { total_count: installed.length, repositories: installed.map(full_name => ({ full_name })) };
+      else if (url.endsWith('/git/ref/heads/main')) data = { object: { sha: base } };
+      else if (url.includes('/git/ref/heads/')) data = { object: { sha: head } };
+      else if (url.includes('/compare/')) data = { status: 'ahead', files: [{ filename: 'docs/management/agent-workflow-hub.md', status: 'added' }] };
       else if (url.endsWith('/graphql')) { ready = true; data = { data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }; }
-      else if (url.endsWith('/issues/comments/10')) data = comment(10, handoffBody);
-      else if (url.endsWith('/issues/comments/9')) data = comment(9, `Builder evidence\n${head}`);
-      else if (url.endsWith('/comments')) data = comment(11, JSON.parse(options.body).body);
-      else data = { ...pr, draft: !ready };
+      else if (url.endsWith('/issues/comments/10')) data = comment(10, overrides.handoffBody ?? handoffBody, targetRepo);
+      else if (url.endsWith('/issues/comments/9')) data = comment(9, `Builder evidence\n${head}`, targetRepo);
+      else if (url.endsWith('/comments')) data = comment(11, JSON.parse(options.body).body, targetRepo);
+      else data = { ...pr, draft: !ready, head: { ...pr.head, ref: targetBranch, repo: { full_name: targetRepo } },
+        base: { ...pr.base, repo: { full_name: targetRepo } } };
       if (overrides.response) data = overrides.response(url, options, data);
       return new Response(JSON.stringify(data));
     },
     spawn: (...args) => {
       git.push(args);
       if (args[1][0] === 'rev-parse') return { status: 0, stdout: repoRoot + '\n' };
+      if (args[1][0] === 'config' && args[1].includes('--get')) return { status: 0, stdout: `https://github.com/${targetRepo}.git\n` };
       if (args[1][0] === 'config') return { status: 0, stdout: 'core.bare\nremote.origin.url\n' };
-      if (args[1][0] === 'branch') return { status: 0, stdout: BRANCH + '\n' };
+      if (args[1][0] === 'branch') return { status: 0, stdout: targetBranch + '\n' };
+      if (args[1][0] === 'diff') return { status: 0, stdout: 'docs/management/agent-workflow-hub.md\0' };
       return { status: 0, stdout: '', stderr: '' };
     },
     ...overrides.deps,
@@ -130,7 +145,7 @@ test('actual installation repository list is checked before narrowing', async ()
   for (const response of [{ total_count: 2, repositories: [{ full_name: REPO }, { full_name: 'zlpoot/other' }] },
     { total_count: 1, repositories: [{ full_name: 'zlpoot/other' }] }]) {
     const f = fake({ response: (url, _, v) => url.includes('/installation/repositories') ? response : v });
-    await assert.rejects(connectBuilder(f.deps), /only the target/);
+    await assert.rejects(connectBuilder(f.deps), /repository set is not allowed/);
     assert.equal(f.requests.length, 4);
     const minted = f.requests.filter(r => r.url.endsWith('/access_tokens'));
     assert.equal(minted.length, 1, 'no write token may be minted before scope passes');
@@ -153,7 +168,7 @@ test('nested invocation rejects a key in the worktree root before key read or au
   assert.equal(readCount, 0); assert.equal(f.requests.length, 0);
   const [cmd, args, options] = f.git[0];
   assert.equal(cmd, 'git'); assert.deepEqual(args, ['rev-parse', '--show-toplevel']);
-  assert.equal(options.cwd, join(repoRoot, 'src'));
+  assert.equal(options.cwd, repoRoot);
   assert.equal(options.env.GIT_CONFIG_VALUE_0, repoRoot.replaceAll('\\', '/'));
   assert.equal(options.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH, undefined);
   assert(!JSON.stringify(options).includes('fake-installation-secret'));
@@ -161,7 +176,7 @@ test('nested invocation rejects a key in the worktree root before key read or au
 
 test('nested invocation with an external key uses the verified root for safe.directory and push cwd', async () => {
   const f = fake({ deps: { cwd: () => join(repoRoot, 'src') } });
-  const b = await connectBuilder(f.deps); b.push();
+  const b = await connectBuilder(f.deps); await b.push();
   for (const [, args, options] of f.git.slice(1)) {
     assert.equal(options.cwd, repoRoot);
     const safeKey = Array.from({ length: Number(options.env.GIT_CONFIG_COUNT) }, (_, i) => i)
@@ -218,13 +233,13 @@ test('expired, overlong, malformed and overpermissioned token responses fail clo
     await assert.rejects(connectBuilder(fake({ response: (url, _, v) => url.endsWith('/access_tokens') ? mutation(v) : v }).deps), /token/);
   }
   const f = fake(), b = await connectBuilder(f.deps); f.advance(3600000);
-  await assert.rejects(b.readPR(5), /expired/); assert.throws(() => b.push(), /expired/);
+  await assert.rejects(b.readPR(5), /expired/); await assert.rejects(b.push(), /expired/);
   assert.equal(f.requests.length, 5);
 });
 
 test('Git token stays in child environment, fixed HTTPS branch, no logged-user credential or trace', async () => {
   const f = fake(), b = await connectBuilder(f.deps);
-  assert.deepEqual(b.push(), { pushed: BRANCH, actor });
+  assert.deepEqual(await b.push(), { pushed: BRANCH, actor });
   const [cmd, args, options] = f.git.at(-1);
   assert.equal(cmd, 'git'); assert(args.includes(`https://github.com/${REPO}.git`));
   assert.equal(args.at(-1), `HEAD:refs/heads/${BRANCH}`);
@@ -240,13 +255,17 @@ test('Git token stays in child environment, fixed HTTPS branch, no logged-user c
 
 test('unsafe local Git transport, wrong branch and Git errors are refused safely', async () => {
   for (const unsafe of ['url.evil.insteadof', 'http.proxy', 'credential.helper', 'include.path']) {
-    const f = fake({ deps: { spawn: (_, args) => ({ status: 0, stdout: args[0] === 'rev-parse' ? repoRoot : unsafe }) } });
-    assert.throws((await connectBuilder(f.deps)).push, /push failed/);
+    const f = fake({ deps: { spawn: (_, args) => ({ status: 0, stdout: args[0] === 'rev-parse' ? repoRoot : args.includes('--get') ? `https://github.com/${REPO}.git` : unsafe }) } });
+    await assert.rejects((await connectBuilder(f.deps)).push(), /push failed/);
   }
-  const f = fake({ deps: { spawn: (_, a) => ({ status: 0, stdout: a[0] === 'rev-parse' ? repoRoot : a[0] === 'config' ? '' : 'main' }) } });
-  assert.throws((await connectBuilder(f.deps)).push, /push failed/);
-  const bad = fake({ deps: { spawn: (_, args) => { if (args[0] === 'rev-parse') return { status: 0, stdout: repoRoot }; throw new Error(pem); } } });
-  assert.throws((await connectBuilder(bad.deps)).push, e => !e.message.includes(pem));
+  const f = fake({ deps: { spawn: (_, a) => ({ status: 0, stdout: a[0] === 'rev-parse' ? repoRoot : a.includes('--get') ? `https://github.com/${REPO}.git` : a[0] === 'config' ? '' : 'main' }) } });
+  await assert.rejects((await connectBuilder(f.deps)).push(), /push failed/);
+  const bad = fake({ deps: { spawn: (_, args) => {
+    if (args[0] === 'rev-parse') return { status: 0, stdout: repoRoot };
+    if (args.includes('--get')) return { status: 0, stdout: `https://github.com/${REPO}.git` };
+    throw new Error(pem);
+  } } });
+  await assert.rejects((await connectBuilder(bad.deps)).push(), e => !e.message.includes(pem));
 });
 
 test('Builder exposes only fixed operations, requires App bot for PR/comments, rejects secret text', async () => {
@@ -318,7 +337,7 @@ test('successful real CLI never prints PEM, signed JWT, token or API response ex
       let v = url.endsWith('/app') ? {id:123,slug:'test-builder'} : url.endsWith('/installation') ?
         {id:456,app_id:123,account:{login:'zlpoot'},repository_selection:'selected',suspended_at:null,permissions} :
         url.includes('/installation/repositories') ? {total_count:1,repositories:[{full_name:'${REPO}'}]} :
-        {token:'fake-installation-secret',expires_at:new Date(Date.now()+3599000).toISOString(),permissions:JSON.parse(options.body).repositories?permissions:{metadata:'read'}};
+        {token:'fake-installation-secret',expires_at:new Date(Date.now()+3599000).toISOString(),permissions:JSON.parse(options.body).repositories?permissions:{metadata:'read'},repositories:[{full_name:'${REPO}'}]};
       return new Response(JSON.stringify({...v,untrusted_echo:key}));
     };
     process.argv = [process.execPath, 'builder-cli.js', 'preflight'];
@@ -368,4 +387,118 @@ test('uncertain Ready mutation restores and reads back Draft', async () => {
   } });
   await assert.rejects((await connectBuilder(f.deps)).ready(5, head, record, 10), /restored to Draft/);
   assert.equal(readyCalls, 1); assert(restored);
+});
+
+test('fixed immutable Profiles reject arbitrary repository/base/workflow overrides', () => {
+  assert.equal(selectWorkflow().profile.repository, HUB_REPO);
+  const future = selectWorkflow({ profile: 'future-ui', workflow: 'bootstrap' });
+  assert.equal(future.profile.repository, FUTURE_REPO); assert.equal(future.profile.base, 'main');
+  assert.deepEqual(future.workflow.bootstrap_paths, ['docs/management/agent-workflow-hub.md']);
+  assert.deepEqual(future.workflow.verification_commands, ['pnpm lint', 'pnpm typecheck', 'pnpm test']);
+  for (const selection of [{ profile: 'evil/repo', workflow: 'bootstrap' }, { profile: 'hub', workflow: 'merge' },
+    { profile: 'future-ui', workflow: 'c05' }, { profile: 'hub', workflow: 'c06', repo: 'evil/repo' },
+    { profile: 'hub', workflow: 'c06', base: 'evil' }]) assert.throws(() => selectWorkflow(selection));
+  assert.throws(() => { PROFILES[0].repository = 'evil/repo'; });
+  assert.throws(() => { future.workflow.bootstrap_paths.push('packages/evil.ts'); });
+});
+
+for (const [profile, workflow, repository, branch] of [
+  ['hub', 'c06', HUB_REPO, 'codex/c06-project-profiles'],
+  ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
+]) test(`${profile} in dual selected scope mints only a single-repository write token and binds API/Git`, async () => {
+  const f = fake({ repository, branch, installed: [FUTURE_REPO, HUB_REPO] });
+  const b = await connectBuilder(f.deps, { profile, workflow });
+  assert.deepEqual(b.preflight().repositories, [HUB_REPO, FUTURE_REPO].sort());
+  const tokens = f.requests.filter(r => r.url.endsWith('/access_tokens'));
+  assert.equal(tokens.length, 2);
+  assert.deepEqual(JSON.parse(tokens[0].body), { permissions: { metadata: 'read' } });
+  assert.deepEqual(JSON.parse(tokens[1].body), { repositories: [repository.split('/')[1]],
+    permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
+  await b.push();
+  assert(f.git.at(-1)[1].includes(`https://github.com/${repository}.git`));
+  assert.equal(f.git.at(-1)[1].at(-1), `HEAD:refs/heads/${branch}`);
+  await b.createPR('Title', 'Implements Hub #6');
+  const create = f.requests.find(r => r.method === 'POST' && r.url.endsWith('/pulls'));
+  assert.equal(create.url, `https://api.github.com/repos/${repository}/pulls`);
+  assert.deepEqual(JSON.parse(create.body), { title: 'Title', body: 'Implements Hub #6', head: branch, base: 'main', draft: true });
+});
+
+test('Hub c06 remains usable with only the original single-repository installation', async () => {
+  const f = fake({ branch: 'codex/c06-project-profiles' });
+  const b = await connectBuilder(f.deps, { profile: 'hub', workflow: 'c06' });
+  assert.deepEqual(b.preflight().repositories, [HUB_REPO]);
+  assert.equal((await b.createPR('Title', 'Phase A')).actor, actor);
+});
+
+test('missing future-ui installation stops before its write token (Human Gate)', async () => {
+  const f = fake({ repository: FUTURE_REPO, branch: 'codex/awh-c06-bootstrap' });
+  await assert.rejects(connectBuilder(f.deps, { profile: 'future-ui', workflow: 'bootstrap' }), /Human Gate/);
+  assert.equal(f.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
+});
+
+test('wrong, extra, duplicate or future-only selected sets never produce a write token', async () => {
+  for (const installed of [[HUB_REPO, FUTURE_REPO, 'zlpoot/other'], [FUTURE_REPO], [HUB_REPO, HUB_REPO], []]) {
+    const f = fake({ installed });
+    await assert.rejects(connectBuilder(f.deps, { profile: 'hub', workflow: 'c06' }), /set is not allowed/);
+    const tokens = f.requests.filter(r => r.url.endsWith('/access_tokens'));
+    assert.equal(tokens.length, 1); assert.deepEqual(JSON.parse(tokens[0].body).permissions, { metadata: 'read' });
+  }
+});
+
+test('effective write-token response must also authorize exactly the selected repository', async () => {
+  for (const repos of [[{ full_name: FUTURE_REPO }], [{ full_name: HUB_REPO }, { full_name: FUTURE_REPO }], []]) {
+    const f = fake({ response: (url, options, v) => url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
+      ? { ...v, repositories: repos } : v });
+    await assert.rejects(connectBuilder(f.deps), /Write token must authorize only/);
+  }
+});
+
+test('selected Profile cannot authenticate from a different repository worktree', async () => {
+  const f = fake();
+  await assert.rejects(connectBuilder(f.deps, { profile: 'future-ui', workflow: 'bootstrap' }), /worktree root/);
+  assert.equal(f.requests.length, 0);
+});
+
+test('future-ui bootstrap blocks product/dependency paths before authenticated push or PR creation', async () => {
+  for (const path of ['packages/ui/index.ts', 'pnpm-lock.yaml', 'docs/management/grant.md']) {
+    const f = fake({ repository: FUTURE_REPO, branch: 'codex/awh-c06-bootstrap', installed: [HUB_REPO, FUTURE_REPO] });
+    const realSpawn = f.deps.spawn;
+    f.deps.spawn = (...args) => args[1][0] === 'diff' ? { status: 0, stdout: path + '\0' } : realSpawn(...args);
+    const b = await connectBuilder(f.deps, { profile: 'future-ui', workflow: 'bootstrap' });
+    await assert.rejects(b.push(), /push failed/);
+    assert(!f.git.some(([, args]) => args.includes('push')));
+    const g = fake({ repository: FUTURE_REPO, branch: 'codex/awh-c06-bootstrap', installed: [HUB_REPO, FUTURE_REPO],
+      response: (url, _, v) => url.includes('/compare/') ? { status: 'ahead', files: [{ filename: path, status: 'modified' }] } : v });
+    await assert.rejects((await connectBuilder(g.deps, { profile: 'future-ui', workflow: 'bootstrap' })).createPR('Title', 'Body'), /docs-only/);
+    assert(!g.requests.some(r => r.method === 'POST' && r.url.endsWith('/pulls')));
+  }
+});
+
+test('future-ui Ready binds the Hub work item, full verification command set and future-ui evidence', async () => {
+  const handoff = structuredClone(record);
+  handoff.work_item.issue = 6;
+  handoff.verification.checks = ['pnpm lint', 'pnpm typecheck', 'pnpm test'].map(command => ({ command, exit_code: 0 }));
+  handoff.verification.evidence_refs = [`https://github.com/${FUTURE_REPO}/pull/5#issuecomment-9`];
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = fake({ repository: FUTURE_REPO, branch: 'codex/awh-c06-bootstrap', installed: [HUB_REPO, FUTURE_REPO], handoffBody: body });
+  const b = await connectBuilder(f.deps, { profile: 'future-ui', workflow: 'bootstrap' });
+  const missing = structuredClone(handoff); missing.verification.checks = [{ command: 'pnpm check', exit_code: 0 }];
+  await assert.rejects(b.ready(5, head, missing, 10), /verification commands/);
+  const wrongRepo = structuredClone(handoff); wrongRepo.work_item.repo = FUTURE_REPO;
+  await assert.rejects(b.ready(5, head, wrongRepo, 10), /work item/);
+  assert.equal((await b.ready(5, head, handoff, 10)).draft, false);
+});
+
+test('Profile CLI rejects arbitrary repo and forbidden actions before credentials', () => {
+  const cli = fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url));
+  for (const args of [
+    ['--profile', 'evil/repo', '--workflow', 'bootstrap', 'preflight'],
+    ['--profile', 'hub', '--workflow', 'merge', 'preflight'],
+    ['--profile', 'hub', '--workflow', 'c06', 'approve'],
+    ['--profile', 'hub', '--workflow', 'c06', 'push', '--repo', 'evil/repo'],
+  ]) {
+    const child = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    assert.equal(child.status, 2); assert.equal(child.stdout, '');
+    assert(!child.stderr.includes('environment')); assert(!child.stderr.includes('evil/repo'));
+  }
 });

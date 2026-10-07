@@ -1,14 +1,13 @@
 import { createPrivateKey, sign } from 'node:crypto';
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { relative, isAbsolute } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { relative, isAbsolute, dirname, join } from 'node:path';
 import { validateHandoff } from './validator.js';
+import { allowedInstallation, selectWorkflow, HUB_REPO, type BuilderSelection } from './profiles.js';
 
-export const REPO = 'zlpoot/agent-workflow-hub';
-export const BRANCH = 'codex/c05-github-app-builder';
+export const REPO = HUB_REPO;
+export const BRANCH = selectWorkflow().workflow.branch;
 const API = 'https://api.github.com';
-const ROOT = `/repos/${REPO}`;
 const PERMISSIONS = { contents: 'write', issues: 'write', metadata: 'read', pull_requests: 'write' };
 const WRITE_PERMISSIONS = { contents: 'write', issues: 'write', pull_requests: 'write' };
 const INSPECTION_PERMISSIONS = { metadata: 'read' };
@@ -23,9 +22,10 @@ export interface Dependencies {
   spawn: typeof spawnSync;
   cwd: () => string;
   realpath: typeof realpath;
+  stat: typeof stat;
 }
 const defaults: Dependencies = { env: process.env, now: Date.now, read: readFile, fetch, spawn: spawnSync,
-  cwd: process.cwd, realpath };
+  cwd: process.cwd, realpath, stat };
 const positive = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
 const sha = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{40}$/i.test(v);
 const equalPermissions = (p: unknown, expected: Record<string, string> = PERMISSIONS) => p !== null && typeof p === 'object' &&
@@ -54,7 +54,9 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
 }
 
 // Returns only fixed Builder operations. Credentials and generic API requests stay in this closure.
-export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
+export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection) {
+  const { profile, workflow } = selectWorkflow(selection);
+  const REPO = profile.repository, BRANCH = workflow.branch, ROOT = `/repos/${REPO}`;
   const d = { ...defaults, ...overrides };
   const appId = d.env.AWH_GITHUB_APP_ID;
   const keyPath = d.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH;
@@ -64,15 +66,33 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
   if (!isAbsolute(keyPath)) fail('Private key path must be absolute and outside the repository');
   let root: string;
   try {
-    // The helper lives in src/ or dist/ of its worktree. Trust only that directory for the Git root query.
-    const helperRoot = await d.realpath(fileURLToPath(new URL('../', import.meta.url)));
+    // Walk to the nearest .git marker (directory or linked-worktree file), then verify it with Git.
+    let candidate = await d.realpath(d.cwd());
+    for (;;) {
+      try {
+        const marker = await d.stat(join(candidate, '.git'));
+        if (!marker.isDirectory() && !marker.isFile()) fail('Invalid Git worktree marker');
+        break;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+        const parent = dirname(candidate);
+        if (parent === candidate) fail('No Git worktree found');
+        candidate = parent;
+      }
+    }
     const query = d.spawn('git', ['rev-parse', '--show-toplevel'], {
-      cwd: d.cwd(), env: gitEnvironment(d.env, helperRoot), encoding: 'utf8', timeout: 10000,
+      cwd: candidate, env: gitEnvironment(d.env, candidate), encoding: 'utf8', timeout: 10000,
     });
     if (query.error || query.status !== 0 || !query.stdout.trim() || !isAbsolute(query.stdout.trim()))
       fail('Cannot resolve repository worktree root');
     root = await d.realpath(query.stdout.trim());
-    if (root !== helperRoot) fail('Builder must run within its own repository worktree');
+    if (root !== candidate) fail('Git worktree root mismatch');
+    const origin = d.spawn('git', ['config', '--local', '--get', 'remote.origin.url'], {
+      cwd: root, env: gitEnvironment(d.env, root), encoding: 'utf8', timeout: 10000,
+    });
+    if (origin.error || origin.status !== 0 || ![
+      `https://github.com/${REPO}`, `https://github.com/${REPO}.git`, `git@github.com:${REPO}`, `git@github.com:${REPO}.git`,
+    ].includes(origin.stdout.trim())) fail('Worktree repository does not match selected Profile');
   } catch { return fail('Cannot verify repository worktree root (details suppressed)'); }
   let canonicalKeyPath: string;
   try { canonicalKeyPath = await d.realpath(keyPath); }
@@ -119,7 +139,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
     (override !== undefined && Number(override) !== inst.id)) fail('Installation identity, scope or permissions mismatch');
   const mint = async (restricted: boolean) => {
     const v = await request(`/app/installations/${inst.id}/access_tokens`, jwt, 'POST', {
-      ...(restricted ? { repositories: ['agent-workflow-hub'] } : {}),
+      ...(restricted ? { repositories: [REPO.split('/')[1]] } : {}),
       permissions: restricted ? WRITE_PERMISSIONS : INSPECTION_PERMISSIONS,
     });
     if (typeof v.token !== 'string' || !v.token || typeof v.expires_at !== 'string') fail('Invalid installation token response');
@@ -129,28 +149,43 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
     if (!Number.isFinite(expiry) || expiry <= d.now() || expiry > d.now() + 3600000 + 60000)
       fail('Invalid installation token expiry');
     if (!equalPermissions(v.permissions, restricted ? PERMISSIONS : INSPECTION_PERMISSIONS)) fail('Installation token permissions mismatch');
+    if (restricted && (!Array.isArray(v.repositories) || v.repositories.length !== 1 || v.repositories[0]?.full_name !== REPO))
+      fail('Write token must authorize only the selected Profile repository');
     return { token: v.token as string, expiry };
   };
   // Metadata-only inspection covers the *actual* installation scope without granting writes to extra repositories.
   const scopeToken = await mint(false);
   const repositories = await request('/installation/repositories?per_page=100', scopeToken.token);
-  if (repositories.total_count !== 1 || !Array.isArray(repositories.repositories) ||
-    repositories.repositories.length !== 1 || repositories.repositories[0]?.full_name !== REPO)
-    fail('Installation must select only the target repository');
+  if (!allowedInstallation(repositories.repositories, repositories.total_count))
+    fail('Installation selected repository set is not allowed');
+  const repositoryNames = (repositories.repositories as { full_name: string }[]).map(r => r.full_name);
+  if (!repositoryNames.includes(REPO)) fail('Selected Profile repository is not installed; stop at Human Gate');
   const { token, expiry } = await mint(true);
   const live = () => { if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
   const call = (path: string, method = 'GET', body?: unknown) => { live(); return request(path, token, method, body); };
   const id = (v: number) => { if (!positive(v)) fail('Invalid GitHub object number'); return v; };
   const prSummary = (p: Json) => {
     if (!positive(p.number) || p.user?.login !== actor || p.user?.type !== 'Bot' || !sha(p.head?.sha) ||
-      !sha(p.base?.sha) || p.head?.ref !== BRANCH || p.base?.ref !== 'main' ||
+      !sha(p.base?.sha) || p.head?.ref !== BRANCH || p.base?.ref !== profile.base ||
       p.head?.repo?.full_name !== REPO || p.base?.repo?.full_name !== REPO ||
       p.state !== 'open' || typeof p.draft !== 'boolean' || typeof p.node_id !== 'string' || !/^[A-Za-z0-9_=+-]+$/.test(p.node_id))
       fail('PR identity, repository, branch or state mismatch');
     return { number: p.number as number, url: `https://github.com/${REPO}/pull/${p.number}`, actor,
       head: p.head.sha as string, base: p.base.sha as string, draft: p.draft as boolean, node_id: safeText(p.node_id) };
   };
-  const readPR = async (number: number) => prSummary(await call(`${ROOT}/pulls/${id(number)}`));
+  const checkBootstrap = async (baseSha: string, headSha: string) => {
+    if (!workflow.bootstrap_paths) return;
+    const comparison = await call(`${ROOT}/compare/${baseSha}...${headSha}`);
+    if (comparison.status !== 'ahead' || !Array.isArray(comparison.files) || !comparison.files.length ||
+      comparison.files.length > workflow.bootstrap_paths.length ||
+      comparison.files.some((f: Json) => !workflow.bootstrap_paths!.includes(f.filename) || !['added', 'modified'].includes(f.status)))
+      fail('Remote bootstrap candidate must stay in the fixed docs-only path');
+  };
+  const readPR = async (number: number) => {
+    const p = prSummary(await call(`${ROOT}/pulls/${id(number)}`));
+    await checkBootstrap(p.base, p.head);
+    return p;
+  };
   const commentSummary = (c: Json, number: number) => {
     if (!positive(c.id) || c.user?.login !== actor || c.user?.type !== 'Bot' || c.issue_url !== `${API}${ROOT}/issues/${id(number)}`)
       fail('Comment actor or PR mismatch');
@@ -160,8 +195,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
     commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`), number);
   return Object.freeze({
     preflight: () => ({ repo: REPO, app_id: Number(appId), installation_id: inst.id as number, actor,
-      repository_selection: 'selected', repositories: [REPO], permissions: { ...PERMISSIONS } }),
-    push: () => {
+      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: { ...PERMISSIONS } }),
+    push: async () => {
       live();
       const inspectEnv = gitEnvironment(d.env, root);
       const env = { ...inspectEnv };
@@ -180,7 +215,16 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
         if (local.error || local.status !== 0 || /^(http\.|https\.|url\.|credential\.|include|core\.(gitproxy|sshcommand))/im.test(local.stdout))
           fail('Unsafe local Git transport configuration');
         const branch = d.spawn('git', ['branch', '--show-current'], { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
-        if (branch.error || branch.status !== 0 || branch.stdout.trim() !== BRANCH) fail('Push requires the C0.5 feature branch');
+        if (branch.error || branch.status !== 0 || branch.stdout.trim() !== BRANCH) fail('Push requires the selected workflow feature branch');
+        if (workflow.bootstrap_paths) {
+          const baseline = await call(`${ROOT}/git/ref/heads/${profile.base}`);
+          if (!sha(baseline.object?.sha)) fail('Invalid bootstrap baseline SHA');
+          const changed = d.spawn('git', ['diff', '--no-ext-diff', '--name-only', '-z', baseline.object.sha, 'HEAD', '--'],
+            { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
+          const paths = changed.stdout.split('\0').filter(Boolean);
+          if (changed.error || changed.status !== 0 || !paths.length || paths.some(p => !workflow.bootstrap_paths!.includes(p)))
+            fail('Bootstrap changes must stay in the fixed docs-only path');
+        }
         const r = d.spawn('git', ['-c', 'credential.helper=', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
           '-c', 'http.followRedirects=false', 'push', `https://github.com/${REPO}.git`, `HEAD:refs/heads/${BRANCH}`],
         { cwd: root, env, encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024 });
@@ -188,8 +232,19 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
       } catch { fail('App HTTPS Git push failed (details suppressed)'); }
       return { pushed: BRANCH, actor };
     },
-    createPR: async (title: string, body: string) => prSummary(await call(`${ROOT}/pulls`, 'POST',
-      { title: safeText(title), body: safeText(body), head: BRANCH, base: 'main', draft: true })),
+    createPR: async (title: string, body: string) => {
+      const safeTitle = safeText(title), safeBody = safeText(body);
+      if (workflow.bootstrap_paths) {
+        const baseRef = await call(`${ROOT}/git/ref/heads/${profile.base}`);
+        const headRef = await call(`${ROOT}/git/ref/heads/${BRANCH}`);
+        if (!sha(baseRef.object?.sha) || !sha(headRef.object?.sha)) fail('Invalid bootstrap branch SHA');
+        await checkBootstrap(baseRef.object.sha, headRef.object.sha);
+      }
+      const p = prSummary(await call(`${ROOT}/pulls`, 'POST',
+        { title: safeTitle, body: safeBody, head: BRANCH, base: profile.base, draft: true }));
+      await checkBootstrap(p.base, p.head);
+      return p;
+    },
     updatePR: async (number: number, title: string, body: string) => {
       await readPR(number);
       return prSummary(await call(`${ROOT}/pulls/${id(number)}`, 'PATCH', { title: safeText(title), body: safeText(body) }));
@@ -208,8 +263,11 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}) {
       const validation = validateHandoff(record, expectedHead);
       if (!validation.ready_claim_valid) fail('Confirmed Handoff validation failed');
       const handoff = record as import('./validator.js').BuilderHandoff;
-      if (handoff.work_item.repo !== REPO || handoff.work_item.issue !== 4 || handoff.candidate.pr !== number)
+      if (handoff.work_item.repo !== workflow.work_item.repo || handoff.work_item.issue !== workflow.work_item.issue || handoff.candidate.pr !== number)
         fail('Handoff work item or PR mismatch');
+      if (handoff.verification.checks.length !== workflow.verification_commands.length ||
+        handoff.verification.checks.some((c, i) => c.command !== workflow.verification_commands[i]))
+        fail('Handoff verification commands do not match selected Profile workflow');
       const p = await readPR(number);
       if (p.head !== expectedHead || p.base !== handoff.candidate.base_sha) fail('Remote PR version mismatch');
       const c = await readComment(number, comment);
