@@ -536,6 +536,7 @@ const workflows = [
   ['hub', 'c07-r1', HUB_REPO, 'codex/c07-r1-git-transport'],
   ['hub', 'c07-r2', HUB_REPO, 'codex/c07-r2-receive-pack'],
   ['hub', 'c07-r3', HUB_REPO, 'codex/c07-r3-scoped-helper'],
+  ['hub', 'c1a', HUB_REPO, 'codex/c1a-protocol'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
@@ -909,6 +910,24 @@ test('real Git precedence: generic reset leaves duplicate scoped helpers visible
     assert.equal(git(query).trim(), '', 'same-scope Builder empty helper wins over both local entries');
     assert.equal(readFileSync(configPath, 'utf8'), before, 'resolution must not mutate fixture config');
   } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('C1-A fixed workflow binds Hub #19, exact-head Ready and unchanged installation boundaries', async () => {
+  const selection = { profile: 'hub', workflow: 'c1a' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c1a', branch: 'codex/c1a-protocol', work_item: { repo: HUB_REPO, issue: 19 },
+    verification_commands: ['pnpm check'], bootstrap_paths: null });
+  const handoff = structuredClone(record); handoff.work_item.issue = 19;
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
+  const builder = await connectBuilder(f.deps, selection);
+  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
+  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
+  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
+  assert.deepEqual(PROFILES.map(p => p.id), ['hub', 'future-ui', 'webskill']);
+  for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh'])
+    assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
 });
 
 test('scoped-helper repair workflow binds Hub #16 and exact-head Ready; arbitrary transport options refused', async () => {

@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:awh:protocol:1.0",
+  "title": "AWH Protocol 1.0",
+  "oneOf": [
+    { "$ref": "#/$defs/manifest" }, { "$ref": "#/$defs/project" },
+    { "$ref": "#/$defs/profile_policy" }, { "$ref": "#/$defs/executor" },
+    { "$ref": "#/$defs/work_item" }, { "$ref": "#/$defs/run" }, { "$ref": "#/$defs/event" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$" },
+    "text": { "type": "string", "minLength": 1, "pattern": "\\S", "maxLength": 4096 },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$", "maxLength": 256 },
+    "profile_ref": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$", "maxLength": 256 },
+    "ref": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?!/)(?!.*(?:\\.\\.|@\\{|//|[\\x00-\\x20\\x7f~^:?*\\[\\\\]))(?!.*(?:^|/)\\.)(?!.*\\.lock(?:/|$))(?!.*[/.]$)[^/]+(?:/[^/]+)*$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "positive": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "exit_code": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$" },
+    "nullable_timestamp": { "anyOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }] },
+    "json": { "anyOf": [
+      { "type": "null" }, { "type": "boolean" }, { "type": "number" }, { "type": "string" },
+      { "type": "array", "items": { "$ref": "#/$defs/json" } },
+      { "type": "object", "additionalProperties": { "$ref": "#/$defs/json" } }
+    ] },
+    "number_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provider", "repository", "kind", "number"],
+      "properties": {
+        "provider": { "const": "github" }, "repository": { "$ref": "#/$defs/repository" },
+        "kind": { "enum": ["issue", "pull_request", "issue_comment", "review"] }, "number": { "$ref": "#/$defs/positive" }
+      }
+    },
+    "issue_ref": { "allOf": [{ "$ref": "#/$defs/number_ref" }, { "type": "object", "properties": { "kind": { "const": "issue" } } }] },
+    "pr_ref": { "allOf": [{ "$ref": "#/$defs/number_ref" }, { "type": "object", "properties": { "kind": { "const": "pull_request" } } }] },
+    "comment_ref": { "allOf": [{ "$ref": "#/$defs/number_ref" }, { "type": "object", "properties": { "kind": { "const": "issue_comment" } } }] },
+    "review_ref": { "allOf": [{ "$ref": "#/$defs/number_ref" }, { "type": "object", "properties": { "kind": { "const": "review" } } }] },
+    "commit_ref": {
+      "type": "object", "additionalProperties": false, "required": ["provider", "repository", "sha", "ref"],
+      "properties": { "provider": { "const": "github" }, "repository": { "$ref": "#/$defs/repository" }, "sha": { "$ref": "#/$defs/sha" }, "ref": { "$ref": "#/$defs/ref" } }
+    },
+    "manifest": {
+      "type": "object", "additionalProperties": false, "required": ["apiVersion", "project", "profile"],
+      "properties": {
+        "apiVersion": { "const": "awh/v1" },
+        "project": { "type": "object", "additionalProperties": false, "required": ["id", "repository"], "properties": { "id": { "$ref": "#/$defs/id" }, "repository": { "$ref": "#/$defs/repository" } } },
+        "profile": { "type": "object", "additionalProperties": false, "required": ["ref"], "properties": { "ref": { "$ref": "#/$defs/profile_ref" } } }
+      }
+    },
+    "project": {
+      "type": "object", "additionalProperties": false, "required": ["schema_version", "kind", "id", "repository", "profile_ref"],
+      "properties": { "schema_version": { "const": "1.0" }, "kind": { "const": "project" }, "id": { "$ref": "#/$defs/id" }, "repository": { "$ref": "#/$defs/repository" }, "profile_ref": { "$ref": "#/$defs/profile_ref" } }
+    },
+    "profile_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "kind", "ref", "version", "repository", "base", "branch", "verification", "github_app", "review", "delivery", "executor_restrictions"],
+      "properties": {
+        "schema_version": { "const": "1.0" }, "kind": { "const": "profile_policy" }, "ref": { "$ref": "#/$defs/profile_ref" }, "version": { "$ref": "#/$defs/id" },
+        "repository": { "$ref": "#/$defs/repository" }, "base": { "$ref": "#/$defs/ref" },
+        "branch": { "type": "object", "additionalProperties": false, "required": ["mode", "ref"], "properties": { "mode": { "const": "fixed" }, "ref": { "$ref": "#/$defs/ref" } } },
+        "verification": { "type": "object", "additionalProperties": false, "required": ["commands"], "properties": { "commands": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/text" } } } },
+        "github_app": {
+          "type": "object", "additionalProperties": false, "required": ["identity", "repository_scope", "selected_set_policy", "permissions"],
+          "properties": {
+            "identity": { "const": "installation" }, "repository_scope": { "const": "single" }, "selected_set_policy": { "const": "exact" },
+            "permissions": { "type": "object", "additionalProperties": false, "required": ["contents", "issues", "metadata", "pull_requests"], "properties": { "contents": { "const": "write" }, "issues": { "const": "write" }, "metadata": { "const": "read" }, "pull_requests": { "const": "write" } } }
+          }
+        },
+        "review": { "type": "object", "additionalProperties": false, "required": ["mode", "builder_is_reviewer"], "properties": { "mode": { "const": "independent_exact_head" }, "builder_is_reviewer": { "const": false } } },
+        "delivery": { "type": "object", "additionalProperties": false, "required": ["draft_pr", "handoff_version", "confirmed_publication_required", "exact_head_required"], "properties": { "draft_pr": { "const": true }, "handoff_version": { "const": "0.1" }, "confirmed_publication_required": { "const": true }, "exact_head_required": { "const": true } } },
+        "executor_restrictions": { "anyOf": [ { "type": "null" }, {
+          "type": "object", "additionalProperties": false, "required": ["executor_ids", "machine_ids"],
+          "properties": { "executor_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }, "machine_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } } }
+        } ] }
+      }
+    },
+    "executor": {
+      "type": "object", "additionalProperties": false, "required": ["schema_version", "kind", "id", "display_name", "machine"],
+      "properties": {
+        "schema_version": { "const": "1.0" }, "kind": { "const": "executor" }, "id": { "$ref": "#/$defs/id" }, "display_name": { "$ref": "#/$defs/text" },
+        "machine": { "type": "object", "additionalProperties": false, "required": ["id", "platform"], "properties": { "id": { "$ref": "#/$defs/id" }, "platform": { "enum": ["windows", "macos", "linux"] } } }
+      }
+    },
+    "work_item": {
+      "type": "object", "additionalProperties": false, "required": ["schema_version", "kind", "id", "project_id", "reference"],
+      "properties": { "schema_version": { "const": "1.0" }, "kind": { "const": "work_item" }, "id": { "$ref": "#/$defs/id" }, "project_id": { "$ref": "#/$defs/id" }, "reference": { "$ref": "#/$defs/issue_ref" } }
+    },
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "kind", "id", "project_id", "work_item_id", "executor_id", "machine_id", "source", "profile", "state", "created_at", "started_at", "updated_at", "completed_at"],
+      "properties": {
+        "schema_version": { "const": "1.0" }, "kind": { "const": "run" }, "id": { "$ref": "#/$defs/id" }, "project_id": { "$ref": "#/$defs/id" },
+        "work_item_id": { "$ref": "#/$defs/id" }, "executor_id": { "$ref": "#/$defs/id" }, "machine_id": { "$ref": "#/$defs/id" },
+        "source": { "$ref": "#/$defs/commit_ref" }, "profile": { "type": "object", "additionalProperties": false, "required": ["ref", "version"], "properties": { "ref": { "$ref": "#/$defs/profile_ref" }, "version": { "$ref": "#/$defs/id" } } },
+        "state": { "enum": ["created", "running", "verifying", "awaiting_review", "reviewing", "review_passed", "completed", "failed"] },
+        "created_at": { "$ref": "#/$defs/timestamp" }, "started_at": { "$ref": "#/$defs/nullable_timestamp" }, "updated_at": { "$ref": "#/$defs/timestamp" }, "completed_at": { "$ref": "#/$defs/nullable_timestamp" }
+      }
+    },
+    "checks": { "type": "array", "minItems": 1, "items": {
+      "type": "object", "additionalProperties": false, "required": ["command", "exit_code"],
+      "properties": { "command": { "$ref": "#/$defs/text" }, "exit_code": { "$ref": "#/$defs/exit_code" } }
+    } },
+    "run_started": { "type": "object", "additionalProperties": false, "required": ["source_sha"], "properties": { "source_sha": { "$ref": "#/$defs/sha" } } },
+    "step_started": { "type": "object", "additionalProperties": false, "required": ["step_id", "name"], "properties": { "step_id": { "$ref": "#/$defs/id" }, "name": { "$ref": "#/$defs/text" } } },
+    "step_completed": { "type": "object", "additionalProperties": false, "required": ["step_id", "exit_code"], "properties": { "step_id": { "$ref": "#/$defs/id" }, "exit_code": { "$ref": "#/$defs/exit_code" } } },
+    "verification_started": { "type": "object", "additionalProperties": false, "required": ["subject_sha"], "properties": { "subject_sha": { "$ref": "#/$defs/sha" } } },
+    "verification_passed": { "type": "object", "additionalProperties": false, "required": ["subject_sha", "checks"], "properties": { "subject_sha": { "$ref": "#/$defs/sha" }, "checks": { "allOf": [{ "$ref": "#/$defs/checks" }, { "type": "array", "items": { "type": "object", "properties": { "exit_code": { "const": 0 } } } }] } } },
+    "verification_failed": { "type": "object", "additionalProperties": false, "required": ["subject_sha", "checks", "reason"], "properties": { "subject_sha": { "$ref": "#/$defs/sha" }, "checks": { "$ref": "#/$defs/checks" }, "reason": { "$ref": "#/$defs/text" } } },
+    "push_completed": { "type": "object", "additionalProperties": false, "required": ["commit"], "properties": { "commit": { "$ref": "#/$defs/commit_ref" } } },
+    "pr_created": { "type": "object", "additionalProperties": false, "required": ["pull_request", "base_sha", "head_sha"], "properties": { "pull_request": { "$ref": "#/$defs/pr_ref" }, "base_sha": { "$ref": "#/$defs/sha" }, "head_sha": { "$ref": "#/$defs/sha" } } },
+    "handoff_published": {
+      "type": "object", "additionalProperties": false, "required": ["handoff_version", "publication", "pull_request", "comment", "base_sha", "head_sha", "subject_sha"],
+      "properties": { "handoff_version": { "const": "0.1" }, "publication": { "enum": ["pending", "confirmed", "failed"] }, "pull_request": { "$ref": "#/$defs/pr_ref" }, "comment": { "$ref": "#/$defs/comment_ref" }, "base_sha": { "$ref": "#/$defs/sha" }, "head_sha": { "$ref": "#/$defs/sha" }, "subject_sha": { "$ref": "#/$defs/sha" } }
+    },
+    "review_started": { "type": "object", "additionalProperties": false, "required": ["pull_request", "subject_sha", "reviewer_executor_id"], "properties": { "pull_request": { "$ref": "#/$defs/pr_ref" }, "subject_sha": { "$ref": "#/$defs/sha" }, "reviewer_executor_id": { "$ref": "#/$defs/id" } } },
+    "review_passed": { "type": "object", "additionalProperties": false, "required": ["pull_request", "subject_sha", "reviewer_executor_id", "review"], "properties": { "pull_request": { "$ref": "#/$defs/pr_ref" }, "subject_sha": { "$ref": "#/$defs/sha" }, "reviewer_executor_id": { "$ref": "#/$defs/id" }, "review": { "$ref": "#/$defs/review_ref" } } },
+    "run_completed": { "type": "object", "additionalProperties": false, "required": ["outcome"], "properties": { "outcome": { "const": "pass" } } },
+    "run_failed": { "type": "object", "additionalProperties": false, "required": ["reason"], "properties": { "reason": { "$ref": "#/$defs/text" } } },
+    "event": {
+      "type": "object", "additionalProperties": false, "required": ["schema_version", "kind", "id", "run_id", "sequence", "type", "occurred_at", "payload"],
+      "properties": {
+        "schema_version": { "const": "1.0" }, "kind": { "const": "event" }, "id": { "$ref": "#/$defs/id" }, "run_id": { "$ref": "#/$defs/id" },
+        "sequence": { "$ref": "#/$defs/positive" }, "occurred_at": { "$ref": "#/$defs/timestamp" },
+        "type": { "enum": ["RUN_STARTED", "STEP_STARTED", "STEP_COMPLETED", "VERIFICATION_STARTED", "VERIFICATION_PASSED", "VERIFICATION_FAILED", "GITHUB_PUSH_COMPLETED", "GITHUB_PR_CREATED", "HANDOFF_PUBLISHED", "REVIEW_STARTED", "REVIEW_PASSED", "RUN_COMPLETED", "RUN_FAILED"] },
+        "payload": { "type": "object", "additionalProperties": false, "required": ["schema_version", "data", "extensions"], "properties": {
+          "schema_version": { "const": "1.0" }, "data": { "type": "object" }, "extensions": { "type": "object", "additionalProperties": { "$ref": "#/$defs/json" } }
+        } }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "RUN_STARTED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/run_started" } } } } } },
+        { "if": { "properties": { "type": { "const": "STEP_STARTED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/step_started" } } } } } },
+        { "if": { "properties": { "type": { "const": "STEP_COMPLETED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/step_completed" } } } } } },
+        { "if": { "properties": { "type": { "const": "VERIFICATION_STARTED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/verification_started" } } } } } },
+        { "if": { "properties": { "type": { "const": "VERIFICATION_PASSED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/verification_passed" } } } } } },
+        { "if": { "properties": { "type": { "const": "VERIFICATION_FAILED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/verification_failed" } } } } } },
+        { "if": { "properties": { "type": { "const": "GITHUB_PUSH_COMPLETED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/push_completed" } } } } } },
+        { "if": { "properties": { "type": { "const": "GITHUB_PR_CREATED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/pr_created" } } } } } },
+        { "if": { "properties": { "type": { "const": "HANDOFF_PUBLISHED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/handoff_published" } } } } } },
+        { "if": { "properties": { "type": { "const": "REVIEW_STARTED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/review_started" } } } } } },
+        { "if": { "properties": { "type": { "const": "REVIEW_PASSED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/review_passed" } } } } } },
+        { "if": { "properties": { "type": { "const": "RUN_COMPLETED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/run_completed" } } } } } },
+        { "if": { "properties": { "type": { "const": "RUN_FAILED" } } }, "then": { "properties": { "payload": { "type": "object", "properties": { "data": { "$ref": "#/$defs/run_failed" } } } } } }
+      ]
+    }
+  }
+}
