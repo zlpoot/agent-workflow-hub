@@ -42,6 +42,7 @@ try {
     await builder.ready(pr, args[2]!, record, comment);
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } catch (e) {
-  process.stderr.write(`${JSON.stringify({ error: e instanceof BuilderError || e instanceof ProfileError ? e.message : 'Builder command failed (details suppressed)' })}\n`);
+  process.stderr.write(`${JSON.stringify({ error: e instanceof BuilderError || e instanceof ProfileError ? e.message : 'Builder command failed (details suppressed)',
+    ...(e instanceof BuilderError && e.category ? { category: e.category } : {}) })}\n`);
   process.exitCode = 2;
 }
