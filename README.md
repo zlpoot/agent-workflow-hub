@@ -1,8 +1,8 @@
 # agent-workflow-hub
 
-Issue [#6](https://github.com/zlpoot/agent-workflow-hub/issues/6), Phase A: prepare fixed Hub/future-ui Project Profiles and safe repository binding in Hub. Stop at the Human Gate before expanding the App installation or writing to future-ui; C1 remains paused.
+Issue [#6](https://github.com/zlpoot/agent-workflow-hub/issues/6) 的 Phase A：在 Hub 中准备固定的 Hub/future-ui Project Profiles 和安全的仓库绑定。独立 Review 获得 PASS 后才正式进入 Human Gate；此前不得扩大 App installation 或写入 future-ui。C1 继续暂停。
 
-Issue [#4](https://github.com/zlpoot/agent-workflow-hub/issues/4) adds a separate GitHub App Builder wrapper for C0.5 identity isolation. The C0 handoff validator remains read-only. C1 (#3) remains paused until the independent Reviewer completes the C0.5 gate.
+Issue [#4](https://github.com/zlpoot/agent-workflow-hub/issues/4) 已完成 C0.5 身份隔离，引入独立的 GitHub App Builder wrapper。C0 Handoff 校验器保持只读。C1 [#3](https://github.com/zlpoot/agent-workflow-hub/issues/3) 仍按当前路线暂停，不因 C0.5 完成而自动恢复。
 
 Issue [#1](https://github.com/zlpoot/agent-workflow-hub/issues/1) 的最小自举工具：读取 `builder_handoff` JSON，校验结构、候选版本与 Ready 声明的一致性。当前是单包 Node.js + TypeScript CLI，无运行时依赖；尚未实现工作流平台。
 
@@ -113,11 +113,11 @@ pnpm builder --profile hub --workflow c06 pr-create 'C0.6 Phase A' .handoff/pr-b
 
 选择错误在读凭据或请求 GitHub 前失败。future-ui bootstrap push 会把当前远端 main 的完整 SHA 作为比较基准，检查 Git diff 仅含固定文档路径；PR 创建前及后续 PR 读写/Ready 也用 GitHub exact base/head compare 检查远端 candidate 只新增或修改该文档，阻止绕过 push 的产品代码 PR。检查不执行文档或评论中的命令。Handoff 的 `work_item` 指向任务所在仓库：c05 为 Hub #4，c06 与 future-ui bootstrap 为 Hub #6；交付仓库由所选 Profile、实际 PR 和该仓库证据 URL 绑定，不能把 future-ui #6 或 #70 冒充本任务。Ready 还要求 checks 按该 workflow 固定顺序完整覆盖允许验证命令。
 
-**Phase A / Human Gate：** 当前只交付 Hub 实现、离线双仓库测试和真实单仓库回归。到 Gate 后停止；这不表示真实双仓库接入已经完成。只有 Human 在确认安全检查能力后，才可把 future-ui 加入同一 App 的 Selected repositories（保持精确的两个仓库集合，不选 All repositories）。之后重新 live preflight，才进入未来阶段的 future-ui docs-only bootstrap。不得触碰或清理 future-ui 现有工作区，不恢复 C1，不做 deploy、付费模型/API 调用或自动 merge。
+**Phase A / Human Gate：** 当前只交付 Hub 实现、离线双仓库测试和真实单仓库回归。独立 Review 获得 PASS 后才正式进入 Human Gate；这不表示真实双仓库接入已经完成。此前保持 Hub-only installation，不加入 future-ui。后续只有 Human 明确放行并确认安全检查能力后，才可把 future-ui 加入同一 App 的 Selected repositories（保持精确的两个仓库集合，不选 All repositories）。之后重新 live preflight，才进入未来阶段的 future-ui docs-only bootstrap。不得触碰或清理 future-ui 现有工作区，不恢复 C1，不做 deploy、付费模型/API 调用或自动 merge。
 
 参数个数严格固定，数字必须是正安全整数；body-file 是 UTF-8 文件，真实数据放在 gitignored 的 `.handoff/`。成功 stdout 一行 JSON，失败 stderr 一行脱敏 JSON、退出码 2。Git 子进程输出不透传，token 只经进程环境中的临时 HTTP Basic header 提供，不在命令行、Git remote 或磁盘配置中出现；Git 系统/用户配置、用户凭据 helper、trace、hooks 和 redirects 禁用。若本地仓库存在 URL rewrite、HTTP/proxy、credential 或 include 配置，则拒绝 push；push 必须从指定功能分支执行，不能 force、push main 或选择其他 remote。
 
-PR 创建固定 Draft。其后写入及评论回读均核对 App bot actor、目标仓库、指定分支与 main；不修改他人评论。`pr-ready` 复用 C0 校验器，核对 Issue #4、PR、base/head、已发布且回读的 confirmed Handoff JSON 和 CLI 结果，以及当前 head 的独立 Builder evidence 评论（所有 evidence_refs 必须是同一 PR 上该 App 的另一条评论）。Handoff 评论正文格式为 `AWH-HANDOFF v0.1` 首行、首个 json fenced block 放交接 JSON，正文包含 C0 的单行 CLI 结果。Evidence 评论首行为 `Builder evidence`，含验证的完整 head SHA 和原始日志。转 Ready 前后再次核对远端版本；不确定的 Ready 发布结果会尝试恢复并回读 Draft，恢复也失败则明确报告，不能宣告交接成功。
+PR 创建固定 Draft。其后写入及评论回读均核对 App bot actor、目标仓库、指定分支与 main；不修改他人评论。`pr-ready` 复用 C0 校验器，核对所选 `workflow.work_item`（`hub/c05` 绑定 Hub #4；`hub/c06` 与 `future-ui/bootstrap` 绑定 Hub #6）、PR、base/head、该 workflow 的完整验证命令集、已发布且回读的 confirmed Handoff JSON 和 CLI 结果，以及当前 head 的独立 Builder evidence 评论（所有 evidence_refs 必须是同一 PR 上该 App 的另一条评论）。Handoff 评论正文格式为 `AWH-HANDOFF v0.1` 首行、首个 json fenced block 放交接 JSON，正文包含 C0 的单行 CLI 结果。Evidence 评论首行为 `Builder evidence`，含验证的完整 head SHA 和原始日志。转 Ready 前后再次核对远端版本；不确定的 Ready 发布结果会尝试恢复并回读 Draft，恢复也失败则明确报告，不能宣告交接成功。
 
 Builder evidence 属于 Builder 验证；Ready 仍不授予审批或合并权限。Contents write 技术上也能调用 merge API，Pull requests write 也覆盖 review API；本轮的禁止由 wrapper 的固定操作和协作 policy 强制，不能宣称是 GitHub permission-level 隔离。wrapper 不提供 approve、review decision、merge、administration、workflow mutation、关闭 Issue 或恢复 C1 的操作。ChatGPT 从 GitHub 独立核对 App bot 身份，并以自己的用户 principal 对 exact head 提交原生 APPROVE；该 Review gate 不由 Builder 代填。
 
