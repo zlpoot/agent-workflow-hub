@@ -1,0 +1,197 @@
+import { DatabaseSync } from 'node:sqlite';
+import { appendEvent, assertEntity, validateBindings } from '../protocol/index.js';
+import type { Event, Executor, ProfilePolicy, Project, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
+import { executorAccess, fail, MAX_PAYLOAD_BYTES, projectAccess, safeData, type Principal } from './security.js';
+
+export const DATABASE_VERSION = 1;
+type Row = Record<string, string | number | bigint | Uint8Array | null>;
+export interface StoredEvent { cursor: number; event: Event }
+const decode = <T>(row: Row, column = 'record'): T => JSON.parse(String(row[column])) as T;
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+  if (value !== null && typeof value === 'object') return '{' + Object.keys(value).sort().map(key =>
+    JSON.stringify(key) + ':' + canonical((value as Record<string, unknown>)[key])).join(',') + '}';
+  return JSON.stringify(value);
+}
+function entity<K extends keyof ProtocolEntities>(kind: K, input: unknown): ProtocolEntities[K] {
+  safeData(input);
+  return assertEntity(kind, input);
+}
+
+// Synchronous transactions contain no await or network I/O. BEGIN IMMEDIATE serializes all writers.
+export class ControlPlaneStore {
+  readonly #db: DatabaseSync;
+  constructor(path: string, policies: readonly ProfilePolicy[], readonly now = () => new Date().toISOString()) {
+    if (!Array.isArray(policies) || policies.length === 0 || policies.length > 256) fail(500, 'configuration', 'Trusted Profile policies are required');
+    policies.forEach(policy => entity('profile_policy', policy));
+    this.#db = new DatabaseSync(path, { timeout: 5000, enableForeignKeyConstraints: true, allowExtension: false });
+    try {
+      this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
+      this.transaction(() => {
+        const version = Number(this.#db.prepare('PRAGMA user_version').get()!.user_version);
+        if (version > DATABASE_VERSION) fail(500, 'database_version', 'Database schema is newer than this server');
+        if (version !== 0 && version !== DATABASE_VERSION) fail(500, 'database_version', 'Unsupported database schema');
+        if (version === 0) this.#db.exec(`
+          CREATE TABLE profiles (ref TEXT NOT NULL, version TEXT NOT NULL, record TEXT NOT NULL CHECK(json_valid(record)), PRIMARY KEY(ref, version)) STRICT;
+          CREATE TABLE projects (id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          CREATE TABLE executors (id TEXT PRIMARY KEY, client_id TEXT NOT NULL, last_seen TEXT NOT NULL, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          CREATE TABLE work_items (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          CREATE TABLE runs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), executor_id TEXT NOT NULL REFERENCES executors(id),
+            work_item_id TEXT NOT NULL REFERENCES work_items(id), client_id TEXT NOT NULL, initial TEXT NOT NULL CHECK(json_valid(initial)), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          CREATE TABLE events (cursor INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id), event_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK(sequence > 0), record TEXT NOT NULL CHECK(json_valid(record)), UNIQUE(run_id, event_id), UNIQUE(run_id, sequence)) STRICT;
+          CREATE INDEX runs_project ON runs(project_id);
+          CREATE INDEX events_run ON events(run_id, sequence);
+          CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'Events are append-only'); END;
+          CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'Events are append-only'); END;
+          CREATE TRIGGER runs_identity_no_update BEFORE UPDATE OF id, project_id, executor_id, work_item_id, client_id, initial ON runs BEGIN SELECT RAISE(ABORT, 'Run identity is immutable'); END;
+          CREATE TRIGGER profiles_no_update BEFORE UPDATE ON profiles BEGIN SELECT RAISE(ABORT, 'Profile versions are immutable'); END;
+          CREATE TRIGGER profiles_no_delete BEFORE DELETE ON profiles BEGIN SELECT RAISE(ABORT, 'Profile versions are immutable'); END;
+          PRAGMA user_version = 1;
+        `);
+        for (const policy of policies) {
+          const versions = this.#db.prepare('SELECT record FROM profiles WHERE ref = ?').all(policy.ref);
+          if (versions.some(row => decode<ProfilePolicy>(row).repository !== policy.repository))
+            fail(409, 'profile_conflict', 'Trusted Profile identity cannot be rebound to another repository');
+          const old = this.#db.prepare('SELECT record FROM profiles WHERE ref = ? AND version = ?').get(policy.ref, policy.version);
+          if (old && canonical(decode(old)) !== canonical(policy)) fail(409, 'profile_conflict', 'Trusted Profile version cannot be replaced');
+          if (!old) this.#db.prepare('INSERT INTO profiles VALUES (?, ?, ?)').run(policy.ref, policy.version, JSON.stringify(policy));
+        }
+      });
+    } catch (error) { this.#db.close(); throw error; }
+  }
+  close(): void { this.#db.close(); }
+  private transaction<T>(action: () => T): T {
+    this.#db.exec('BEGIN IMMEDIATE');
+    try { const result = action(); this.#db.exec('COMMIT'); return result; }
+    catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+  }
+  private row(table: 'projects' | 'executors' | 'work_items' | 'runs', id: string): Row {
+    const row = this.#db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+    if (!row) fail(404, 'not_found', 'Registry entity was not found');
+    return row;
+  }
+  private insert(table: 'projects' | 'work_items', value: Project | WorkItem): 'created' | 'idempotent' {
+    const old = this.#db.prepare(`SELECT record FROM ${table} WHERE id = ?`).get(value.id);
+    if (old) {
+      if (canonical(decode(old)) !== canonical(value)) fail(409, 'identity_conflict', 'Registry identity cannot be rebound');
+      return 'idempotent';
+    }
+    if (table === 'projects') this.#db.prepare('INSERT INTO projects VALUES (?, ?)').run(value.id, JSON.stringify(value));
+    else this.#db.prepare('INSERT INTO work_items VALUES (?, ?, ?)').run(value.id, (value as WorkItem).project_id, JSON.stringify(value));
+    return 'created';
+  }
+  registerProject(principal: Principal, input: unknown) {
+    const manifest = entity('manifest', input);
+    projectAccess(principal, manifest.project.id);
+    const policies = this.#db.prepare('SELECT record FROM profiles WHERE ref = ?').all(manifest.profile.ref).map(row => decode<ProfilePolicy>(row));
+    if (!policies.length || policies.some(policy => policy.repository !== manifest.project.repository))
+      fail(403, 'profile_binding', 'Manifest must match a trusted Profile repository');
+    const project: Project = { schema_version: '1.0', kind: 'project', id: manifest.project.id,
+      repository: manifest.project.repository, profile_ref: manifest.profile.ref };
+    return this.transaction(() => ({ project, disposition: this.insert('projects', project) }));
+  }
+  getProject(principal: Principal, id: string): Project { projectAccess(principal, id); return decode(this.row('projects', id)); }
+  listProjects(principal: Principal): Project[] {
+    return this.#db.prepare('SELECT record FROM projects ORDER BY id').all().map(row => decode<Project>(row)).filter(p => principal.project_ids.includes(p.id));
+  }
+  listProfiles(principal: Principal, projectId: string): ProfilePolicy[] {
+    const project = this.getProject(principal, projectId);
+    return this.#db.prepare('SELECT record FROM profiles WHERE ref = ? ORDER BY version').all(project.profile_ref).map(row => decode<ProfilePolicy>(row));
+  }
+  registerExecutor(principal: Principal, input: unknown) {
+    const executor = entity('executor', input);
+    executorAccess(principal, executor.id);
+    return this.transaction(() => {
+      const old = this.#db.prepare('SELECT * FROM executors WHERE id = ?').get(executor.id);
+      if (old && (old.client_id !== principal.id || canonical(decode(old)) !== canonical(executor)))
+        fail(409, 'identity_conflict', 'Executor identity or owner cannot be rebound');
+      if (!old) this.#db.prepare('INSERT INTO executors VALUES (?, ?, ?, ?)').run(executor.id, principal.id, this.now(), JSON.stringify(executor));
+      return { executor, last_seen: String((old ?? this.row('executors', executor.id)).last_seen), disposition: old ? 'idempotent' : 'created' };
+    });
+  }
+  listExecutors(principal: Principal) {
+    return this.#db.prepare('SELECT * FROM executors WHERE client_id = ? ORDER BY id').all(principal.id)
+      .filter(row => principal.executor_ids.includes(String(row.id))).map(row => ({ executor: decode<Executor>(row), last_seen: String(row.last_seen) }));
+  }
+  heartbeat(principal: Principal, id: string) {
+    executorAccess(principal, id);
+    return this.transaction(() => {
+      const row = this.row('executors', id);
+      if (row.client_id !== principal.id) fail(403, 'forbidden', 'Executor belongs to another client');
+      const lastSeen = [this.now(), String(row.last_seen)].sort().at(-1)!;
+      this.#db.prepare('UPDATE executors SET last_seen = ? WHERE id = ?').run(lastSeen, id);
+      return { executor: decode<Executor>(row), last_seen: lastSeen };
+    });
+  }
+  registerWorkItem(principal: Principal, input: unknown) {
+    const workItem = entity('work_item', input);
+    this.getProject(principal, workItem.project_id);
+    // Work references may belong to the Hub (external bootstrap); they remain provider declarations.
+    return this.transaction(() => ({ work_item: workItem, disposition: this.insert('work_items', workItem) }));
+  }
+  getWorkItem(principal: Principal, id: string): WorkItem {
+    const workItem = decode<WorkItem>(this.row('work_items', id)); projectAccess(principal, workItem.project_id); return workItem;
+  }
+  createRun(principal: Principal, input: unknown) {
+    const run = entity('run', input);
+    const project = this.getProject(principal, run.project_id);
+    executorAccess(principal, run.executor_id);
+    if (run.state !== 'created') fail(409, 'state', 'New Runs must begin in created state');
+    const owner = this.row('executors', run.executor_id);
+    if (owner.client_id !== principal.id) fail(403, 'forbidden', 'Executor belongs to another client');
+    const policy = this.#db.prepare('SELECT record FROM profiles WHERE ref = ? AND version = ?').get(run.profile.ref, run.profile.version);
+    if (!policy) fail(403, 'profile_binding', 'Run requires an exact trusted Profile version');
+    const bundle = { manifest: { apiVersion: 'awh/v1', project: { id: project.id, repository: project.repository }, profile: { ref: project.profile_ref } },
+      project, profile_policy: decode<ProfilePolicy>(policy), executor: decode<Executor>(owner), work_item: this.getWorkItem(principal, run.work_item_id), run };
+    if (!validateBindings(bundle).valid) fail(409, 'binding', 'Run Registry bindings do not match');
+    return this.transaction(() => {
+      const old = this.#db.prepare('SELECT * FROM runs WHERE id = ?').get(run.id);
+      if (old) {
+        if (old.client_id !== principal.id || canonical(decode(old, 'initial')) !== canonical(run)) fail(409, 'identity_conflict', 'Run identity cannot be rebound');
+        return { run: decode<Run>(old), disposition: 'idempotent' };
+      }
+      this.#db.prepare('INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)').run(run.id, run.project_id, run.executor_id, run.work_item_id,
+        principal.id, JSON.stringify(run), JSON.stringify(run));
+      return { run, disposition: 'created' };
+    });
+  }
+  getRun(principal: Principal, id: string): Run {
+    const run = decode<Run>(this.row('runs', id)); projectAccess(principal, run.project_id); return run;
+  }
+  listRuns(principal: Principal, projectId: string): Run[] {
+    this.getProject(principal, projectId);
+    return this.#db.prepare('SELECT record FROM runs WHERE project_id = ? ORDER BY id').all(projectId).map(row => decode<Run>(row));
+  }
+  listEvents(principal: Principal, runId: string, after = 0, limit = 100): StoredEvent[] {
+    this.getRun(principal, runId);
+    return this.#db.prepare('SELECT cursor, record FROM events WHERE run_id = ? AND sequence > ? ORDER BY sequence LIMIT ?')
+      .all(runId, after, limit).map(row => ({ cursor: Number(row.cursor), event: decode<Event>(row) }));
+  }
+  append(principal: Principal, runId: string, input: unknown) {
+    const event = entity('event', input);
+    if (Buffer.byteLength(JSON.stringify(event.payload)) > MAX_PAYLOAD_BYTES) fail(413, 'payload_too_large', 'Event payload exceeds the byte limit');
+    if (event.run_id !== runId) fail(409, 'binding', 'Event Run ID does not match the route');
+    return this.transaction(() => {
+      const row = this.row('runs', runId), initial = decode<Run>(row, 'initial');
+      projectAccess(principal, initial.project_id); executorAccess(principal, initial.executor_id);
+      if (row.client_id !== principal.id) fail(403, 'forbidden', 'Run belongs to another client');
+      const history = this.#db.prepare('SELECT record FROM events WHERE run_id = ? ORDER BY sequence').all(runId).map(row => decode<Event>(row));
+      const result = appendEvent(initial, history, event);
+      if (result.disposition === 'appended') {
+        this.#db.prepare('INSERT INTO events (run_id, event_id, sequence, record) VALUES (?, ?, ?, ?)').run(runId, event.id, event.sequence, JSON.stringify(event));
+        this.#db.prepare('UPDATE runs SET record = ? WHERE id = ?').run(JSON.stringify(result.run), runId);
+      }
+      const stored = this.#db.prepare('SELECT cursor FROM events WHERE run_id = ? AND event_id = ?').get(runId, event.id)!;
+      return { disposition: result.disposition, cursor: Number(stored.cursor), run: result.run, event, authority_verified: false as const };
+    });
+  }
+  latestCursor(): number { return Number(this.#db.prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events').get()!.cursor); }
+  streamEvents(principal: Principal, after: number, limit = 100): StoredEvent[] {
+    const placeholders = principal.project_ids.map(() => '?').join(',');
+    if (!placeholders) return [];
+    return this.#db.prepare(`SELECT e.cursor, e.record FROM events e JOIN runs r ON r.id = e.run_id
+      WHERE e.cursor > ? AND r.project_id IN (${placeholders}) ORDER BY e.cursor LIMIT ?`)
+      .all(after, ...principal.project_ids, limit).map(row => ({ cursor: Number(row.cursor), event: decode<Event>(row) }));
+  }
+}
