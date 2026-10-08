@@ -1,5 +1,7 @@
 # Client / C1-C and C1-D
 
+Current v0.2 candidate: [Hub #41](https://github.com/zlpoot/agent-workflow-hub/issues/41), Client 0.4.0 and the [Windows repeatable workflow](repeatable.md). Live #90 follows the original CP compatibility and unified Review dependencies.
+
 当前 v0.1 MVP 候选按 [MVP 使用说明](mvp.md) 执行：Windows 静态配置、独立 Client 0.3.0、deliver/timeline/sync；下文保留原 C1-C/C1-D 历史范围和恢复约束，Mac 双端与动态 Onboarding 不再是本候选前置条件。
 
 `@zlpoot/awh-client` 0.2.0 是可独立安装的 Node 24+ CLI/Client。消费者不需要 Hub checkout；包内含 Client、C1-A Protocol 校验器、固定 GitHub App Builder/政策及运行依赖，不含 CP server、Builder CLI、开发依赖或凭据。Hub 保持 pnpm 单包；不向 npm registry 发布、不新增许可证。升级须显式安装新 tarball。`deliver` 的固定执行、Draft、观测与恢复边界见 [delivery](delivery.md)；下述 C1-C runtime 命令仍兼容旧会话。

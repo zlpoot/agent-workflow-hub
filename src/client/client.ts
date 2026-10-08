@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { appendEvent, assertEntity, assertClientMetadata, replayRun, validateBindings } from '../protocol/index.js';
 import type { ClientMetadata, Event, EventType, Executor, ProjectManifest, ProfilePolicy, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
 import { safeData, MAX_PAYLOAD_BYTES } from '../control-plane/security.js';
 import { connectBuilder } from '../builder.js';
+import { taskBinding, bindWorkflow, REPEATABLE_VERSION, type TaskBinding } from '../profiles.js';
 import { CLIENT_VERSION } from './version.js';
 import { atomicJson, clientFail, inspectRepository, locked, machine, readConfig, readCredential, readCaCertificate, readJson, readManifest, same, type Machine, type RepositoryIdentity, type ClientConfig } from './local.js';
 import { requestJson } from './http.js';
@@ -13,9 +14,9 @@ import type { Json } from '../protocol/index.js';
 
 export const CLIENT_EVENT_TYPES = ['STEP_STARTED', 'STEP_COMPLETED', 'VERIFICATION_STARTED', 'VERIFICATION_PASSED', 'VERIFICATION_FAILED', 'RUN_FAILED'] as const;
 interface Session { schema_version: '1.0'; manifest: ProjectManifest; endpoint: string; executor_id: string; machine_id: string;
-  initial: Run | null; work_item: WorkItem | null; events: Event[]; pending: Event | null; outbox?: Event[] }
+  initial: Run | null; work_item: WorkItem | null; events: Event[]; pending: Event | null; outbox?: Event[]; task_binding?: TaskBinding; previous_run?: string }
 export interface DeliveryObservation {
-  run: Run; executor_id: string; journal: string;
+  run: Run; executor_id: string; journal: string; task_binding?: TaskBinding;
   emit(type: EventType, data: unknown, extensions?: Record<string, Json>): Promise<void>;
   retainFailure(reason: string, stage: string): Promise<void>;
 }
@@ -49,7 +50,7 @@ export class AwhClient {
     executor_id: c.executor.id, machine_id: c.machine.id, initial: null, work_item: null, events: [], pending: null }; }
   private validateSession(c: Context, value: unknown): Session {
     const s = value as Session;
-    if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).filter(k => k !== 'outbox').sort().join(',') !== 'endpoint,events,executor_id,initial,machine_id,manifest,pending,schema_version,work_item' ||
+    if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).filter(k => !['outbox','task_binding','previous_run'].includes(k)).sort().join(',') !== 'endpoint,events,executor_id,initial,machine_id,manifest,pending,schema_version,work_item' ||
         s.schema_version !== '1.0' || !same(checked('manifest', s.manifest), c.manifest) || s.endpoint !== c.config.endpoint ||
         s.executor_id !== c.executor.id || s.machine_id !== c.machine.id || !Array.isArray(s.events) ||
         s.outbox !== undefined && !Array.isArray(s.outbox) || s.events.length + (s.pending ? 1 : 0) + (s.outbox?.length ?? 0) > 256)
@@ -66,6 +67,14 @@ export class AwhClient {
         if (item.reference.repository !== fixed.workflow.work_item.repo || item.reference.number !== fixed.workflow.work_item.issue)
           clientFail('state', 'Cross-repository Work Item must match the fixed Builder workflow');
       }
+      if (s.task_binding) {
+        const { fingerprint, ...data } = s.task_binding, bound = taskBinding(data);
+        if (fingerprint !== bound.fingerprint || initial.source.repository !== bound.repository || initial.source.sha !== bound.source_sha ||
+            initial.source.ref !== bound.branch || initial.profile.ref !== bound.profile_ref || initial.profile.version !== bound.profile_version ||
+            initial.executor_id !== bound.executor_id || initial.machine_id !== bound.machine_id || item.reference.number !== bound.issue || item.reference.repository !== bound.repository)
+          clientFail('state', 'Frozen Task binding differs from the Run');
+      } else if (initial.profile.version === REPEATABLE_VERSION) clientFail('state', 'Repeatable Run has no frozen Task binding');
+      if (s.previous_run !== undefined && (typeof s.previous_run !== 'string' || !/^run-[a-f0-9-]{36}$/.test(s.previous_run))) clientFail('state', 'Invalid previous Run reference');
       s.events.forEach(e => checked('event', e)); replayRun(initial, s.events);
       if (s.pending !== null) { checked('event', s.pending); appendEvent(initial, s.events, s.pending); }
       s.outbox?.forEach(e => checked('event', e));
@@ -116,6 +125,8 @@ export class AwhClient {
   async status() {
     const c = this.context(), s = this.load(c), p = await this.project(c), executor = await this.executor(c);
     return { project: p, ...executor, run: s.initial ? await this.run(c, s.initial) : null,
+      task: s.task_binding ?? (s.initial ? { issue: s.work_item!.reference.number, branch: s.initial.source.ref, source_sha: s.initial.source.sha, profile: s.initial.profile } : null),
+      previous_run: s.previous_run ?? null, history: this.history(c).map(old => ({ run_id: old.initial!.id, issue: old.work_item!.reference.number, branch: old.initial!.source.ref, state: replayRun(old.initial!, old.events).run.state })),
       pending_event: s.pending ? { id: s.pending.id, sequence: s.pending.sequence, type: s.pending.type } : null,
       pending_delivery_events: (s.pending ? 1 : 0) + (s.outbox?.length ?? 0), authority_verified: false };
   }
@@ -124,9 +135,11 @@ export class AwhClient {
     const history = [...s.events, ...(s.pending ? [s.pending] : []), ...(s.outbox ?? [])];
     if (history.length >= 256) clientFail('state_limit', 'Client Run event limit reached; explicit recovery is required');
     const run = replayRun(s.initial, history).run;
+    const candidate = s.events.find(e => e.type === 'GITHUB_PR_CREATED');
+    const task = s.task_binding ? { ...s.task_binding, ...(candidate?.type === 'GITHUB_PR_CREATED' ? { pull_request: candidate.payload.data.pull_request.number } : {}) } : null;
     const e = checked('event', { schema_version: '1.0', kind: 'event', id: 'event-' + randomUUID(), run_id: s.initial.id, sequence: history.length + 1,
       type, occurred_at: [new Date().toISOString(), run.updated_at].sort().at(-1),
-      payload: { schema_version: '1.0', data, extensions: { ...extensions, client: c.metadata, source_dirty: c.identity.dirty } } });
+      payload: { schema_version: '1.0', data, extensions: { ...(task ? { task_binding: task } : {}), ...extensions, client: c.metadata, source_dirty: c.identity.dirty } } });
     if (Buffer.byteLength(JSON.stringify(e.payload)) > MAX_PAYLOAD_BYTES) clientFail('payload_size', 'Event payload exceeds the Control Plane limit');
     appendEvent(s.initial, history, e); return e;
   }
@@ -144,7 +157,7 @@ export class AwhClient {
   async start(issue: number) {
     return this.startRun(issue);
   }
-  private async startRun(issue: number, deliveryRef?: string) {
+  private async startRun(issue: number, deliveryRef?: string, binding?: TaskBinding) {
     if (!Number.isSafeInteger(issue) || issue < 1) clientFail('arguments', 'A positive Issue number is required');
     const c = this.context();
     return locked(c.path + '.lock', async () => {
@@ -155,14 +168,17 @@ export class AwhClient {
         const ended = s.initial && terminal(replayRun(s.initial, s.events).run);
         // Check all retained journals before archival: ordinary C1-C start may have
         // archived a delivery Run, but cannot authorize repeating provider writes.
-        if (readdirSync(dirname(c.path)).some(name => name.endsWith('.delivery.json') && (name !== currentJournal || ended)))
+        const journals = readdirSync(dirname(c.path)).filter(name => name.endsWith('.delivery.json') && (name !== currentJournal || ended));
+        if (binding) await this.completedJournals(c, s, binding, journals);
+        else if (journals.length)
           clientFail('delivery_reconciliation', 'Retained delivery requires explicit provider reconciliation and an approved fresh candidate; Event retry does not authorize another delivery');
       }
       if (s.initial && terminal(replayRun(s.initial, s.events).run)) {
         const archive = join(dirname(c.path), s.initial.id + '.json');
-        try { writeFileSync(archive, JSON.stringify(s), { flag: 'wx', mode: 0o600 }); }
+        try { writeFileSync(archive, readFileSync(c.path), { flag: 'wx', mode: 0o600 }); }
         catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; if (!same(readJson(archive, 16 * 1024 * 1024, false), s)) clientFail('state', 'Archived Run conflict'); }
-        Object.assign(s, this.empty(c));
+        const previous = s.initial.id;
+        delete s.task_binding; delete s.outbox; Object.assign(s, this.empty(c)); s.previous_run = previous;
       }
       if (!s.initial) {
         const r = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(p.id)); keys(r, ['profiles']);
@@ -172,7 +188,7 @@ export class AwhClient {
         if (policies.length !== 1) clientFail('profile', 'Select one exact registered Profile version in the external Client config');
         const policy: ProfilePolicy = policies[0]!;
         if (deliveryRef) matchDeliveryPolicy(policy, deliveryRef);
-        const itemRepo = deliveryRef ? deliveryPolicy(deliveryRef).workflow.work_item.repo : p.repository;
+        const itemRepo = deliveryRef ? deliveryPolicy(deliveryRef, binding?.profile_version).workflow.work_item.repo : p.repository;
         const workItem: WorkItem = { schema_version: '1.0', kind: 'work_item', id: 'work-' + createHash('sha256').update(JSON.stringify([p.id, itemRepo, issue])).digest('hex'),
           project_id: p.id, reference: { provider: 'github', repository: itemRepo, kind: 'issue', number: issue } };
         const now = new Date().toISOString();
@@ -181,9 +197,11 @@ export class AwhClient {
           profile: { ref: policy.ref, version: policy.version }, state: 'created', created_at: now, updated_at: now, started_at: null, completed_at: null };
         if (!validateBindings({ manifest: c.manifest, project: p, profile_policy: policy, executor: ex.executor, work_item: workItem, run: initial }).valid)
           clientFail('binding', 'Run binding violates the registered Profile policy');
+        if (binding) s.task_binding = binding;
         s.initial = initial; s.work_item = workItem; s.pending = this.makeEvent(c, s, 'RUN_STARTED', { source_sha: initial.source.sha }); this.save(c, s);
       }
-      if (s.work_item!.reference.number !== issue || s.work_item!.reference.repository !== (deliveryRef ? deliveryPolicy(deliveryRef).workflow.work_item.repo : p.repository)) clientFail('active_run', 'A different Issue Run is active; finish it explicitly before starting another');
+      if (binding && !same(s.task_binding, binding)) clientFail('active_run', 'An existing Run has a different frozen Task binding');
+      if (s.work_item!.reference.number !== issue || s.work_item!.reference.repository !== (deliveryRef ? deliveryPolicy(deliveryRef, binding?.profile_version).workflow.work_item.repo : p.repository)) clientFail('active_run', 'A different Issue Run is active; finish it explicitly before starting another');
       if (s.events.length) {
         if (s.pending) clientFail('pending', 'Retry the pending Event explicitly before another operation');
         return { run: await this.run(c, s.initial!), disposition: 'idempotent', authority_verified: false };
@@ -222,16 +240,36 @@ export class AwhClient {
   }
 
   // Separate from the generic runtime Event CLI: fixed delivery, one writer, no Review emission.
-  async observeDelivery<T>(action: (observation: DeliveryObservation) => Promise<T>): Promise<T> {
-    const c = this.context(), fixed = deliveryPolicy(c.manifest.profile.ref);
-    if (c.identity.repository !== fixed.profile.repository || c.identity.ref !== fixed.workflow.branch || c.identity.dirty)
-      clientFail('delivery_source', 'Delivery requires the fixed feature branch at an exact clean HEAD');
+  async observeDelivery<T>(action: (observation: DeliveryObservation) => Promise<T>, issue?: number,
+    preflight?: (binding: TaskBinding) => Promise<void>): Promise<T> {
+    const c = this.context();
     const policies = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(c.manifest.project.id)); keys(policies, ['profiles']);
     if (!Array.isArray(policies.profiles) || policies.profiles.length > 256) clientFail('profile', 'Invalid trusted Profile Registry response');
     const matches = policies.profiles.map(v => checked('profile_policy', v)).filter(p => p.ref === c.manifest.profile.ref && (!c.config.profile_version || p.version === c.config.profile_version));
     if (matches.length !== 1) clientFail('profile', 'One exact trusted Profile version is required');
-    matchDeliveryPolicy(matches[0]!, c.manifest.profile.ref);
-    await this.startRun(fixed.workflow.work_item.issue, c.manifest.profile.ref);
+    const policy = matches[0]!; matchDeliveryPolicy(policy, c.manifest.profile.ref);
+    const fixed = deliveryPolicy(c.manifest.profile.ref, policy.version), repeatable = fixed.workflow.id === 'repeatable-docs';
+    if (repeatable && (!Number.isSafeInteger(issue) || issue! < 1)) clientFail('arguments', 'Repeatable deliver requires --issue');
+    if (!repeatable && issue !== undefined && issue !== fixed.workflow.work_item.issue) clientFail('arguments', 'Fixed delivery Issue cannot be changed');
+    const binding = repeatable ? taskBinding({ repository: c.identity.repository, issue: issue!, branch: c.identity.ref, source_sha: c.identity.sha,
+      profile_ref: policy.ref, profile_version: policy.version, executor_id: c.executor.id, machine_id: c.machine.id }) : undefined;
+    if (binding && (!policy.executor_restrictions!.machine_ids.includes(c.machine.id) || c.machine.platform !== 'windows')) clientFail('binding', 'Untrusted repeatable delivery machine');
+    const resolved = bindWorkflow(fixed.selection, binding);
+    if (c.identity.repository !== resolved.profile.repository || c.identity.ref !== resolved.workflow.branch || c.identity.dirty)
+      clientFail('delivery_source', 'Delivery requires the controlled feature branch at an exact clean HEAD');
+    if (binding) {
+      await locked(c.path + '.lock', async () => {
+        const s = this.load(c);
+        if (s.pending && (s.pending.type !== 'RUN_STARTED' || s.events.length) || s.outbox?.length) clientFail('pending', 'Retry pending delivery Events before starting another Task');
+        const journals = readdirSync(dirname(c.path)).filter(n => n.endsWith('.delivery.json'));
+        await this.completedJournals(c, s, binding, journals);
+        if (s.initial && !terminal(replayRun(s.initial, s.events).run) && (s.events.length > 1 || !same(s.task_binding, binding)))
+          clientFail('delivery_state', 'A different or delivered Run is still active');
+      });
+      if (!preflight) clientFail('delivery_policy', 'Repeatable delivery requires App Issue preflight');
+      await preflight(binding);
+    }
+    await this.startRun(binding?.issue ?? fixed.workflow.work_item.issue, c.manifest.profile.ref, binding);
     return locked(c.path + '.lock', async () => {
       const s = this.load(c);
       if (!s.initial || s.pending || s.outbox?.length || s.events.length !== 1 || s.events[0]?.type !== 'RUN_STARTED' ||
@@ -249,7 +287,7 @@ export class AwhClient {
         while (s.pending) { await this.flush(c, s); if (s.outbox?.length) { s.pending = s.outbox.shift()!; this.save(c, s); } }
       };
       const o: DeliveryObservation = { run: structuredClone(s.initial), executor_id: c.executor.id,
-        journal: join(dirname(c.path), s.initial.id + '.delivery.json'),
+        journal: join(dirname(c.path), s.initial.id + '.delivery.json'), ...(s.task_binding ? { task_binding: s.task_binding } : {}),
         emit: async (type, data, extensions) => { enqueue(type, data, extensions); await flush(); },
         retainFailure: async (reason, stage) => {
           const alreadyPending = !!s.pending || !!s.outbox?.length;
@@ -261,8 +299,10 @@ export class AwhClient {
       return action(o);
     });
   }
-  async timeline() {
-    const c = this.context(), s = this.load(c);
+  async timeline(runId?: string) {
+    const c = this.context();
+    if (runId !== undefined && !/^run-[a-f0-9-]{36}$/.test(runId)) clientFail('arguments', 'Expected a local archived Run id');
+    const current = this.load(c), s = !runId || current.initial?.id === runId ? current : this.validateSession(c, readJson(join(dirname(c.path), runId + '.json'), 16 * 1024 * 1024, false));
     if (!s.initial) clientFail('state', 'No Run is available');
     const events: { cursor: number; event: Event }[] = [];
     for (let page = 0; page < 3; page++) {
@@ -284,21 +324,27 @@ export class AwhClient {
 
   // Separate provider observation; Builder execution cannot manufacture Review or success.
   async syncDelivery(connect: typeof connectBuilder = connectBuilder) {
-    const c = this.context(), fixed = deliveryPolicy(c.manifest.profile.ref);
+    const c = this.context();
     return locked(c.path + '.lock', async () => {
       const s = this.load(c);
       if (!s.initial || s.pending || s.outbox?.length) clientFail('delivery_state', 'A delivered Run without pending Events is required; retry Events explicitly');
       if (s.initial.source.sha !== c.identity.sha || s.initial.source.ref !== c.identity.ref || c.identity.dirty)
         clientFail('exact_head', 'Synchronize from the original clean delivery candidate');
       const journalPath = join(dirname(c.path), s.initial.id + '.delivery.json');
-      const journal = readJson(journalPath) as { run_id: string; source_sha: string; disposition: string; refs: Record<string, Json> };
+      const journal = readJson(journalPath) as { run_id: string; source_sha: string; disposition: string; refs: Record<string, Json>; task_binding?: TaskBinding };
       const candidate = s.events.find(e => e.type === 'GITHUB_PR_CREATED');
       if (!candidate || candidate.type !== 'GITHUB_PR_CREATED' || journal.run_id !== s.initial.id || journal.source_sha !== c.identity.sha ||
           journal.refs.pull_request !== candidate.payload.data.pull_request.number ||
           !['draft_waiting_for_acceptance','waiting_for_independent_review','completed'].includes(journal.disposition))
         clientFail('delivery_state', 'Confirmed delivery journal and candidate are required');
-      const builder = await connect({ cwd: () => c.identity.root }, fixed.selection);
+      const fixed = deliveryPolicy(c.manifest.profile.ref, s.initial.profile.version);
+      if (s.task_binding && !same(journal.task_binding, s.task_binding)) clientFail('delivery_state', 'Journal Task binding mismatch');
+      const builder = await connect({ cwd: () => c.identity.root }, fixed.selection, s.task_binding, s.task_binding ? 'observe' : undefined);
       const observation = await builder.readLifecycle(candidate.payload.data.pull_request.number, s.initial.source.sha);
+      if (observation.repository !== s.initial.source.repository || observation.pull_request !== candidate.payload.data.pull_request.number || observation.head_sha !== s.initial.source.sha ||
+          observation.issue !== s.work_item!.reference.number || observation.issue_repository !== s.work_item!.reference.repository ||
+          observation.review && observation.review.subject_sha !== s.initial.source.sha || observation.merged && !/^[a-f0-9]{40}$/.test(observation.merge_sha ?? ''))
+        clientFail('provider_binding', 'Provider lifecycle differs from the frozen Run');
       const emit = async (type: EventType, data: unknown) => {
         s.pending = this.makeEvent(c, s, type, data, { provider_observation: observation as unknown as Json });
         this.save(c, s); await this.flush(c, s);
@@ -327,6 +373,31 @@ export class AwhClient {
     });
   }
 
+  private history(c: Context): Session[] {
+    const names = readdirSync(dirname(c.path)).filter(n => /^run-[a-f0-9-]{36}\.json$/.test(n));
+    if (names.length > 1024) clientFail('state_limit', 'Archived Run limit reached');
+    return names.map(n => this.validateSession(c, readJson(join(dirname(c.path), n), 16 * 1024 * 1024, false)));
+  }
+  private async completedJournals(c: Context, current: Session, binding: TaskBinding, names: string[]) {
+    const history = this.history(c), sessions = [...history, ...(current.initial ? [current] : [])];
+    if (sessions.some(s => s.initial!.source.ref === binding.branch && (s !== current || terminal(replayRun(s.initial!, s.events).run))))
+      clientFail('delivery_reconciliation', 'Task branch is already consumed; use a new Issue and branch');
+    if (sessions.some(old => old.events.some(e => e.type === 'GITHUB_PUSH_COMPLETED' || e.type === 'GITHUB_PR_CREATED' || e.type === 'STEP_STARTED' && e.payload.data.step_id === 'builder-preflight') &&
+        !names.includes(old.initial!.id + '.delivery.json')))
+      clientFail('delivery_reconciliation', 'Delivery Journal is missing; preserve history and reconcile provider state');
+    for (const name of names) {
+      const old = sessions.find(s => s.initial!.id + '.delivery.json' === name);
+      const j = readJson(join(dirname(c.path), name)) as { run_id: string; source_sha: string; disposition: string; refs: Record<string, Json>; task_binding?: TaskBinding };
+      if (!old || old.pending || old.outbox?.length || j.run_id !== old.initial!.id || j.source_sha !== old.initial!.source.sha ||
+          j.disposition !== 'completed' || replayRun(old.initial!, old.events).run.state !== 'completed')
+        clientFail('delivery_reconciliation', 'Journal is stopped, ambiguous, pending or unfinished; only sync-confirmed completed delivery can be archived');
+      const candidate = old.events.find(e => e.type === 'GITHUB_PR_CREATED');
+      if (candidate?.type !== 'GITHUB_PR_CREATED' || j.refs.pull_request !== candidate.payload.data.pull_request.number ||
+          j.refs.repository !== old.initial!.source.repository || j.refs.head_sha !== old.initial!.source.sha ||
+          old.task_binding && !same(old.task_binding, j.task_binding) || !same(await this.run(c, old.initial!), replayRun(old.initial!, old.events).run))
+        clientFail('delivery_reconciliation', 'Completed Journal candidate or CP replay disagrees; history retained');
+    }
+  }
   async retryDelivery() {
     const c = this.context(); deliveryPolicy(c.manifest.profile.ref);
     return locked(c.path + '.lock', async () => {

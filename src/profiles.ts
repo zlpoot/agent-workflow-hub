@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 export const HUB_REPO = 'zlpoot/agent-workflow-hub';
 export const FUTURE_REPO = 'zlpoot/future-ui';
 export const WEBSKILL_REPO = 'zlpoot/webskill';
@@ -35,11 +36,14 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
     workflow('c1c', 'codex/c1c-client', 21, ['pnpm check'], null),
     workflow('c1e', 'codex/c1e-dashboard-api-contract', 23, ['pnpm check'], null),
     workflow('c1g', 'codex/c1g-dashboard-readonly', 30, ['pnpm check'], null),
+    workflow('v02-mvp', 'codex/v02-repeatable-workflow', 41, ['pnpm check'], null),
     workflow('v01-mvp', 'codex/v01-mvp', 39, ['pnpm check'], null),
     workflow('c1h', 'codex/c12-trusted-onboarding', 31, ['pnpm check'], null),
     workflow('c1d', 'codex/c1d-builder-adapter', 22, ['pnpm check'], null),
   ]) }),
   Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([
+    workflow('repeatable-docs', 'codex/awh-task-', 0, ['git diff --check origin/main...HEAD'],
+      ['docs/management/awh-repeatable-workflow.md', 'docs/management/awh-v01-acceptance.md'], FUTURE_REPO),
     workflow('mvp-docs', 'codex/awh-v01-acceptance', 88, ['git diff --check origin/main...HEAD'],
       ['docs/management/awh-v01-acceptance.md', '.awh/project.yaml', '.gitignore'], FUTURE_REPO),
     workflow('bootstrap', 'codex/awh-c06-bootstrap', 6,
@@ -73,4 +77,36 @@ export function allowedInstallation(repositories: unknown, total: unknown): repo
     !repositories.every(r => r && typeof r.full_name === 'string')) return false;
   const names = repositories.map(r => r.full_name).sort();
   return ALLOWED_INSTALLATION_SETS.some(set => JSON.stringify(set) === JSON.stringify(names));
+}
+
+// One checked-in template. Caller data can only fill a positive Issue and its canonical branch.
+export const REPEATABLE_VERSION = 'v02-repeatable-v1';
+export const TASK_PREFIX = 'codex/awh-task-';
+export interface TaskBinding {
+  repository: string; issue: number; branch: string; source_sha: string;
+  profile_ref: string; profile_version: string; executor_id: string; machine_id: string; fingerprint: string;
+}
+export function taskBinding(value: Omit<TaskBinding, 'fingerprint'>): TaskBinding {
+  const keys = ['repository','issue','branch','source_sha','profile_ref','profile_version','executor_id','machine_id'];
+  if (!value || Object.keys(value).sort().join(',') !== [...keys].sort().join(',') ||
+      value.repository !== FUTURE_REPO || !Number.isSafeInteger(value.issue) || value.issue < 1 ||
+      value.branch !== TASK_PREFIX + value.issue || !/^[a-f0-9]{40}$/.test(value.source_sha) ||
+      value.profile_ref !== 'future-ui/c1c-acceptance' || value.profile_version !== REPEATABLE_VERSION ||
+      value.executor_id !== 'c1c-future-ui-windows' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value.machine_id))
+    throw new ProfileError('Task binding differs from the trusted Windows Future UI template');
+  const ordered = Object.fromEntries(keys.map(k => [k, value[k as keyof typeof value]]));
+  return Object.freeze({ ...value, fingerprint: createHash('sha256').update(JSON.stringify(ordered)).digest('hex') });
+}
+export function bindWorkflow(selection: BuilderSelection | undefined, binding?: TaskBinding) {
+  const fixed = selectWorkflow(selection);
+  if (fixed.workflow.id !== 'repeatable-docs') {
+    if (binding !== undefined) throw new ProfileError('Fixed workflows do not accept a Task binding');
+    return fixed;
+  }
+  if (!binding || Object.keys(binding).length !== 9) throw new ProfileError('Repeatable delivery requires a frozen Task binding');
+  const { fingerprint, ...data } = binding;
+  const checked = taskBinding(data);
+  if (checked.fingerprint !== fingerprint) throw new ProfileError('Task fingerprint mismatch');
+  return Object.freeze({ profile: fixed.profile, workflow: Object.freeze({ ...fixed.workflow,
+    branch: checked.branch, work_item: Object.freeze({ repo: checked.repository, issue: checked.issue }) }) });
 }

@@ -173,7 +173,7 @@ for(const type of ['REVIEW_STARTED','REVIEW_PASSED','RUN_COMPLETED'])test('MVP '
 });
 test('MVP pending/blocked Review never manufactures completion and changed local source prevents sync',async t=>{
   const h=await harness(t);await deliver(h.client,{...options,holdDraft:true},h.deps);
-  const facts={...observed(h),merged:true,issue_closed:true,changes_requested:true};const connect=async()=>({...h.builder,readLifecycle:async()=>facts});
+  const facts={...observed(h),merged:true,merge_sha:'c'.repeat(40),issue_closed:true,changes_requested:true};const connect=async()=>({...h.builder,readLifecycle:async()=>facts});
   assert.equal((await h.client.syncDelivery(connect)).run.state,'awaiting_review');
   writeFileSync(join(h.repo,'source.txt'),'new source');await assert.rejects(h.client.syncDelivery(connect),e=>e.code==='exact_head');
 });
