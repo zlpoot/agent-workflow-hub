@@ -4,8 +4,11 @@ import { TextDecoder } from 'node:util';
 import { ProtocolError } from '../protocol/index.js';
 import { ControlPlaneStore } from './store.js';
 import { ControlPlaneError, fail, MAX_BODY_BYTES, safeData, validId, type Authenticate, type Principal } from './security.js';
+import { dashboardRoute } from '../dashboard/routes.js';
+import type { AuthenticateViewer } from '../dashboard/security.js';
 
-export interface ServerOptions { store: ControlPlaneStore; authenticate: Authenticate; poll_interval_ms?: number; tls?: { cert: Buffer; key: Buffer } }
+export interface ServerOptions { store: ControlPlaneStore; authenticate: Authenticate; poll_interval_ms?: number; tls?: { cert: Buffer; key: Buffer };
+  dashboard?: { authenticate: AuthenticateViewer; now?: () => number } }
 function number(value: string | null, max = Number.MAX_SAFE_INTEGER): number {
   if (value === null) return 0;
   if (!/^(0|[1-9][0-9]{0,15})$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > max)
@@ -18,7 +21,8 @@ function query(url: URL, allowed: string[]): void {
 }
 function reply(response: ServerResponse, status: number, data: unknown): void {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
-    ...(status === 401 ? { 'WWW-Authenticate': 'Bearer' } : {}), ...(status >= 400 ? { Connection: 'close' } : {}) });
+    ...(status === 401 && (data as { error?: { code?: string } })?.error?.code === 'unauthorized' ? { 'WWW-Authenticate': 'Bearer' } : {}),
+    ...(status >= 400 ? { Connection: 'close' } : {}) });
   response.end(JSON.stringify(data));
 }
 async function body(request: IncomingMessage): Promise<unknown> {
@@ -85,10 +89,14 @@ export function createControlPlaneServer(options: ServerOptions) {
   };
   const handler = async (request: IncomingMessage, response: ServerResponse) => {
     try {
-      const principal = authenticate(request);
-      if (!principal) fail(401, 'unauthorized', 'A registered Control Plane client credential is required');
       if (!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.length > 2048) fail(400, 'invalid_route', 'Invalid request target');
       const url = new URL(request.url, 'http://control-plane.invalid');
+      if (url.pathname === '/dashboard/v1' || url.pathname.startsWith('/dashboard/v1/')) {
+        if (!options.dashboard) fail(404, 'not_found', 'Dashboard read gateway is not enabled');
+        dashboardRoute(request, response, url, { store, authenticate: options.dashboard.authenticate, now: options.dashboard.now, streams, interval }); return;
+      }
+      const principal = authenticate(request);
+      if (!principal) fail(401, 'unauthorized', 'A registered Control Plane client credential is required');
       const method = request.method;
       if (method === 'GET' && url.pathname === '/v1/events/stream') { openStream(request, response, principal, url); return; }
       const match = /^\/v1\/(projects|executors|work-items|runs)\/([^/]+)(?:\/(heartbeat|events))?$/.exec(url.pathname);

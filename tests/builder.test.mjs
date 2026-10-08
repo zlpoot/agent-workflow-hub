@@ -539,6 +539,7 @@ const workflows = [
   ['hub', 'c1a', HUB_REPO, 'codex/c1a-protocol'],
   ['hub', 'c1b', HUB_REPO, 'codex/c1b-control-plane'],
   ['hub', 'c1c', HUB_REPO, 'codex/c1c-client'],
+  ['hub', 'c1e', HUB_REPO, 'codex/c1e-dashboard-api-contract'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
@@ -962,6 +963,26 @@ test('C1-C fixed workflow binds Hub #21 and preserves exact-head Handoff, scopes
   await assert.rejects(builder.ready(5, head, record, 10), /work item/);
   await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
   assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
+  for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
+  for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh']) assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
+});
+
+test('C1-E fixed workflow binds Hub #23 without bypassing App, scope, exact-head or work-item gates', async () => {
+  const selection = { profile: 'hub', workflow: 'c1e' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c1e', branch: 'codex/c1e-dashboard-api-contract', work_item: { repo: HUB_REPO, issue: 23 },
+    verification_commands: ['pnpm check'], bootstrap_paths: null });
+  const f = fake({ branch: workflow.branch, installed: selectedSets[3] });
+  const builder = await connectBuilder(f.deps, selection);
+  const handoff = structuredClone(record); handoff.work_item.issue = 23;
+  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
+  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
+  const wrongChecks = structuredClone(handoff); wrongChecks.verification.checks[0].command = 'arbitrary command';
+  await assert.rejects(builder.ready(5, head, wrongChecks, 10), /verification commands/);
+  const tokens = f.requests.filter(request => request.url.endsWith('/access_tokens')).map(request => JSON.parse(request.body));
+  assert.deepEqual(tokens[0], { permissions: inspectionPermissions });
+  assert.deepEqual(tokens[1], { repositories: ['agent-workflow-hub'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
   for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
   for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh']) assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
 });

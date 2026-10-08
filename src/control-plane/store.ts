@@ -6,6 +6,15 @@ import { executorAccess, fail, MAX_PAYLOAD_BYTES, projectAccess, safeData, type 
 export const DATABASE_VERSION = 2;
 type Row = Record<string, string | number | bigint | Uint8Array | null>;
 export interface StoredEvent { cursor: number; event: Event }
+export interface DashboardReadView {
+  cursor: number;
+  projects: Project[];
+  policies: ProfilePolicy[];
+  runs: Run[];
+  work_items: WorkItem[];
+  executors: { executor: Executor; client?: ClientMetadata; last_seen: string }[];
+  events: StoredEvent[];
+}
 const decode = <T>(row: Row, column = 'record'): T => JSON.parse(String(row[column])) as T;
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
@@ -198,6 +207,32 @@ export class ControlPlaneStore {
     });
   }
   latestCursor(): number { return Number(this.#db.prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events').get()!.cursor); }
+  // One bounded SQLite read transaction; never seeds policies, mutates history or exposes client owners.
+  dashboardReadView(principal: Pick<Principal, 'project_ids'>): DashboardReadView {
+    const scope = principal.project_ids;
+    if (!scope.length || scope.length > 64) fail(403, 'forbidden', 'Explicit viewer project scope is required');
+    const placeholders = scope.map(() => '?').join(',');
+    const bounded = (sql: string, args: string[], limit: number): Row[] => {
+      const rows = this.#db.prepare(sql + ' LIMIT ?').all(...args, limit + 1);
+      if (rows.length > limit) fail(503, 'projection_limit', 'Dashboard projection exceeds the local MVP limit');
+      return rows;
+    };
+    this.#db.exec('BEGIN');
+    try {
+      const cursor = this.latestCursor();
+      const projects = bounded(`SELECT record FROM projects WHERE id IN (${placeholders}) ORDER BY id`, [...scope], 64).map(row => decode<Project>(row));
+      const runs = bounded(`SELECT record FROM runs WHERE project_id IN (${placeholders}) ORDER BY id`, [...scope], 1000).map(row => decode<Run>(row));
+      const workItems = bounded(`SELECT record FROM work_items WHERE project_id IN (${placeholders}) ORDER BY id`, [...scope], 1000).map(row => decode<WorkItem>(row));
+      const executors = bounded(`SELECT DISTINCT e.* FROM executors e JOIN runs r ON r.executor_id = e.id WHERE r.project_id IN (${placeholders}) ORDER BY e.id`, [...scope], 1000)
+        .map(row => ({ executor: decode<Executor>(row), ...this.metadata(String(row.id)), last_seen: String(row.last_seen) }));
+      const events = bounded(`SELECT e.cursor, e.record FROM events e JOIN runs r ON r.id = e.run_id WHERE r.project_id IN (${placeholders}) ORDER BY e.cursor`, [...scope], 10000)
+        .map(row => ({ cursor: Number(row.cursor), event: decode<Event>(row) }));
+      const policies = bounded(`SELECT DISTINCT p.record FROM profiles p JOIN projects j ON j.id IN (${placeholders}) AND p.ref = json_extract(j.record, '$.profile_ref') ORDER BY p.ref, p.version`, [...scope], 256)
+        .map(row => decode<ProfilePolicy>(row));
+      this.#db.exec('COMMIT');
+      return { cursor, projects, policies, runs, work_items: workItems, executors, events };
+    } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+  }
   streamEvents(principal: Principal, after: number, limit = 100): StoredEvent[] {
     const placeholders = principal.project_ids.map(() => '?').join(',');
     if (!placeholders) return [];
