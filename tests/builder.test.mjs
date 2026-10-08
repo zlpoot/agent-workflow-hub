@@ -538,6 +538,7 @@ const workflows = [
   ['hub', 'c07-r3', HUB_REPO, 'codex/c07-r3-scoped-helper'],
   ['hub', 'c1a', HUB_REPO, 'codex/c1a-protocol'],
   ['hub', 'c1b', HUB_REPO, 'codex/c1b-control-plane'],
+  ['hub', 'c1c', HUB_REPO, 'codex/c1c-client'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
@@ -938,6 +939,23 @@ test('C1-B fixed workflow binds Hub #20 and preserves exact-head Handoff, scopes
   assert.deepEqual(workflow, { id: 'c1b', branch: 'codex/c1b-control-plane', work_item: { repo: HUB_REPO, issue: 20 },
     verification_commands: ['pnpm check'], bootstrap_paths: null });
   const handoff = structuredClone(record); handoff.work_item.issue = 20;
+  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
+  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
+  const builder = await connectBuilder(f.deps, selection);
+  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
+  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
+  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
+  for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
+  for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh']) assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
+});
+
+test('C1-C fixed workflow binds Hub #21 and preserves exact-head Handoff, scopes and forbidden operations', async () => {
+  const selection = { profile: 'hub', workflow: 'c1c' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c1c', branch: 'codex/c1c-client', work_item: { repo: HUB_REPO, issue: 21 },
+    verification_commands: ['pnpm check'], bootstrap_paths: null });
+  const handoff = structuredClone(record); handoff.work_item.issue = 21;
   const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
   const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
   const builder = await connectBuilder(f.deps, selection);

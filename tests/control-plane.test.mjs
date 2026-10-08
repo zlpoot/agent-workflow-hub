@@ -63,13 +63,37 @@ test('SQLite migration is repeatable, versioned, and preserves every registry an
   assert.equal(restored.getRun(principal, sample.run.id).state, 'running');
   assert.deepEqual(restored.listEvents(principal, sample.run.id), [{ cursor: appended.cursor, event: event() }]);
   assert.equal(restored.append(principal, sample.run.id, event()).disposition, 'idempotent');
-  const raw = new DatabaseSync(db.path); assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 1); raw.close();
+  const raw = new DatabaseSync(db.path); assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 2); raw.close();
 });
 test('future SQLite versions fail closed without downgrading the database', t => {
   const db = database(t); db.store.close();
-  const raw = new DatabaseSync(db.path); raw.exec('PRAGMA user_version = 2'); raw.close();
+  const raw = new DatabaseSync(db.path); raw.exec('PRAGMA user_version = 3'); raw.close();
   assert.throws(() => db.open(), e => e.code === 'database_version');
+  const check = new DatabaseSync(db.path); assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3); check.close();
+});
+test('C1-B version 1 migrates to version 2 without replacing existing records or Events', t => {
+  const db = database(t); populate(db.store); db.store.append(principal, sample.run.id, event()); db.store.close();
+  const raw = new DatabaseSync(db.path); raw.exec('DROP TABLE executor_clients; PRAGMA user_version = 1'); raw.close();
+  const restored = db.open(); assert.deepEqual(restored.getProject(principal, sample.project.id), sample.project);
+  assert.equal(restored.getRun(principal, sample.run.id).state, 'running'); assert.equal(restored.listEvents(principal, sample.run.id).length, 1);
+  assert.equal(restored.listExecutors(principal)[0].client, undefined);
+  const metadata = { schema_version: '1.0', executor_type: 'codex', machine_name: 'mini', arch: 'arm64', client_version: '0.1.0' };
+  assert.deepEqual(restored.registerExecutor(principal, sample.executor, metadata).client, metadata); restored.close();
+  const again = db.open(); assert.deepEqual(again.listExecutors(principal)[0].client, metadata);
   const check = new DatabaseSync(db.path); assert.equal(check.prepare('PRAGMA user_version').get().user_version, 2); check.close();
+});
+test('optional Client metadata is closed, owner scoped, upgradeable and returned by heartbeat', async t => {
+  const h = await httpService(t, false), client = { schema_version: '1.0', executor_type: 'codex', machine_name: 'mini', arch: 'arm64', client_version: '0.1.0' };
+  assert.equal((await h.call('/v1/executors/register', 'POST', sample.executor)).status, 201);
+  const registered = await h.call('/v1/executors/register', 'POST', { executor: sample.executor, client }); assert.equal(registered.status, 200); assert.deepEqual(registered.body.client, client);
+  for (const changed of [{ ...client, token: 'hidden' }, { ...client, arch: '' }, { ...client, machine_name: 'invalid name' }, { ...client, client_version: 'latest' }])
+    assert.equal((await h.call('/v1/executors/register', 'POST', { executor: sample.executor, client: changed })).status, 400);
+  assert.equal((await h.call('/v1/executors/register', 'POST', { executor: sample.executor, client, arbitrary: true })).status, 400);
+  assert.equal((await h.call('/v1/executors/register', 'POST', { executor: sample.executor, client }, h.windows.token)).status, 403);
+  const upgraded = { ...client, client_version: '0.1.1' }; assert.deepEqual((await h.call('/v1/executors/register', 'POST', { executor: sample.executor, client: upgraded })).body.client, upgraded);
+  assert.deepEqual((await h.call(`/v1/executors/${sample.executor.id}/heartbeat`, 'POST', {})).body.client, upgraded);
+  assert.deepEqual((await h.call('/v1/executors')).body.executors[0].client, upgraded);
+  assert.equal((await h.call('/v1/executors', 'GET', undefined, h.windows.token)).body.executors.length, 0);
 });
 test('trusted Profile versions are immutable and new versions preserve old Run bindings', t => {
   const db = database(t); populate(db.store);

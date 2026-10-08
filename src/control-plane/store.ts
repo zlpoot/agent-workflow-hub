@@ -1,9 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
-import { appendEvent, assertEntity, validateBindings } from '../protocol/index.js';
+import { appendEvent, assertEntity, assertClientMetadata, validateBindings, type ClientMetadata } from '../protocol/index.js';
 import type { Event, Executor, ProfilePolicy, Project, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
 import { executorAccess, fail, MAX_PAYLOAD_BYTES, projectAccess, safeData, type Principal } from './security.js';
 
-export const DATABASE_VERSION = 1;
+export const DATABASE_VERSION = 2;
 type Row = Record<string, string | number | bigint | Uint8Array | null>;
 export interface StoredEvent { cursor: number; event: Event }
 const decode = <T>(row: Row, column = 'record'): T => JSON.parse(String(row[column])) as T;
@@ -30,7 +30,7 @@ export class ControlPlaneStore {
       this.transaction(() => {
         const version = Number(this.#db.prepare('PRAGMA user_version').get()!.user_version);
         if (version > DATABASE_VERSION) fail(500, 'database_version', 'Database schema is newer than this server');
-        if (version !== 0 && version !== DATABASE_VERSION) fail(500, 'database_version', 'Unsupported database schema');
+        if (version !== 0 && version !== 1 && version !== DATABASE_VERSION) fail(500, 'database_version', 'Unsupported database schema');
         if (version === 0) this.#db.exec(`
           CREATE TABLE profiles (ref TEXT NOT NULL, version TEXT NOT NULL, record TEXT NOT NULL CHECK(json_valid(record)), PRIMARY KEY(ref, version)) STRICT;
           CREATE TABLE projects (id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
@@ -48,6 +48,10 @@ export class ControlPlaneStore {
           CREATE TRIGGER profiles_no_update BEFORE UPDATE ON profiles BEGIN SELECT RAISE(ABORT, 'Profile versions are immutable'); END;
           CREATE TRIGGER profiles_no_delete BEFORE DELETE ON profiles BEGIN SELECT RAISE(ABORT, 'Profile versions are immutable'); END;
           PRAGMA user_version = 1;
+        `);
+        if (version < 2) this.#db.exec(`
+          CREATE TABLE executor_clients (executor_id TEXT PRIMARY KEY REFERENCES executors(id), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          PRAGMA user_version = 2;
         `);
         for (const policy of policies) {
           const versions = this.#db.prepare('SELECT record FROM profiles WHERE ref = ?').all(policy.ref);
@@ -99,20 +103,27 @@ export class ControlPlaneStore {
     const project = this.getProject(principal, projectId);
     return this.#db.prepare('SELECT record FROM profiles WHERE ref = ? ORDER BY version').all(project.profile_ref).map(row => decode<ProfilePolicy>(row));
   }
-  registerExecutor(principal: Principal, input: unknown) {
+  private metadata(id: string): { client?: ClientMetadata } {
+    const row = this.#db.prepare('SELECT record FROM executor_clients WHERE executor_id = ?').get(id);
+    return row ? { client: decode<ClientMetadata>(row) } : {};
+  }
+  registerExecutor(principal: Principal, input: unknown, client?: unknown) {
     const executor = entity('executor', input);
+    if (client !== undefined) { safeData(client); assertClientMetadata(client); }
     executorAccess(principal, executor.id);
     return this.transaction(() => {
       const old = this.#db.prepare('SELECT * FROM executors WHERE id = ?').get(executor.id);
       if (old && (old.client_id !== principal.id || canonical(decode(old)) !== canonical(executor)))
         fail(409, 'identity_conflict', 'Executor identity or owner cannot be rebound');
       if (!old) this.#db.prepare('INSERT INTO executors VALUES (?, ?, ?, ?)').run(executor.id, principal.id, this.now(), JSON.stringify(executor));
-      return { executor, last_seen: String((old ?? this.row('executors', executor.id)).last_seen), disposition: old ? 'idempotent' : 'created' };
+      if (client !== undefined) this.#db.prepare('INSERT INTO executor_clients VALUES (?, ?) ON CONFLICT(executor_id) DO UPDATE SET record = excluded.record')
+        .run(executor.id, JSON.stringify(client));
+      return { executor, ...this.metadata(executor.id), last_seen: String((old ?? this.row('executors', executor.id)).last_seen), disposition: old ? 'idempotent' : 'created' };
     });
   }
   listExecutors(principal: Principal) {
     return this.#db.prepare('SELECT * FROM executors WHERE client_id = ? ORDER BY id').all(principal.id)
-      .filter(row => principal.executor_ids.includes(String(row.id))).map(row => ({ executor: decode<Executor>(row), last_seen: String(row.last_seen) }));
+      .filter(row => principal.executor_ids.includes(String(row.id))).map(row => ({ executor: decode<Executor>(row), ...this.metadata(String(row.id)), last_seen: String(row.last_seen) }));
   }
   heartbeat(principal: Principal, id: string) {
     executorAccess(principal, id);
@@ -121,7 +132,7 @@ export class ControlPlaneStore {
       if (row.client_id !== principal.id) fail(403, 'forbidden', 'Executor belongs to another client');
       const lastSeen = [this.now(), String(row.last_seen)].sort().at(-1)!;
       this.#db.prepare('UPDATE executors SET last_seen = ? WHERE id = ?').run(lastSeen, id);
-      return { executor: decode<Executor>(row), last_seen: lastSeen };
+      return { executor: decode<Executor>(row), ...this.metadata(id), last_seen: lastSeen };
     });
   }
   registerWorkItem(principal: Principal, input: unknown) {

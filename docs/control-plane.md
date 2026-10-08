@@ -16,6 +16,16 @@ pnpm control-plane --database <absolute-sqlite-file> --config <absolute-trusted-
 
 SIGINT/SIGTERM 关闭 SSE/HTTP 后关闭数据库。启动/请求错误不回显 credential/config 或原始 SQLite 异常。不兼容 schema version 时停止，不自动降级。TLS、公网和生产部署不在 #20 范围。
 
+## C1-C 可选原生 HTTPS
+
+#21 按 PR #26 Owner 指令新增 `--https-config <absolute-external-json>`，在同一个进程/同一个 `ControlPlaneStore` 上增加 HTTPS listener；原 HTTP 始终 loopback。配置 closed `{host,port,certificate_file,private_key_file}`，显式 private IPv4（例如 192.168.2.5:8443），不接受 wildcard、公网 IP、DNS 自动解析或 LAN HTTP。三种 TLS 文件均 bounded regular、仓库外；private key 在 Unix 必须 owner-only，Windows provisioning 使用 owner/SYSTEM ACL。检查 leaf 非 CA、当前有效、真实 IP SAN 与 key 匹配；Node 原生 HTTPS 至少 TLS 1.2，Registry/auth/body/SSE 边界完全相同。任一 listener 启动失败则关闭全部 listener/store，不留下部分服务。
+
+OS provisioning 为一次性人工设置，证书或防火墙验证未完成前不得启动 LAN listener。`scripts/c1c-https-certificate.ps1 -Directory <new-external-private-directory>` 使用 Windows PKI 创建独立非导出 CA key 和带 iPAddress 192.168.2.5 SAN 的 leaf；仅在 private directory 写 leaf key，不输出秘密、不导入系统 trust。public CA fingerprint 经可信渠道核对，Client 使用仓库外 per-endpoint CA。[Microsoft PKI 文档](https://learn.microsoft.com/en-us/powershell/module/pki/new-selfsignedcertificate?view=windowsserver2025-ps) 描述 SAN/签发；[Node HTTPS 文档](https://nodejs.org/api/https.html) 描述请求级 CA 与默认链/主机校验。
+
+管理员执行 `scripts/c1c-https-firewall.ps1 -NodeExecutable <actual-node.exe> -ProofPath <external-proof.json>`：仅 Human 指定的可信 LAN 192.168.2.5 接口，不修改现有网络 profile；在全部 profile 上，8443 入站 allow 只限 192.168.2.3/指定 Node binary；显式 block 全部其他 IPv4 来源（覆盖已有宽 allow），读取 ActiveStore 与 filter 核对有效地址/port/action/profile/program。无第三方 proxy、SSH、service 安装或网络信任类别变更。IPv6/wildcard listener 不存在；本机 loopback 验收保持 4310。管理员规则 proof 仍不等于实际 Mac 连接 PASS。
+
+启动示例：`node dist/control-plane-cli.js --database <existing-runtime.sqlite> --config <existing-trusted.json> --port 4310 --https-config <external-https.json>`。保留已接受 Windows Run/machine/token/Registry，同一库继续 append；不创建第二 DB、不直接复制在线 WAL 文件、不 cutover。完整跨主机备份/恢复/稳定 service identity 和 Client pending session 兼容迁移留给 #27；[Client 迁移前置 gate](client.md) 明确禁止在它完成前改址。
+
 本地受信 config 只有 `clients` 与 `profiles`，不在 HTTP 上编辑。`profiles` 为 C1-A `ProfilePolicy[]`；`clients` 每项如下（hash 是须替换的占位符）：
 
 ```json
@@ -58,7 +68,7 @@ Windows 上 mode 不替代 ACL，目录应继承仅负责人可读 ACL。使用�
 | GET `/v1/projects` | 无 | scoped `projects` |
 | GET `/v1/projects/:id` | 无 | `project` |
 | GET `/v1/profiles` | 必填 `project_id` | 已绑定项目的受信 `profiles` 版本列表，只读 |
-| POST `/v1/executors/register` | Executor | `executor`, server `last_seen`, `disposition` |
+| POST `/v1/executors/register` | Executor，或 C1-C `{executor,client}` | `executor`, optional `client`, server `last_seen`, `disposition` |
 | GET `/v1/executors` | 无 | 本 Client scoped `executors` / `last_seen` |
 | POST `/v1/executors/:id/heartbeat` | `{}` | server `last_seen`, `executor` |
 | POST `/v1/work-items/register` | Work Item | `work_item`, `disposition` |
@@ -78,7 +88,9 @@ Run 创建通过 C1-A `validateBindings`：已注册 Project、受信 exact Prof
 
 ## 持久化与 Event
 
-SQLite `PRAGMA user_version=1`。首次迁移在一个 `BEGIN IMMEDIATE` 事务建表/index/trigger 并设置版本；重复启动不重建，未来版本 fail-closed。启用 foreign keys、WAL、`synchronous=FULL`、5s busy timeout。Profile seed 原子应用，不把 Client credential/hash 或 App key/token 存入 DB。DB/WAL/SHM 有 gitignore，真实 runtime 文件建议存仓库外。
+SQLite `PRAGMA user_version=2`。首次迁移在一个 `BEGIN IMMEDIATE` 事务建表/index/trigger 并设置版本；C1-B v1 升到 v2 只新增 `executor_clients` metadata 表，保留 Registry/Run/Event/owner/last-seen。重复启动不重建，未来版本 fail-closed。启用 foreign keys、WAL、`synchronous=FULL`、5s busy timeout。Profile seed 原子应用，不把 Client credential/hash 或 App key/token 存入 DB。DB/WAL/SHM 有 gitignore，真实 runtime 文件建议存仓库外。
+
+C1-C metadata DTO 为 closed `{schema_version:"1.0",executor_type,machine_name,arch,client_version}`，不放进既有 closed C1-A Executor entity。类型、hostname、arch 和 semver 有格式约束；safeData 拒绝凭据/复杂 JSON。Metadata 仅当前 owner 可随 register 更新（例如升级 Client version），不会改变 Executor/machine/owner 身份。GET executors 与 heartbeat 返回已持久化的 optional client。旧直接 Executor 注册、旧 DB 及无 metadata 的 heartbeat 兼容，last-seen 仍由 server 生成。此扩展不开放 Profile 上传或凭据签发。
 
 Event append 在 `BEGIN IMMEDIATE` 下读取 initial/history，调用 C1-A `appendEvent`，插入 Event 并更新 Run projection，全部成功才 COMMIT。投影写失败时 Event/cursor 一起回滚。独立 SQLite 连接也争用写锁；重启恢复 projection/history，Client 可重发未确认 Event。
 

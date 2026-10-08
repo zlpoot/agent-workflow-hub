@@ -1,12 +1,16 @@
 # agent-workflow-hub
 
+## C1-C Client
+
+Issue [#21](https://github.com/zlpoot/agent-workflow-hub/issues/21) 增加可独立安装的 `@zlpoot/awh-client` CLI：minimal Manifest、真实 Git origin binding、稳定 machine identity、专用 CP 配置，以及 register/start/event/status/finish。`pnpm client:pack` 生成包含运行依赖的 tarball，消费者在仓库外安装，无需 Hub checkout。安装、固定命令、显式重试、原生 verified HTTPS 和真实双端验收边界见 [Client 规范](docs/client.md)。`deliver` 等待 #22；双平台 PASS 必须由同一个 CP 的实际两端证据证明。
+
 ## C1-B Control Plane
 
-Issue [#20](https://github.com/zlpoot/agent-workflow-hub/issues/20) 增加本地 HTTP REST/SSE + SQLite runtime service：Project/Profile/Executor Registry、Work Item/Run/Event 持久化、原子 append、重启恢复和独立注册 Client 认证。启动、受信配置、API、cursor/权限边界及限制见 [Control Plane 规范](docs/control-plane.md)。服务显式启动，固定监听 loopback，不连接 GitHub 或执行项目命令；不包含 #21 Client、Dashboard 或远程调度。所有 runtime 结果 `authority_verified=false`，GitHub 仍保存长期开发事实。
+Issue [#20](https://github.com/zlpoot/agent-workflow-hub/issues/20) 增加本地 HTTP REST/SSE + SQLite runtime service：Project/Profile/Executor Registry、Work Item/Run/Event 持久化、原子 append、重启恢复和独立注册 Client 认证。启动、受信配置、API、cursor/权限边界及限制见 [Control Plane 规范](docs/control-plane.md)。服务显式启动，固定监听 loopback，不连接 GitHub 或执行项目命令；不包含 Dashboard 或远程调度。所有 runtime 结果 `authority_verified=false`，GitHub 仍保存长期开发事实。
 
 ## C1-A Protocol
 
-Issue [#19](https://github.com/zlpoot/agent-workflow-hub/issues/19) 的版本化 Project / Profile Policy / Executor / Work Item / Run / Event 模型位于 `src/protocol/`。独立 JSON Schema、纯函数校验、状态与 sequence/idempotency 规则、v0.1 Handoff 映射及 WebSkill / Future UI fixture 见 [Protocol 规范](docs/protocol.md)。Manifest 只绑定身份，不授予权限；所有结果 `authority_verified=false`。C1-B 复用该协议；Client 与 Dashboard 后续单独交付。
+Issue [#19](https://github.com/zlpoot/agent-workflow-hub/issues/19) 的版本化 Project / Profile Policy / Executor / Work Item / Run / Event 模型位于 `src/protocol/`。独立 JSON Schema、纯函数校验、状态与 sequence/idempotency 规则、v0.1 Handoff 映射及 WebSkill / Future UI fixture 见 [Protocol 规范](docs/protocol.md)。Manifest 只绑定身份，不授予权限；所有结果 `authority_verified=false`。C1-B/C1-C 复用该协议；Dashboard 后续单独交付。
 
 既有基线 Issue [#16](https://github.com/zlpoot/agent-workflow-hub/issues/16)：C0.7-R3 安全兼容 exact GitHub-host scoped credential helper，仅修改 AWH。#19 不改变 WebSkill frozen candidate、live acceptance 或其他 Human Gate；C1 #3 继续暂停，agent-desktop 保持 dormant。
 
