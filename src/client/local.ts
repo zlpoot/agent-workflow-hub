@@ -25,7 +25,7 @@ function git(root: string, args: string[], optional = false): string {
   Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
     GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: root.replaceAll('\\', '/'),
     GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '', GIT_TERMINAL_PROMPT: '0' });
-  const r = spawnSync('git', ['-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, ...args], { cwd: root, env, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true });
+  const r = spawnSync('git', ['-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, '-c', 'core.fsmonitor=false', ...args], { cwd: root, env, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true });
   if (optional && r.status === 1 && !r.error) return '';
   if (r.error || r.status !== 0) return clientFail('git', 'Read-only Git identity inspection failed (details suppressed)');
   return r.stdout.trim();
@@ -40,13 +40,14 @@ export function inspectRepository(cwd = process.cwd()): RepositoryIdentity {
   const root = realpathSync(git(candidate, ['rev-parse', '--show-toplevel']));
   if (root !== candidate) clientFail('git', 'Git root does not match the real worktree root');
   const names = git(root, ['config', '--local', '--no-includes', '--name-only', '--list']);
-  if (names.split('\n').some(key => /^(?:include|url\.|extensions\.worktreeconfig$)/i.test(key))) clientFail('origin', 'Included, worktree-overridden or rewritten Git origin configuration is unsupported');
+  if (names.split('\n').some(key => /^(?:include|url\.|filter\.|extensions\.worktreeconfig$)/i.test(key))) clientFail('origin', 'Included, rewritten, filtered or worktree-overridden Git configuration is unsupported');
   const origin = git(root, ['config', '--local', '--no-includes', '--get-all', 'remote.origin.url']);
   const match = /^(?:git@github\.com:|https:\/\/github\.com\/)([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(origin);
   if (!match) clientFail('origin', 'A single canonical GitHub origin is required (value suppressed)');
   const sha = git(root, ['rev-parse', '--verify', 'HEAD']); if (!/^[a-f0-9]{40}$/.test(sha)) clientFail('git', 'A committed exact source HEAD is required');
   const branch = git(root, ['symbolic-ref', '-q', '--short', 'HEAD'], true);
-  return { root, repository: match[1]!, sha, ref: branch || sha, dirty: !!git(root, ['status', '--porcelain']) };
+  // Do not spawn child Git processes in submodule worktrees with independent executable config.
+  return { root, repository: match[1]!, sha, ref: branch || sha, dirty: !!git(root, ['status', '--porcelain', '--ignore-submodules=all']) };
 }
 function regular(path: string, max: number): Buffer {
   const st = lstatSync(path); if (!st.isFile() || st.isSymbolicLink() || st.size > max) clientFail('file', 'Expected a bounded regular file');

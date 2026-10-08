@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,6 +99,17 @@ test('dedicated explicit off-project config fails closed on plaintext LAN, crede
   h.updateConfig({ state_directory: join(h.repo,'state') }); await assert.rejects(h.client.register(),errorCode('configuration')); h.updateConfig(valid);
   writeFileSync(valid.credential_file,'github_pat_test_only', { mode: 0o600 }); await assert.rejects(h.client.register(),errorCode('credential'));
   assert.equal(h.requests,0); assert.equal(h.store.listProjects(h.principal).length,0);
+});
+
+test('read-only Git inspection never executes configured fsmonitor or filter drivers', t => {
+  const base = temporary(t), repo = consumer(base), marker = join(repo,'executed.marker'), script = join(repo,'driver.cjs');
+  writeFileSync(script,"require('node:fs').writeFileSync(require('node:path').join(__dirname,'executed.marker'),'executed');process.stdout.write(require('node:fs').readFileSync(0));");
+  const quote = path => "'" + path.replaceAll('\\','/').replaceAll("'","'\\''") + "'";
+  const driver = quote(process.execPath) + ' ' + quote(script);
+  git(repo,['config','core.fsmonitor',driver]);
+  assert.equal(inspectRepository(repo).repository,'zlpoot/webskill'); assert.equal(existsSync(marker),false);
+  git(repo,['config','filter.fixture.clean',driver]);writeFileSync(join(repo,'.gitattributes'),'source.txt filter=fixture\n');writeFileSync(join(repo,'source.txt'),'modified fixture\n');
+  assert.throws(() => inspectRepository(repo),errorCode('origin')); assert.equal(existsSync(marker),false);
 });
 
 test('native Client registers metadata/heartbeat and reports exact source, ordered Events, status and explicit failed finish', async t => {

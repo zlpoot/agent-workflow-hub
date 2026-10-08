@@ -28,7 +28,7 @@ profile:
   ref: "webskill/bootstrap"
 ```
 
-这是 C1-A closed Manifest 的六行 YAML 子集，支持安全 plain scalar 或 JSON 双引号字符串，拒绝额外字段、重复、alias、tag、复杂 YAML、超过 4 KiB 或 symlink 文件。已存在且语义相同则保持文件；冲突不会覆盖。每次操作重新核对 canonical Git root、真实 local origin、HEAD/ref。origin 仅支持单一 canonical GitHub HTTPS/SSH URL；拒绝 credential URL、includes、URL rewrite 和 worktree config override。Git 操作只读，禁用 hooks/global/system config/credential helper，无 shell 或 Git 参数透传，不联网。dirty 只上报 boolean，不上报本地文件路径。
+这是 C1-A closed Manifest 的六行 YAML 子集，支持安全 plain scalar 或 JSON 双引号字符串，拒绝额外字段、重复、alias、tag、复杂 YAML、超过 4 KiB 或 symlink 文件。已存在且语义相同则保持文件；冲突不会覆盖。每次操作重新核对 canonical Git root、真实 local origin、HEAD/ref。origin 仅支持单一 canonical GitHub HTTPS/SSH URL；拒绝 credential URL、includes、URL rewrite、local filter driver 和 worktree config override。Git 操作只读，禁用 hooks/fsmonitor/global/system config/credential helper，无 shell 或 Git 参数透传，不联网；status 忽略 submodule，避免在子工作区执行独立配置的 Git。source_dirty 只反映当前根工作区（不含 submodule），只上报 boolean，不上报本地文件路径。
 
 Manifest 只请求身份绑定。Policy 来自 CP trusted registry，不从项目加载或上传，亦不执行 Policy 中的命令。`start --issue` 绑定当前项目仓库中的 Issue reference，不创建/读取 GitHub Issue。source 是真实 HEAD/ref，不切分支、不 commit/reset/clean、不运行产品命令。
 
