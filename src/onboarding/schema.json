@@ -1,0 +1,657 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-workflow-hub.invalid/onboarding/v1",
+  "$defs": {
+    "ProjectRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "repository",
+        "profile_ref",
+        "profile_version"
+      ],
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+          "maxLength": 200
+        },
+        "profile_ref": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$",
+          "maxLength": 128
+        },
+        "profile_version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        }
+      }
+    },
+    "Decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision"
+      ],
+      "properties": {
+        "decision": {
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        }
+      }
+    },
+    "Empty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "InvitationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "repository",
+        "profile_ref",
+        "profile_version",
+        "client_id",
+        "executor_id",
+        "executor_type",
+        "machine_id",
+        "platform",
+        "service_id",
+        "endpoint",
+        "ca_sha256",
+        "delivery_id"
+      ],
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+          "maxLength": 200
+        },
+        "profile_ref": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$",
+          "maxLength": 128
+        },
+        "profile_version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "client_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "executor_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "executor_type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "machine_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "platform": {
+          "enum": [
+            "windows",
+            "macos",
+            "linux"
+          ]
+        },
+        "service_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "ca_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivery_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        }
+      }
+    },
+    "ClaimRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitation_id",
+        "project_id",
+        "repository",
+        "profile_ref",
+        "profile_version",
+        "client_id",
+        "executor_id",
+        "executor_type",
+        "machine_id",
+        "platform",
+        "service_id",
+        "endpoint",
+        "ca_sha256",
+        "git_root_verified",
+        "user_confirmed"
+      ],
+      "properties": {
+        "invitation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+          "maxLength": 200
+        },
+        "profile_ref": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$",
+          "maxLength": 128
+        },
+        "profile_version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "client_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "executor_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "executor_type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+        },
+        "machine_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "platform": {
+          "enum": [
+            "windows",
+            "macos",
+            "linux"
+          ]
+        },
+        "service_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "ca_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "git_root_verified": {
+          "const": true
+        },
+        "user_confirmed": {
+          "const": true
+        }
+      }
+    },
+    "RequestView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "project_id",
+        "repository",
+        "profile_ref",
+        "profile_version",
+        "state",
+        "created_at",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+          "maxLength": 200
+        },
+        "profile_ref": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$",
+          "maxLength": 128
+        },
+        "profile_version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    },
+    "InvitationView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "project_id",
+        "state",
+        "expires_at",
+        "attempts_remaining",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "state": {
+          "enum": [
+            "active",
+            "claimed",
+            "revoked",
+            "expired",
+            "locked"
+          ]
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "attempts_remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    },
+    "ClaimView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_id",
+        "project_id",
+        "state",
+        "git_identity",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "client_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "state": {
+          "enum": [
+            "active"
+          ]
+        },
+        "git_identity": {
+          "const": "client_local_claim"
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    },
+    "Nonce": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nonce",
+        "expires_at",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    },
+    "Check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "code"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "passed",
+            "blocked",
+            "not_checked"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z_]+$"
+        }
+      }
+    },
+    "Diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "state",
+        "binding",
+        "policy",
+        "checks",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "state": {
+          "enum": [
+            "blocked",
+            "not_checked"
+          ]
+        },
+        "binding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "branch",
+                "verification_commands"
+              ],
+              "properties": {
+                "branch": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "verification_commands": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "maxItems": 16
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enrollment",
+            "client",
+            "git_identity",
+            "branch_verification",
+            "provider_app_permissions"
+          ],
+          "properties": {
+            "enrollment": {
+              "$ref": "#/$defs/Check"
+            },
+            "client": {
+              "$ref": "#/$defs/Check"
+            },
+            "git_identity": {
+              "$ref": "#/$defs/Check"
+            },
+            "branch_verification": {
+              "$ref": "#/$defs/Check"
+            },
+            "provider_app_permissions": {
+              "$ref": "#/$defs/Check"
+            }
+          }
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    },
+    "AuditEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cursor",
+        "at",
+        "actor",
+        "action",
+        "target",
+        "project_id",
+        "repository",
+        "result",
+        "code"
+      ],
+      "properties": {
+        "cursor": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "action": {
+          "type": "string",
+          "pattern": "^[a-z_]+$"
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repository": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "enum": [
+            "accepted",
+            "denied"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z_]+$"
+        }
+      }
+    },
+    "Audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entries",
+        "next_cursor",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/AuditEntry"
+          }
+        },
+        "next_cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z_]+$"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 160
+            }
+          }
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    }
+  }
+}

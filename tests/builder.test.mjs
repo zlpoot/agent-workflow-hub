@@ -541,6 +541,7 @@ const workflows = [
   ['hub', 'c1c', HUB_REPO, 'codex/c1c-client'],
   ['hub', 'c1e', HUB_REPO, 'codex/c1e-dashboard-api-contract'],
   ['hub', 'c1g', HUB_REPO, 'codex/c1g-dashboard-readonly'],
+  ['hub', 'c1h', HUB_REPO, 'codex/c12-trusted-onboarding'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
@@ -1005,6 +1006,52 @@ test('C1-G fixed workflow binds Hub #30 with single-repository App scope and rej
   assert.deepEqual(tokens[1], { repositories: ['agent-workflow-hub'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
   for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
   for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh']) assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
+});
+
+test('C1-H fixed workflow binds offline Hub #31 and refuses work-item, head, checks and target overrides', async () => {
+  const selection = { profile: 'hub', workflow: 'c1h' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c1h', branch: 'codex/c12-trusted-onboarding',
+    work_item: { repo: HUB_REPO, issue: 31 }, verification_commands: ['pnpm check'], bootstrap_paths: null });
+  const f = fake({ branch: workflow.branch, installed: selectedSets[3] });
+  const builder = await connectBuilder(f.deps, selection);
+  const handoff = structuredClone(record); handoff.work_item.issue = 31;
+  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
+  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
+  const wrongChecks = structuredClone(handoff); wrongChecks.verification.checks[0].command = 'arbitrary command';
+  await assert.rejects(builder.ready(5, head, wrongChecks, 10), /verification commands/);
+  assert.equal(f.requests.some(r => r.url.endsWith('/graphql')), false);
+  for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
+  for (const key of ['repo', 'repository', 'base', 'branch', 'work_item', 'verification_commands', 'bootstrap_paths', 'api', 'url', 'git', 'gh'])
+    assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
+  assert.throws(() => { workflow.work_item.issue = 30; });
+  assert.throws(() => { workflow.verification_commands.push('other'); });
+  for (const option of ['--url', '--ref', '--git-args', '--dry-run', '--force', '--repo', '--base', '--branch']) {
+    const child = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url)),
+      '--profile', 'hub', '--workflow', 'c1h', 'push', option, 'untrusted'],
+    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    assert.equal(child.status, 2); assert.match(child.stderr, /Unsupported Builder operation/);
+  }
+});
+
+test('C1-H refuses malformed installation scope and broader write tokens before delivery', async () => {
+  const selection = { profile: 'hub', workflow: 'c1h' };
+  for (const response of [
+    (url, _, v) => url.endsWith('/installation') ? { ...v, repository_selection: 'all' } : v,
+    (url, _, v) => url.includes('/installation/repositories') ? { ...v, total_count: v.total_count + 1 } : v,
+    (url, _, v) => url.includes('/installation/repositories') ? { total_count: 5, repositories: [...v.repositories, { full_name: 'zlpoot/fifth' }] } : v,
+    (url, _, v) => url.includes('/installation/repositories') ? { total_count: 4, repositories: [...v.repositories.slice(0, 3), v.repositories[0]] } : v,
+    (url, options, v) => url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
+      ? { ...v, repositories: [{ full_name: HUB_REPO }, { full_name: FUTURE_REPO }] } : v,
+    (url, options, v) => url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
+      ? { ...v, permissions: { ...v.permissions, administration: 'write' } } : v,
+  ]) {
+    const f = fake({ branch: 'codex/c12-trusted-onboarding', installed: selectedSets[3], response });
+    await assert.rejects(connectBuilder(f.deps, selection), /mismatch|not allowed|only the selected/);
+    assert.equal(f.git.some(g => g[1][0] === 'push'), false);
+    assert.equal(f.requests.some(r => r.url.endsWith('/pulls')), false);
+  }
 });
 
 test('scoped-helper repair workflow binds Hub #16 and exact-head Ready; arbitrary transport options refused', async () => {
