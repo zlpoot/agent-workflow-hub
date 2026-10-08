@@ -114,6 +114,33 @@ test('read-only Git inspection never executes configured fsmonitor or filter dri
   assert.throws(() => inspectRepository(repo),errorCode('origin')); assert.equal(existsSync(marker),false);
 });
 
+test('real linked worktrees with an unused worktreeConfig extension retain canonical identity without config changes', t => {
+  const base = temporary(t), repo = consumer(base), linked = join(base,'linked');
+  git(repo,['config','extensions.worktreeConfig','true']); git(repo,['worktree','add','-b','acceptance',linked]);
+  const common = readFileSync(join(repo,'.git/config')), marker = readFileSync(join(linked,'.git'));
+  const identity = inspectRepository(linked); assert.equal(identity.root,linked); assert.equal(identity.repository,'zlpoot/webskill');
+  assert.equal(identity.ref,'acceptance'); assert.equal(identity.sha,git(repo,['rev-parse','HEAD'])); assert.equal(identity.dirty,false);
+  assert(common.equals(readFileSync(join(repo,'.git/config')))); assert(marker.equals(readFileSync(join(linked,'.git'))));
+  const scoped = resolve(linked,git(linked,['rev-parse','--git-path','config.worktree']));
+  for (const content of ['', '# No worktree overrides\n']) {
+    writeFileSync(scoped,content); assert.equal(inspectRepository(linked).ref,'acceptance'); assert.equal(readFileSync(scoped,'utf8'),content);
+  }
+  git(repo,['config','extensions.worktreeConfig','false']); assert.equal(inspectRepository(linked).ref,'acceptance');
+});
+
+test('worktree-specific overrides remain refused before callbacks or substituted repository identity', t => {
+  const base = temporary(t), repo = consumer(base), linked = join(base,'linked'), marker = join(base,'callback.marker');
+  git(repo,['config','extensions.worktreeConfig','true']); git(repo,['worktree','add','-b','acceptance',linked]);
+  const driver = `echo callback > ${marker.replaceAll('\\','/')}`;
+  for (const [key,value] of [['remote.origin.url','https://github.com/evil/repo.git'],['core.fsmonitor',driver],['core.hooksPath',base],
+    ['filter.fixture.clean',driver],['include.path',join(base,'missing-config')],['url.https://evil.invalid/.insteadOf','https://github.com/'],['core.bare','false']]) {
+    git(linked,['config','--worktree',key,value]); assert.throws(() => inspectRepository(linked),errorCode('origin'));
+    assert.equal(existsSync(marker),false); git(linked,['config','--worktree','--unset-all',key]);
+  }
+  assert.equal(inspectRepository(linked).repository,'zlpoot/webskill');
+  git(repo,['config','--add','extensions.worktreeConfig','false']); assert.throws(() => inspectRepository(linked),errorCode('origin'));
+});
+
 test('native Client registers metadata/heartbeat and reports exact source, ordered Events, status and explicit failed finish', async t => {
   const h = await harness(t), before = git(h.repo,['rev-parse','HEAD']);
   const registered = await h.client.register(); assert.equal(registered.client.client_version,CLIENT_VERSION); assert.equal(registered.client.executor_type,'codex');
@@ -195,8 +222,9 @@ test('local package installs offline with bundled runtime and real bin; full CLI
   const invalid = await runCli(linkedCli,['deliver'],h.repo); assert.equal(invalid.code,2); assert.equal(JSON.parse(invalid.stderr).error.code,'arguments');
   const imported = await runCli('--input-type=module',['--eval',`await import(${JSON.stringify(new URL('../dist/client/cli.js',import.meta.url).href)})`],h.repo);
   assert.equal(imported.code,0,imported.stderr); assert.equal(imported.stdout,''); assert.equal(imported.stderr,'');
-  const invoke = async args => { const r = await runCli(linkedCli,args,h.repo); assert.equal(r.code,0,r.stderr); assert(!r.stdout.includes(h.token)); return JSON.parse(r.stdout); };
-  unlinkSync(join(h.repo,'.awh/project.yaml'));
+  const installedRepo = join(h.base,'installed-consumer-worktree');
+  git(h.repo,['config','extensions.worktreeConfig','true']); git(h.repo,['worktree','add','-b','installed-client',installedRepo]);
+  const invoke = async args => { const r = await runCli(linkedCli,args,installedRepo); assert.equal(r.code,0,r.stderr); assert(!r.stdout.includes(h.token)); return JSON.parse(r.stdout); };
   await invoke(['init','--profile',fixture('webskill').manifest.profile.ref]); await invoke(['--config',h.configPath,'register']); const started = await invoke(['--config',h.configPath,'start','--issue','21']);
   const payload = join(h.base,'event.json'); writeFileSync(payload,JSON.stringify({step_id:'installed',name:'Installed CLI smoke test'})); await invoke(['--config',h.configPath,'event','--type','STEP_STARTED','--data',payload]);
   assert.equal((await invoke(['--config',h.configPath,'status'])).run.id,started.run.id);

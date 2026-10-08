@@ -40,7 +40,18 @@ export function inspectRepository(cwd = process.cwd()): RepositoryIdentity {
   const root = realpathSync(git(candidate, ['rev-parse', '--show-toplevel']));
   if (root !== candidate) clientFail('git', 'Git root does not match the real worktree root');
   const names = git(root, ['config', '--local', '--no-includes', '--name-only', '--list']);
-  if (names.split('\n').some(key => /^(?:include|url\.|filter\.|extensions\.worktreeconfig$)/i.test(key))) clientFail('origin', 'Included, rewritten, filtered or worktree-overridden Git configuration is unsupported');
+  if (names.split('\n').some(key => /^(?:include|url\.|filter\.)/i.test(key))) clientFail('origin', 'Included, rewritten or filtered Git configuration is unsupported');
+  const worktreeConfig = git(root, ['config', '--local', '--no-includes', '--bool', '--get-all', 'extensions.worktreeConfig'], true);
+  if (worktreeConfig && !['true', 'false'].includes(worktreeConfig)) clientFail('origin', 'Ambiguous worktree configuration extension is unsupported');
+  // Enabling the extension does not itself override anything. Accept only an unused worktree scope.
+  if (worktreeConfig === 'true') {
+    const worktreePath = resolve(root, git(root, ['rev-parse', '--git-path', 'config.worktree']));
+    let present = true;
+    try { regular(worktreePath, 1024 * 1024); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; present = false; }
+    if (present && git(root, ['config', '--worktree', '--no-includes', '--name-only', '--list']))
+      clientFail('origin', 'Nonempty worktree-specific Git configuration is unsupported (keys and values suppressed)');
+  }
   const origin = git(root, ['config', '--local', '--no-includes', '--get-all', 'remote.origin.url']);
   const match = /^(?:git@github\.com:|https:\/\/github\.com\/)([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(origin);
   if (!match) clientFail('origin', 'A single canonical GitHub origin is required (value suppressed)');
