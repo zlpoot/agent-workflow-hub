@@ -17,7 +17,7 @@
 | Pairing Client 通道 | 认领自己收到的一次性材料，验证模拟凭据及读取自己 project 的安全诊断 | Operator API、他人邀请/Client/Project |
 | 已有 Client bearer / Viewer cookie | 原有 reporting / read-only API | 任何 Operator 权限升级 |
 
-Operator 的 awh_operator cookie 与 awh_viewer、CP Bearer 分域。受信配置只存 session hash、绝对 expiry、role 和 repository scope；API body 不能指定 role/permissions。fixture 固定为数值 IPv4 loopback Operator origin，不提供登录/会话生成 HTTP 端点。生产 HttpOnly/SameSite/安全 session 发放尚未部署。
+Operator 的 awh_operator cookie（awh_op_ 独立格式）与 awh_viewer、CP Bearer 分域。受信配置只存带 operator 域分隔的 SHA-256、绝对 expiry、role 和 repository scope；Pairing hash 另用 pairing 域分隔，CP credential hash 保持现有 createAuthenticator 的 SHA-256 兼容。API body 不能指定 role/permissions。fixture 固定为数值 IPv4 loopback Operator origin，不提供登录/会话生成 HTTP 端点。生产 HttpOnly/SameSite/安全 session 发放尚未部署。
 
 审批仅接受已配置的 future-ui/default → zlpoot/future-ui 与 webskill/default → zlpoot/webskill 的精确 version。保存并核对完整不可变 ProfilePolicy，永不修改 src/profiles.ts 的 Builder 工作流/固定 branch/check/权限。未知 repository 可以作为 pending 申请保存，审批必须拒绝；未审批请求不是授权。已绑定 project/repository/profile/version 的重复审批幂等，冲突一律拒绝；不存在隐式 adopt、replace 或 credential rotation。
 
@@ -25,13 +25,13 @@ Operator 的 awh_operator cookie 与 awh_viewer、CP Bearer 分域。受信配�
 
 项目申请：pending → approved / rejected，终态不能回转；审批与有效 project 绑定、审计在同一 BEGIN IMMEDIATE 事务提交。已存在精确 project 绑定可以幂等复用，已有 CP Project 仅作为 reservation，不能借此改写身份。
 
-邀请：active → claimed / revoked / expired / locked。TTL 固定最多 300 秒，最多 3 次有效通道的失败认领；服务器单调时间水位持久化，时钟回拨不能复活邀请。失效/超限/撤销/已认领均不可恢复。一个 executor/client/machine 不得被多个有效邀请或其他历史身份抢占；旧/已认领的身份保留，撤销 Client 也不释放身份。
+邀请：pending_delivery → active → claimed / revoked / expired / locked。只有私有交付与激活审计成功后才 active；pending_delivery 不能认领且不会因重启自动激活。TTL 固定最多 300 秒，最多 3 次有效通道的失败认领；服务器单调时间水位持久化，时钟回拨不能复活邀请。失效/超限/撤销/已认领均不可恢复。一个 executor/client/machine 不得被多个有效邀请或其他历史身份抢占；旧/已认领的身份保留，撤销 Client 也不释放身份。
 
 闭环：project request → Operator approve → issue scoped invite → trusted out-of-browser mock Client receives secret → Client checks exact declared repo/profile/executor/machine/service/endpoint/CA plus explicit local-root verification/user confirmation → atomically consume invite + persist dedicated credential hash/single-project/executor identity + append audit → deliver credential only to the Client private sink → query safe diagnostics.
 
 邀请绑定 project_id/repository/Profile ref+version/client_id/executor_id/executor_type/machine_id/platform/service_id/endpoint/CA fingerprint。只有服务器已批准的 project 与服务配置构成授权；认领者不能改变任何字段。Git root/origin 是 Client 本地核对声明，服务器不把它视为远程文件系统 attestation 或 GitHub 授权。
 
-秘密只生成于服务端内存；SQLite 仅存邀请 hash、Client credential hash 与固定作用域。Browser request/response、diagnostics、audit、Run/Event、Git、日志、URL、Handoff 均不得包含这些原值。创建邀请响应只有 identifier/status/expiry，秘密通过另外受信的交付 sink 送达；claim 响应也只含安全状态，credential 经 Client 私有 provisioning sink 交付。只有一次发送，丢失响应不恢复秘密；交付失败使邀请或 Client 终止/撤销，并产生脱敏审计，必须重新经 Operator 审批创建新身份，不能重新认领旧邀请。
+秘密只生成于服务端内存；SQLite 仅存邀请 hash、Client credential hash 与固定作用域。Browser request/response、diagnostics、audit、Run/Event、Git、日志、URL、Handoff 均不得包含这些原值。创建邀请响应只有 identifier/status/expiry，秘密通过另外受信的交付 sink 送达；claim 响应也只含安全状态，credential 经 Client 私有 provisioning sink 交付。Client 为 pending_delivery → active / revoked，只有交付和激活审计成功后才 active；崩溃/存储故障遗留 pending_delivery 仍不可认证，没有自动补发。只有一次发送，丢失响应不恢复秘密；交付失败使邀请或 Client 终止/撤销，并产生脱敏审计，必须重新经 Operator 审批创建新身份，不能重新认领旧邀请。
 
 ## 4. API 契约
 
@@ -74,3 +74,9 @@ audit 为 append-only 安全元数据：cursor/time/actor/action/target/project/
 不改变 CP v2 schema/user_version、ControlPlaneStore/createAuthenticator、现有 Client namespace 或 #23 Dashboard OpenAPI。隔离库的 fixture schema/version 与 CP v2 不互用；旧 CP fixture 的 7 张表/历史在 onboarding 操作前后保持一致，Dashboard 可继续独立读取。真实集成迁移和动态 Client hash/scope 注入留待单独设计与授权，不声称现存 CP 已接受新 Client。
 
 本轮完成定向负例后生成本地提交候选，在 exact clean head 最多执行一次 pnpm check。Evidence 放 gitignored .handoff/；不 Push/PR/Ready/Handoff 发布，不借用 hub/c1g。停在 Human/ChatGPT 独立 Review Gate。后续需先批准可读离线代码的审查/交付方式；任何新的 Builder workflow、生产配对、迁移或现场验收再单独授权。
+
+## 7. 离线复现与限制
+
+安装现有 pinned dependencies 后，在 Hub 独立工作区先运行 `pnpm exec tsc`，再运行 `node --test tests/onboarding.test.mjs`。测试自建并清理专用临时目录/数据库；并发 worker 只在内存传递模拟 Client 请求，不把材料序列化到磁盘、浏览器或输出。`scripts/onboarding-contract.mjs` 同时生成 runtime schema 与 OpenAPI，测试保证二者一致。全量最终验证仍只在最终 clean head 运行一次 `pnpm check`。
+
+mock 适配器不能证明真实 TLS/CA/HttpOnly/NTFS ACL、真实 Git root/origin 或生产身份管理；这些是独立部署 Gate。本轮没有新 connect/doctor 命令、Dashboard wizard、动态 CP trusted-config 注入或真实迁移。若私有交付后存储故障遗留 pending_delivery，身份保持 blocked，Operator 可通过审计定位并撤销未激活邀请；Client 不提供自动重新认领、补发或身份覆盖。
