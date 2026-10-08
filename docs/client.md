@@ -1,15 +1,15 @@
-# C1-C Client / Issue #21
+# Client / C1-C and C1-D
 
-`@zlpoot/awh-client` 0.1.0 是可独立安装的 Node 24+ CLI/Client。消费者不需要 Hub checkout；包内含编译后的 Client、C1-A Protocol 校验器及固定的运行依赖，不含 Builder、CP server、开发依赖或凭据。Hub 保持原有 pnpm 单包；不向 npm registry 发布、不新增许可证。版本入口为 `awh --version`，升级必须显式安装新 tarball。`deliver` 等待 #22。
+`@zlpoot/awh-client` 0.2.0 是可独立安装的 Node 24+ CLI/Client。消费者不需要 Hub checkout；包内含 Client、C1-A Protocol 校验器、固定 GitHub App Builder/政策及运行依赖，不含 CP server、Builder CLI、开发依赖或凭据。Hub 保持 pnpm 单包；不向 npm registry 发布、不新增许可证。升级须显式安装新 tarball。`deliver` 的固定执行、Draft、观测与恢复边界见 [delivery](delivery.md)；下述 C1-C runtime 命令仍兼容旧会话。
 
 ## 分发与安装
 
-Builder 在 Hub 执行 `pnpm client:pack`，生成 `.handoff/packages/zlpoot-awh-client-0.1.0.tgz` 和 SHA-256/文件清单 JSON。`--output` 仅指定包输出目录。打包从锁定、已安装的 runtime dependencies 复制依赖闭包，调用本机 npm 的 offline pack，不下载或运行 lifecycle scripts。
+Builder 在 Hub 执行 `pnpm client:pack`，生成 `.handoff/packages/zlpoot-awh-client-0.2.0.tgz` 和 SHA-256/文件清单 JSON。`--output` 仅指定包输出目录。打包从锁定、已安装的 runtime dependencies 复制依赖闭包，调用本机 npm 的 offline pack，不下载或运行 lifecycle scripts。
 
 将 tarball 经已认证的文件传输交给消费者，核对提供的 SHA-256。消费者在仓库外安装：
 
 ```sh
-npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --no-audit --no-fund /absolute/zlpoot-awh-client-0.1.0.tgz
+npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --no-audit --no-fund /absolute/zlpoot-awh-client-0.2.0.tgz
 /absolute/external/awh-client/node_modules/.bin/awh --version
 ```
 

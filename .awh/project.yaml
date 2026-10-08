@@ -1,0 +1,6 @@
+apiVersion: awh/v1
+project:
+  id: "hub"
+  repository: "zlpoot/agent-workflow-hub"
+profile:
+  ref: "hub/c1d"

@@ -7,10 +7,17 @@ import { safeData, MAX_PAYLOAD_BYTES } from '../control-plane/security.js';
 import { CLIENT_VERSION } from './version.js';
 import { atomicJson, clientFail, inspectRepository, locked, machine, readConfig, readCredential, readCaCertificate, readJson, readManifest, same, type Machine, type RepositoryIdentity, type ClientConfig } from './local.js';
 import { requestJson } from './http.js';
+import { deliveryPolicy, matchDeliveryPolicy } from './delivery-policy.js';
+import type { Json } from '../protocol/index.js';
 
 export const CLIENT_EVENT_TYPES = ['STEP_STARTED', 'STEP_COMPLETED', 'VERIFICATION_STARTED', 'VERIFICATION_PASSED', 'VERIFICATION_FAILED', 'RUN_FAILED'] as const;
 interface Session { schema_version: '1.0'; manifest: ProjectManifest; endpoint: string; executor_id: string; machine_id: string;
-  initial: Run | null; work_item: WorkItem | null; events: Event[]; pending: Event | null }
+  initial: Run | null; work_item: WorkItem | null; events: Event[]; pending: Event | null; outbox?: Event[] }
+export interface DeliveryObservation {
+  run: Run; executor_id: string; journal: string;
+  emit(type: EventType, data: unknown, extensions?: Record<string, Json>): Promise<void>;
+  retainFailure(reason: string, stage: string): Promise<void>;
+}
 interface Context { identity: RepositoryIdentity; manifest: ProjectManifest; config: ClientConfig; machine: Machine; metadata: ClientMetadata; executor: Executor; credential: string; path: string }
 const terminal = (run: Run) => ['completed', 'failed'].includes(run.state);
 function checked<K extends keyof ProtocolEntities>(kind: K, value: unknown): ProtocolEntities[K] { safeData(value); return assertEntity(kind, value); }
@@ -41,19 +48,27 @@ export class AwhClient {
     executor_id: c.executor.id, machine_id: c.machine.id, initial: null, work_item: null, events: [], pending: null }; }
   private validateSession(c: Context, value: unknown): Session {
     const s = value as Session;
-    if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).sort().join(',') !== 'endpoint,events,executor_id,initial,machine_id,manifest,pending,schema_version,work_item' ||
+    if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).filter(k => k !== 'outbox').sort().join(',') !== 'endpoint,events,executor_id,initial,machine_id,manifest,pending,schema_version,work_item' ||
         s.schema_version !== '1.0' || !same(checked('manifest', s.manifest), c.manifest) || s.endpoint !== c.config.endpoint ||
-        s.executor_id !== c.executor.id || s.machine_id !== c.machine.id || !Array.isArray(s.events) || s.events.length > 256)
+        s.executor_id !== c.executor.id || s.machine_id !== c.machine.id || !Array.isArray(s.events) ||
+        s.outbox !== undefined && !Array.isArray(s.outbox) || s.events.length + (s.pending ? 1 : 0) + (s.outbox?.length ?? 0) > 256)
       clientFail('state', 'Client session binding is invalid; refusing to discard or replace it');
     if (s.initial === null) {
-      if (s.work_item !== null || s.events.length || s.pending !== null) clientFail('state', 'Invalid initial Client session');
+      if (s.work_item !== null || s.events.length || s.pending !== null || s.outbox?.length) clientFail('state', 'Invalid initial Client session');
     } else {
       const initial = checked('run', s.initial), item = checked('work_item', s.work_item);
       if (initial.state !== 'created' || initial.project_id !== c.manifest.project.id || initial.source.repository !== c.manifest.project.repository ||
-          initial.executor_id !== c.executor.id || initial.machine_id !== c.machine.id || initial.work_item_id !== item.id || item.project_id !== initial.project_id || item.reference.repository !== c.manifest.project.repository)
+          initial.executor_id !== c.executor.id || initial.machine_id !== c.machine.id || initial.work_item_id !== item.id || item.project_id !== initial.project_id)
         clientFail('state', 'Client Run identity does not match the project/machine');
+      if (item.reference.repository !== c.manifest.project.repository) {
+        const fixed = deliveryPolicy(c.manifest.profile.ref);
+        if (item.reference.repository !== fixed.workflow.work_item.repo || item.reference.number !== fixed.workflow.work_item.issue)
+          clientFail('state', 'Cross-repository Work Item must match the fixed Builder workflow');
+      }
       s.events.forEach(e => checked('event', e)); replayRun(initial, s.events);
       if (s.pending !== null) { checked('event', s.pending); appendEvent(initial, s.events, s.pending); }
+      s.outbox?.forEach(e => checked('event', e));
+      replayRun(initial, [...s.events, ...(s.pending ? [s.pending] : []), ...(s.outbox ?? [])]);
     }
     return s;
   }
@@ -100,17 +115,19 @@ export class AwhClient {
   async status() {
     const c = this.context(), s = this.load(c), p = await this.project(c), executor = await this.executor(c);
     return { project: p, ...executor, run: s.initial ? await this.run(c, s.initial) : null,
-      pending_event: s.pending ? { id: s.pending.id, sequence: s.pending.sequence, type: s.pending.type } : null, authority_verified: false };
+      pending_event: s.pending ? { id: s.pending.id, sequence: s.pending.sequence, type: s.pending.type } : null,
+      pending_delivery_events: (s.pending ? 1 : 0) + (s.outbox?.length ?? 0), authority_verified: false };
   }
-  private makeEvent(c: Context, s: Session, type: EventType, data: unknown): Event {
+  private makeEvent(c: Context, s: Session, type: EventType, data: unknown, extensions: Record<string, Json> = {}): Event {
     if (!s.initial) clientFail('state', 'Start a Run before reporting an Event');
-    if (s.events.length >= 256) clientFail('state_limit', 'C1-C Run event limit reached; explicit recovery is required');
-    const run = replayRun(s.initial, s.events).run;
-    const e = checked('event', { schema_version: '1.0', kind: 'event', id: 'event-' + randomUUID(), run_id: s.initial.id, sequence: s.events.length + 1,
+    const history = [...s.events, ...(s.pending ? [s.pending] : []), ...(s.outbox ?? [])];
+    if (history.length >= 256) clientFail('state_limit', 'Client Run event limit reached; explicit recovery is required');
+    const run = replayRun(s.initial, history).run;
+    const e = checked('event', { schema_version: '1.0', kind: 'event', id: 'event-' + randomUUID(), run_id: s.initial.id, sequence: history.length + 1,
       type, occurred_at: [new Date().toISOString(), run.updated_at].sort().at(-1),
-      payload: { schema_version: '1.0', data, extensions: { client: c.metadata, source_dirty: c.identity.dirty } } });
+      payload: { schema_version: '1.0', data, extensions: { ...extensions, client: c.metadata, source_dirty: c.identity.dirty } } });
     if (Buffer.byteLength(JSON.stringify(e.payload)) > MAX_PAYLOAD_BYTES) clientFail('payload_size', 'Event payload exceeds the Control Plane limit');
-    appendEvent(s.initial, s.events, e); return e;
+    appendEvent(s.initial, history, e); return e;
   }
   private async flush(c: Context, s: Session) {
     if (!s.initial || !s.pending) clientFail('pending', 'There is no pending Event to retry');
@@ -124,10 +141,14 @@ export class AwhClient {
     return { event: r.event, run: r.run, cursor: r.cursor, disposition: r.disposition, authority_verified: false };
   }
   async start(issue: number) {
+    return this.startRun(issue);
+  }
+  private async startRun(issue: number, deliveryRef?: string) {
     if (!Number.isSafeInteger(issue) || issue < 1) clientFail('arguments', 'A positive Issue number is required');
     const c = this.context();
     return locked(c.path + '.lock', async () => {
       const s = this.load(c), p = await this.project(c), ex = await this.executor(c);
+      if (s.outbox?.length) clientFail('pending', 'Delivery Events require explicit deliver --retry');
       if (s.initial && terminal(replayRun(s.initial, s.events).run)) {
         const archive = join(dirname(c.path), s.initial.id + '.json');
         try { writeFileSync(archive, JSON.stringify(s), { flag: 'wx', mode: 0o600 }); }
@@ -141,8 +162,10 @@ export class AwhClient {
           policy.repository === c.manifest.project.repository && (!c.config.profile_version || policy.version === c.config.profile_version));
         if (policies.length !== 1) clientFail('profile', 'Select one exact registered Profile version in the external Client config');
         const policy: ProfilePolicy = policies[0]!;
-        const workItem: WorkItem = { schema_version: '1.0', kind: 'work_item', id: 'work-' + createHash('sha256').update(JSON.stringify([p.id, p.repository, issue])).digest('hex'),
-          project_id: p.id, reference: { provider: 'github', repository: p.repository, kind: 'issue', number: issue } };
+        if (deliveryRef) matchDeliveryPolicy(policy, deliveryRef);
+        const itemRepo = deliveryRef ? deliveryPolicy(deliveryRef).workflow.work_item.repo : p.repository;
+        const workItem: WorkItem = { schema_version: '1.0', kind: 'work_item', id: 'work-' + createHash('sha256').update(JSON.stringify([p.id, itemRepo, issue])).digest('hex'),
+          project_id: p.id, reference: { provider: 'github', repository: itemRepo, kind: 'issue', number: issue } };
         const now = new Date().toISOString();
         const initial: Run = { schema_version: '1.0', kind: 'run', id: 'run-' + randomUUID(), project_id: p.id, work_item_id: workItem.id,
           executor_id: c.executor.id, machine_id: c.machine.id, source: { provider: 'github', repository: c.identity.repository, sha: c.identity.sha, ref: c.identity.ref },
@@ -151,7 +174,7 @@ export class AwhClient {
           clientFail('binding', 'Run binding violates the registered Profile policy');
         s.initial = initial; s.work_item = workItem; s.pending = this.makeEvent(c, s, 'RUN_STARTED', { source_sha: initial.source.sha }); this.save(c, s);
       }
-      if (s.work_item!.reference.number !== issue) clientFail('active_run', 'A different Issue Run is active; finish it explicitly before starting another');
+      if (s.work_item!.reference.number !== issue || s.work_item!.reference.repository !== (deliveryRef ? deliveryPolicy(deliveryRef).workflow.work_item.repo : p.repository)) clientFail('active_run', 'A different Issue Run is active; finish it explicitly before starting another');
       if (s.events.length) {
         if (s.pending) clientFail('pending', 'Retry the pending Event explicitly before another operation');
         return { run: await this.run(c, s.initial!), disposition: 'idempotent', authority_verified: false };
@@ -170,6 +193,7 @@ export class AwhClient {
     const c = this.context();
     return locked(c.path + '.lock', async () => {
       const s = this.load(c); if (!s.initial || s.events.length === 0) clientFail('state', 'A started Run is required');
+      if (s.outbox?.length) clientFail('pending', 'Delivery Events require explicit deliver --retry');
       if (s.pending) {
         if (type !== null && (s.pending.type !== type || !same(s.pending.payload.data, data))) clientFail('pending', 'A different Event is pending; retry it explicitly without changing ID/sequence');
       } else {
@@ -182,9 +206,62 @@ export class AwhClient {
   async finish(failed = false, data?: unknown) {
     if (failed) return { ...await this.event('RUN_FAILED', data), reporting_finished: true };
     const c = this.context(), s = this.load(c);
-    if (!s.initial || s.pending) clientFail('state', 'A Run without a pending Event is required');
+    if (!s.initial || s.pending || s.outbox?.length) clientFail('state', 'A Run without a pending Event is required');
     const run = await this.run(c, s.initial);
     if (!terminal(run)) clientFail('review_gate', 'Successful completion requires C1-A independent delivery/Review; use finish --outcome failed --data for an explicitly unsuccessful test Run');
     return { run, reporting_finished: true, authority_verified: false };
+  }
+
+  // Separate from the generic runtime Event CLI: fixed delivery, one writer, no Review emission.
+  async observeDelivery<T>(action: (observation: DeliveryObservation) => Promise<T>): Promise<T> {
+    const c = this.context(), fixed = deliveryPolicy(c.manifest.profile.ref);
+    if (c.identity.repository !== fixed.profile.repository || c.identity.ref !== fixed.workflow.branch || c.identity.dirty)
+      clientFail('delivery_source', 'Delivery requires the fixed feature branch at an exact clean HEAD');
+    const policies = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(c.manifest.project.id)); keys(policies, ['profiles']);
+    if (!Array.isArray(policies.profiles) || policies.profiles.length > 256) clientFail('profile', 'Invalid trusted Profile Registry response');
+    const matches = policies.profiles.map(v => checked('profile_policy', v)).filter(p => p.ref === c.manifest.profile.ref && (!c.config.profile_version || p.version === c.config.profile_version));
+    if (matches.length !== 1) clientFail('profile', 'One exact trusted Profile version is required');
+    matchDeliveryPolicy(matches[0]!, c.manifest.profile.ref);
+    await this.startRun(fixed.workflow.work_item.issue, c.manifest.profile.ref);
+    return locked(c.path + '.lock', async () => {
+      const s = this.load(c);
+      if (!s.initial || s.pending || s.outbox?.length || s.events.length !== 1 || s.events[0]?.type !== 'RUN_STARTED' ||
+          !same(s.initial.profile, { ref: matches[0]!.ref, version: matches[0]!.version }) ||
+          !same(s.initial.source, { provider: 'github', repository: c.identity.repository, sha: c.identity.sha, ref: c.identity.ref }))
+        clientFail('delivery_state', 'A fresh exact-source delivery Run is required; retry never repeats GitHub operations');
+      const enqueue = (type: EventType, data: unknown, extensions: Record<string, Json> = {}) => {
+        if (!['STEP_STARTED','STEP_COMPLETED','VERIFICATION_STARTED','VERIFICATION_PASSED','VERIFICATION_FAILED','GITHUB_PUSH_COMPLETED','GITHUB_PR_CREATED','HANDOFF_PUBLISHED','RUN_FAILED'].includes(type))
+          clientFail('event_type', 'Builder observation cannot declare Review or completion');
+        const event = this.makeEvent(c, s, type, data, extensions);
+        if (!s.pending) s.pending = event; else (s.outbox ??= []).push(event);
+        this.save(c, s);
+      };
+      const flush = async () => {
+        while (s.pending) { await this.flush(c, s); if (s.outbox?.length) { s.pending = s.outbox.shift()!; this.save(c, s); } }
+      };
+      const o: DeliveryObservation = { run: structuredClone(s.initial), executor_id: c.executor.id,
+        journal: join(dirname(c.path), s.initial.id + '.delivery.json'),
+        emit: async (type, data, extensions) => { enqueue(type, data, extensions); await flush(); },
+        retainFailure: async (reason, stage) => {
+          const alreadyPending = !!s.pending || !!s.outbox?.length;
+          const current = replayRun(s.initial!, [...s.events, ...(s.pending ? [s.pending] : []), ...(s.outbox ?? [])]).run;
+          if (!terminal(current)) { enqueue('RUN_FAILED', { reason }, { builder_stage: stage }); }
+          // A failure remains locally durable even when CP connectivity is lost.
+          if (!alreadyPending) { try { await flush(); } catch { /* explicit deliver --retry; never mask the original Builder error */ } }
+        } };
+      return action(o);
+    });
+  }
+  async retryDelivery() {
+    const c = this.context(); deliveryPolicy(c.manifest.profile.ref);
+    return locked(c.path + '.lock', async () => {
+      const s = this.load(c);
+      if (!s.initial || !existsSync(join(dirname(c.path), s.initial.id + '.delivery.json')))
+        clientFail('delivery_state', 'No recorded delivery is available to retry');
+      let retried = 0;
+      if (!s.pending && s.outbox?.length) { s.pending = s.outbox.shift()!; this.save(c, s); }
+      while (s.pending) { await this.flush(c, s); retried++; if (s.outbox?.length) { s.pending = s.outbox.shift()!; this.save(c, s); } }
+      return { run: await this.run(c, s.initial), retried_events: retried, github_operations_repeated: false, authority_verified: false };
+    });
   }
 }

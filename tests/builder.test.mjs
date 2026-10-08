@@ -87,6 +87,24 @@ function fake(overrides = {}) {
   return { deps, requests, git, advance: ms => { clock += ms; } };
 }
 
+test('Adapter Draft restoration is fixed App-owned exact-head and read back', async () => {
+  let restored = false;
+  const f = fake({ response: (url, options, value) => {
+    if (url.endsWith('/graphql')) { assert(JSON.parse(options.body).query.includes('convertPullRequestToDraft')); restored = true; return { data: { convertPullRequestToDraft: { pullRequest: { isDraft: true } } } }; }
+    if (url.endsWith('/pulls/5')) return { ...value, draft: restored };
+    return value;
+  } });
+  const builder = await connectBuilder(f.deps);
+  await assert.rejects(builder.restoreDraft(5, 'c'.repeat(40)), /exact head/);
+  assert(!f.requests.some(r => r.url.endsWith('/graphql')));
+  const p = await builder.restoreDraft(5, head); assert(p.draft); assert.equal(p.head, head); assert.equal(p.base, base);
+  assert.equal(f.requests.filter(r => r.url.endsWith('/graphql')).length, 1);
+});
+test('Draft restoration refuses foreign actor before mutation', async () => {
+  const f = fake({ response: (url, options, value) => url.endsWith('/pulls/5') ? { ...value, user: { login: 'foreign', type: 'User' } } : value });
+  const builder = await connectBuilder(f.deps); await assert.rejects(builder.restoreDraft(5, head), /identity/);
+  assert(!f.requests.some(r => r.url.endsWith('/graphql')));
+});
 test('JWT RS256 signature and skew/expiry claims at clock boundaries', () => {
   for (const clock of [60000, now, now + 876]) {
     const jwt = createJwt('123', pem, clock), [h, p, s] = jwt.split('.');
@@ -274,7 +292,7 @@ test('unsafe local Git transport, wrong branch and Git errors are refused safely
 
 test('Builder exposes only fixed operations, requires App bot for PR/comments, rejects secret text', async () => {
   const f = fake(), b = await connectBuilder(f.deps);
-  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready'].sort());
+  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready', 'restoreDraft'].sort());
   await b.createPR('Title', 'Implements #4');
   assert.deepEqual(JSON.parse(f.requests.at(-1).body), { title: 'Title', body: 'Implements #4', head: BRANCH, base: 'main', draft: true });
   await b.updatePR(5, 'Final title', 'Final body');
@@ -539,6 +557,7 @@ const workflows = [
   ['hub', 'c1a', HUB_REPO, 'codex/c1a-protocol'],
   ['hub', 'c1b', HUB_REPO, 'codex/c1b-control-plane'],
   ['hub', 'c1c', HUB_REPO, 'codex/c1c-client'],
+  ['hub', 'c1d', HUB_REPO, 'codex/c1d-builder-adapter'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
