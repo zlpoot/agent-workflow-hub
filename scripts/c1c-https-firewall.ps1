@@ -3,9 +3,9 @@
 param([Parameter(Mandatory=$true)][string]$NodeExecutable,[Parameter(Mandatory=$true)][string]$ProofPath)
 $ErrorActionPreference='Stop'
 $taskHostIP='192.168.2.5';$taskMacIP='192.168.2.3'
-if(-not [IO.Path]::IsPathFullyQualified($NodeExecutable) -or -not (Test-Path -LiteralPath $NodeExecutable -PathType Leaf)){throw 'Explicit Node executable required.'}
+if($NodeExecutable -notmatch '^[A-Za-z]:[\\/]' -or -not (Test-Path -LiteralPath $NodeExecutable -PathType Leaf)){throw 'Explicit local absolute Node executable required.'}
 $taskNode=[IO.Path]::GetFullPath($NodeExecutable)
-if(-not [IO.Path]::IsPathFullyQualified($ProofPath) -or -not (Test-Path -LiteralPath (Split-Path $ProofPath) -PathType Container)){throw 'Existing external proof directory required.'}
+if($ProofPath -notmatch '^[A-Za-z]:[\\/]' -or -not (Test-Path -LiteralPath (Split-Path $ProofPath) -PathType Container)){throw 'Existing absolute external proof directory required.'}
 for($taskAncestor=Split-Path $ProofPath;$taskAncestor;$taskAncestor=[IO.Path]::GetDirectoryName($taskAncestor)){if(Test-Path -LiteralPath (Join-Path $taskAncestor '.git')){throw 'Firewall proof must be external.'}}
 $taskAddress=Get-NetIPAddress -AddressFamily IPv4 | Where-Object IPAddress -eq $taskHostIP
 if(@($taskAddress).Count -ne 1){throw 'Expected Windows LAN interface is absent or ambiguous.'}
@@ -18,7 +18,7 @@ $taskRules=@('AWH-C1C-HTTPS-Mac','AWH-C1C-HTTPS-Other-IPv4')
 foreach($taskName in $taskRules){
   $taskExisting=Get-NetFirewallRule -Name $taskName -ErrorAction SilentlyContinue
   if($taskExisting -and $taskExisting.Group -ne 'AWH C1C HTTPS'){throw 'Unmanaged conflicting rule name; refusing replacement.'}
-  $taskExisting | Remove-NetFirewallRule | Out-Null
+  if($taskExisting){$taskExisting | Remove-NetFirewallRule | Out-Null}
 }
 New-NetFirewallRule -Name $taskRules[1] -DisplayName 'AWH C1C HTTPS block non-Mac IPv4' -Group 'AWH C1C HTTPS' -Direction Inbound -Action Block -Enabled True -Profile Any -Protocol TCP -LocalAddress $taskHostIP -LocalPort 8443 -RemoteAddress '0.0.0.0-192.168.2.2','192.168.2.4-255.255.255.255' | Out-Null
 New-NetFirewallRule -Name $taskRules[0] -DisplayName 'AWH C1C HTTPS Mac only' -Group 'AWH C1C HTTPS' -Direction Inbound -Action Allow -Enabled True -Profile Any -Protocol TCP -LocalAddress $taskHostIP -LocalPort 8443 -RemoteAddress $taskMacIP -Program $taskNode | Out-Null
