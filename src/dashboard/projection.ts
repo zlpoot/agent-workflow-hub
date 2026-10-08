@@ -1,9 +1,23 @@
 import { createHash } from 'node:crypto';
 import { fail, validId } from '../control-plane/security.js';
-import type { ControlPlaneStore, DashboardReadView, StoredEvent } from '../control-plane/store.js';
+import type { DashboardStore, DashboardReadView, StoredEvent } from '../control-plane/store.js';
 import { RUN_STATES, type Event, type Run } from '../protocol/types.js';
 import type { Viewer } from './security.js';
 
+const indexes = new WeakMap<DashboardReadView, { runs: Map<string, Run>; events: Map<string, StoredEvent[]>; projects: Map<string, StoredEvent[]> }>();
+function index(view: DashboardReadView) {
+  let value = indexes.get(view);
+  if (!value) {
+    value = { runs: new Map(view.runs.map(run => [run.id, run])), events: new Map(), projects: new Map() };
+    for (const entry of view.events) {
+      const events = value.events.get(entry.event.run_id) ?? []; events.push(entry); value.events.set(entry.event.run_id, events);
+      const project = value.runs.get(entry.event.run_id)!.project_id;
+      const entries = value.projects.get(project) ?? []; entries.push(entry); value.projects.set(project, entries);
+    }
+    indexes.set(view, value);
+  }
+  return value;
+}
 const terminal = (run: Run) => run.state === 'completed' || run.state === 'failed';
 const envelope = { contract_version: '1.0' as const, authority_verified: false as const };
 type NumberRef = { provider: 'github'; repository: string; kind: string; number: number };
@@ -20,7 +34,7 @@ function eventRefs(event: Event) {
   return refs;
 }
 export function timeline(entry: StoredEvent, view: DashboardReadView) {
-  const event = entry.event, run = view.runs.find(run => run.id === event.run_id)!;
+  const event = entry.event, run = index(view).runs.get(event.run_id)!;
   const data = event.payload.data;
   return { ...envelope, cursor: entry.cursor, event_id: event.id, sequence: event.sequence, project_id: run.project_id, run_id: run.id,
     executor_id: run.executor_id, machine_id: run.machine_id, actor: null, actor_provenance: 'not_recorded' as const,
@@ -41,7 +55,7 @@ function steps(events: StoredEvent[]) {
   return { current_step: [...open.values()].at(-1) ?? null, last_step: last };
 }
 function runSummary(run: Run, view: DashboardReadView) {
-  const events = view.events.filter(entry => entry.event.run_id === run.id);
+  const events = index(view).events.get(run.id) ?? [];
   const work = view.work_items.find(work => work.id === run.work_item_id);
   const refs = events.flatMap(entry => eventRefs(entry.event));
   return { ...envelope, id: run.id, project_id: run.project_id, work_item: work ? { id: work.id, reference: githubRef(work.reference) } : null,
@@ -72,8 +86,8 @@ function diagnostics(run: Run, view: DashboardReadView) {
     verification_subject_sha: data && 'subject_sha' in data ? data.subject_sha : null, verification_cursor: verification?.cursor ?? null };
 }
 export class DashboardProjection {
-  constructor(readonly store: ControlPlaneStore, readonly viewer: Viewer, readonly now = Date.now) {}
-  view() { return this.store.dashboardReadView(this.viewer); }
+  constructor(readonly store: DashboardStore, readonly viewer: Viewer, readonly now = Date.now, readonly readView?: () => DashboardReadView) {}
+  view() { return this.readView ? this.readView() : this.store.dashboardReadView(this.viewer); }
   projects(view = this.view()) {
     return view.projects.map(project => {
       const runs = view.runs.filter(run => run.project_id === project.id);
@@ -113,8 +127,10 @@ export class DashboardProjection {
     if (projectId) this.scope(projectId);
     if (after > view.cursor) fail(400, 'invalid_cursor', 'Cursor is ahead of the Event Store');
     if (runId && !view.runs.some(run => run.id === runId && (!projectId || run.project_id === projectId))) fail(404, 'not_found', 'Run was not found in the viewer scope');
-    const entries = view.events.filter(entry => entry.cursor > after && (!runId || entry.event.run_id === runId) &&
-      (!projectId || view.runs.find(run => run.id === entry.event.run_id)!.project_id === projectId));
+    const history = runId ? index(view).events.get(runId) ?? [] : projectId ? index(view).projects.get(projectId) ?? [] : view.events;
+    let low = 0, high = history.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (history[mid]!.cursor <= after) low = mid + 1; else high = mid; }
+    const entries = history.slice(low, low + limit + 1);
     const items = entries.slice(0, limit).map(entry => timeline(entry, view));
     return { ...envelope, items, next_cursor: entries.length > limit ? items.at(-1)!.cursor : null, snapshot_cursor: view.cursor };
   }

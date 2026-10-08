@@ -30,6 +30,7 @@ function entity<K extends keyof ProtocolEntities>(kind: K, input: unknown): Prot
 // Synchronous transactions contain no await or network I/O. BEGIN IMMEDIATE serializes all writers.
 export class ControlPlaneStore {
   readonly #db: DatabaseSync;
+  #revision = 0;
   constructor(path: string, policies: readonly ProfilePolicy[], readonly now = () => new Date().toISOString()) {
     if (!Array.isArray(policies) || policies.length === 0 || policies.length > 256) fail(500, 'configuration', 'Trusted Profile policies are required');
     policies.forEach(policy => entity('profile_policy', policy));
@@ -76,7 +77,7 @@ export class ControlPlaneStore {
   close(): void { this.#db.close(); }
   private transaction<T>(action: () => T): T {
     this.#db.exec('BEGIN IMMEDIATE');
-    try { const result = action(); this.#db.exec('COMMIT'); return result; }
+    try { const result = action(); this.#db.exec('COMMIT'); ++this.#revision; return result; }
     catch (error) { this.#db.exec('ROLLBACK'); throw error; }
   }
   private row(table: 'projects' | 'executors' | 'work_items' | 'runs', id: string): Row {
@@ -206,32 +207,11 @@ export class ControlPlaneStore {
       return { disposition: result.disposition, cursor: Number(stored.cursor), run: result.run, event, authority_verified: false as const };
     });
   }
+  dashboardRevision(): string { return `${this.#revision}:${this.#db.prepare('PRAGMA data_version').get()!.data_version}:${this.latestCursor()}`; }
   latestCursor(): number { return Number(this.#db.prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events').get()!.cursor); }
   // One bounded SQLite read transaction; never seeds policies, mutates history or exposes client owners.
   dashboardReadView(principal: Pick<Principal, 'project_ids'>): DashboardReadView {
-    const scope = principal.project_ids;
-    if (!scope.length || scope.length > 64) fail(403, 'forbidden', 'Explicit viewer project scope is required');
-    const placeholders = scope.map(() => '?').join(',');
-    const bounded = (sql: string, args: string[], limit: number): Row[] => {
-      const rows = this.#db.prepare(sql + ' LIMIT ?').all(...args, limit + 1);
-      if (rows.length > limit) fail(503, 'projection_limit', 'Dashboard projection exceeds the local MVP limit');
-      return rows;
-    };
-    this.#db.exec('BEGIN');
-    try {
-      const cursor = this.latestCursor();
-      const projects = bounded(`SELECT record FROM projects WHERE id IN (${placeholders}) ORDER BY id`, [...scope], 64).map(row => decode<Project>(row));
-      const runs = bounded(`SELECT record FROM runs WHERE project_id IN (${placeholders}) ORDER BY id`, [...scope], 1000).map(row => decode<Run>(row));
-      const workItems = bounded(`SELECT record FROM work_items WHERE project_id IN (${placeholders}) ORDER BY id`, [...scope], 1000).map(row => decode<WorkItem>(row));
-      const executors = bounded(`SELECT DISTINCT e.* FROM executors e JOIN runs r ON r.executor_id = e.id WHERE r.project_id IN (${placeholders}) ORDER BY e.id`, [...scope], 1000)
-        .map(row => ({ executor: decode<Executor>(row), ...this.metadata(String(row.id)), last_seen: String(row.last_seen) }));
-      const events = bounded(`SELECT e.cursor, e.record FROM events e JOIN runs r ON r.id = e.run_id WHERE r.project_id IN (${placeholders}) ORDER BY e.cursor`, [...scope], 10000)
-        .map(row => ({ cursor: Number(row.cursor), event: decode<Event>(row) }));
-      const policies = bounded(`SELECT DISTINCT p.record FROM profiles p JOIN projects j ON j.id IN (${placeholders}) AND p.ref = json_extract(j.record, '$.profile_ref') ORDER BY p.ref, p.version`, [...scope], 256)
-        .map(row => decode<ProfilePolicy>(row));
-      this.#db.exec('COMMIT');
-      return { cursor, projects, policies, runs, work_items: workItems, executors, events };
-    } catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+    return readDashboard(this.#db, principal);
   }
   streamEvents(principal: Principal, after: number, limit = 100): StoredEvent[] {
     const placeholders = principal.project_ids.map(() => '?').join(',');
@@ -240,4 +220,53 @@ export class ControlPlaneStore {
       WHERE e.cursor > ? AND r.project_id IN (${placeholders}) ORDER BY e.cursor LIMIT ?`)
       .all(after, ...principal.project_ids, limit).map(row => ({ cursor: Number(row.cursor), event: decode<Event>(row) }));
   }
+}
+
+export interface DashboardStore {
+  dashboardReadView(principal: Pick<Principal, 'project_ids'>): DashboardReadView;
+  dashboardRevision(): string;
+}
+function latestCursor(db: DatabaseSync) { return Number(db.prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events').get()!.cursor); }
+function metadata(db: DatabaseSync, id: string): { client?: ClientMetadata } {
+  const row = db.prepare('SELECT record FROM executor_clients WHERE executor_id = ?').get(id);
+  return row ? { client: decode<ClientMetadata>(row) } : {};
+}
+function readDashboard(db: DatabaseSync, principal: Pick<Principal, 'project_ids'>): DashboardReadView {
+  const scope = principal.project_ids;
+  if (!scope.length || scope.length > 64) fail(403, 'forbidden', 'Explicit viewer project scope is required');
+  const placeholders = scope.map(() => '?').join(',');
+  const bounded = (sql: string, args: string[], limit: number): Row[] => {
+    const rows = db.prepare(sql + ' LIMIT ?').all(...args, limit + 1);
+    if (rows.length > limit) fail(503, 'projection_limit', 'Dashboard projection exceeds the local MVP limit');
+    return rows;
+  };
+  db.exec('BEGIN');
+  try {
+    const cursor = latestCursor(db);
+    const projects = bounded(`SELECT record FROM projects WHERE id IN (${placeholders}) ORDER BY id`, [...scope], 64).map(row => decode<Project>(row));
+    const runs = bounded(`SELECT record FROM runs WHERE project_id IN (${placeholders}) ORDER BY id`, [...scope], 1000).map(row => decode<Run>(row));
+    const workItems = bounded(`SELECT record FROM work_items WHERE project_id IN (${placeholders}) ORDER BY id`, [...scope], 1000).map(row => decode<WorkItem>(row));
+    const executors = bounded(`SELECT DISTINCT e.* FROM executors e JOIN runs r ON r.executor_id = e.id WHERE r.project_id IN (${placeholders}) ORDER BY e.id`, [...scope], 1000)
+      .map(row => ({ executor: decode<Executor>(row), ...metadata(db, String(row.id)), last_seen: String(row.last_seen) }));
+    const events = bounded(`SELECT e.cursor, e.record FROM events e JOIN runs r ON r.id = e.run_id WHERE r.project_id IN (${placeholders}) ORDER BY e.cursor`, [...scope], 10000)
+      .map(row => ({ cursor: Number(row.cursor), event: decode<Event>(row) }));
+    const policies = bounded(`SELECT DISTINCT p.record FROM profiles p JOIN projects j ON j.id IN (${placeholders}) AND p.ref = json_extract(j.record, '$.profile_ref') ORDER BY p.ref, p.version`, [...scope], 256)
+      .map(row => decode<ProfilePolicy>(row));
+    db.exec('COMMIT');
+    return { cursor, projects, policies, runs, work_items: workItems, executors, events };
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+// A separate sidecar can read an existing v2 DB without migrations, trusted config or write methods.
+export class DashboardReadStore implements DashboardStore {
+  readonly #db: DatabaseSync;
+  constructor(path: string) {
+    this.#db = new DatabaseSync(path, { readOnly: true, timeout: 1000, allowExtension: false });
+    try {
+      if (Number(this.#db.prepare('PRAGMA user_version').get()!.user_version) !== DATABASE_VERSION)
+        fail(500, 'database_version', 'Dashboard requires an existing v2 database');
+    } catch (error) { this.#db.close(); throw error; }
+  }
+  close() { this.#db.close(); }
+  dashboardRevision() { return String(this.#db.prepare('PRAGMA data_version').get()!.data_version) + ':' + latestCursor(this.#db); }
+  dashboardReadView(principal: Pick<Principal, 'project_ids'>) { return readDashboard(this.#db, principal); }
 }

@@ -63,7 +63,7 @@ Streams share the existing 64-connection limit, poll at most 100 Events per batc
 
 ## Bounds and verification
 
-Synchronous SQLite view caps: 64 projects, 1000 Runs/Work Items/Executors, 256 Policy versions, 10000 Events. Exceeding a cap returns 503 `projection_limit` rather than truncating history. Reads do not migrate/rewrite original data. Projection/poll cost scales with scoped retained history; larger deployments need a separately designed query/index strategy.
+Synchronous SQLite view caps: 64 projects, 1000 Runs/Work Items/Executors, 256 Policy versions, 10000 Events. Exceeding a cap returns 503 `projection_limit` rather than truncating history. Reads do not migrate/rewrite original data. #30 shares SSE views per exact scope, detects own/external Registry commits with lightweight revisions, and bounds idle probes/presence refresh; cold refresh still scales with scoped retained history. P2 load evidence, full-history browser recovery, default-off sidecar and separate live/session gates are described in [Dashboard UI](dashboard-ui.md). Larger deployments need a separately designed query/index strategy.
 
 Errors: 400 query/cursor/id, 401 missing/expired viewer session, 403 explicit foreign scope, 404 absent/foreign entity or disabled gateway, 405 mutation, 503 busy/projection/stream limit, generic 500 otherwise. OpenAPI includes negative auth/scope/cursor examples.
 
