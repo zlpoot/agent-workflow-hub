@@ -58,7 +58,7 @@ Windows 上 mode 不替代 ACL，目录应继承仅负责人可读 ACL。使用�
 | GET `/v1/projects` | 无 | scoped `projects` |
 | GET `/v1/projects/:id` | 无 | `project` |
 | GET `/v1/profiles` | 必填 `project_id` | 已绑定项目的受信 `profiles` 版本列表，只读 |
-| POST `/v1/executors/register` | Executor | `executor`, server `last_seen`, `disposition` |
+| POST `/v1/executors/register` | Executor，或 C1-C `{executor,client}` | `executor`, optional `client`, server `last_seen`, `disposition` |
 | GET `/v1/executors` | 无 | 本 Client scoped `executors` / `last_seen` |
 | POST `/v1/executors/:id/heartbeat` | `{}` | server `last_seen`, `executor` |
 | POST `/v1/work-items/register` | Work Item | `work_item`, `disposition` |
@@ -78,7 +78,9 @@ Run 创建通过 C1-A `validateBindings`：已注册 Project、受信 exact Prof
 
 ## 持久化与 Event
 
-SQLite `PRAGMA user_version=1`。首次迁移在一个 `BEGIN IMMEDIATE` 事务建表/index/trigger 并设置版本；重复启动不重建，未来版本 fail-closed。启用 foreign keys、WAL、`synchronous=FULL`、5s busy timeout。Profile seed 原子应用，不把 Client credential/hash 或 App key/token 存入 DB。DB/WAL/SHM 有 gitignore，真实 runtime 文件建议存仓库外。
+SQLite `PRAGMA user_version=2`。首次迁移在一个 `BEGIN IMMEDIATE` 事务建表/index/trigger 并设置版本；C1-B v1 升到 v2 只新增 `executor_clients` metadata 表，保留 Registry/Run/Event/owner/last-seen。重复启动不重建，未来版本 fail-closed。启用 foreign keys、WAL、`synchronous=FULL`、5s busy timeout。Profile seed 原子应用，不把 Client credential/hash 或 App key/token 存入 DB。DB/WAL/SHM 有 gitignore，真实 runtime 文件建议存仓库外。
+
+C1-C metadata DTO 为 closed `{schema_version:"1.0",executor_type,machine_name,arch,client_version}`，不放进既有 closed C1-A Executor entity。类型、hostname、arch 和 semver 有格式约束；safeData 拒绝凭据/复杂 JSON。Metadata 仅当前 owner 可随 register 更新（例如升级 Client version），不会改变 Executor/machine/owner 身份。GET executors 与 heartbeat 返回已持久化的 optional client。旧直接 Executor 注册、旧 DB 及无 metadata 的 heartbeat 兼容，last-seen 仍由 server 生成。此扩展不开放 Profile 上传或凭据签发。
 
 Event append 在 `BEGIN IMMEDIATE` 下读取 initial/history，调用 C1-A `appendEvent`，插入 Event 并更新 Run projection，全部成功才 COMMIT。投影写失败时 Event/cursor 一起回滚。独立 SQLite 连接也争用写锁；重启恢复 projection/history，Client 可重发未确认 Event。
 

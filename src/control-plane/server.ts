@@ -102,7 +102,13 @@ export function createControlPlaneServer(options: ServerOptions) {
           fail(404, 'not_found', 'Endpoint was not found');
         const value = await body(request);
         if (url.pathname === '/v1/projects/register') result = store.registerProject(principal, value);
-        else if (url.pathname === '/v1/executors/register') result = store.registerExecutor(principal, value);
+        else if (url.pathname === '/v1/executors/register') {
+          if (value && typeof value === 'object' && Object.hasOwn(value, 'executor')) {
+            if (Object.keys(value).sort().join(',') !== 'client,executor') fail(400, 'registration', 'Invalid Client registration envelope');
+            const envelope = value as { executor: unknown; client: unknown };
+            result = store.registerExecutor(principal, envelope.executor, envelope.client);
+          } else result = store.registerExecutor(principal, value);
+        }
         else if (url.pathname === '/v1/work-items/register') result = store.registerWorkItem(principal, value);
         else if (url.pathname === '/v1/runs') result = store.createRun(principal, value);
         else if (match?.[1] === 'executors' && match[3] === 'heartbeat') {

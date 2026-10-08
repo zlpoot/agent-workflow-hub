@@ -12,7 +12,9 @@
     "check": "pnpm typecheck && pnpm build && pnpm test",
     "handoff:check": "node dist/cli.js",
     "builder": "node dist/builder-cli.js",
-    "control-plane": "node dist/control-plane-cli.js"
+    "control-plane": "node dist/control-plane-cli.js",
+    "client": "node dist/client/cli.js",
+    "client:pack": "pnpm build && node scripts/client-pack.mjs"
   },
   "devDependencies": {
     "@types/node": "24.10.0",
