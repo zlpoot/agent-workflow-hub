@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { appendEvent, assertEntity, assertClientMetadata, replayRun, validateBindings } from '../protocol/index.js';
 import type { ClientMetadata, Event, EventType, Executor, ProjectManifest, ProfilePolicy, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
@@ -149,6 +149,14 @@ export class AwhClient {
     return locked(c.path + '.lock', async () => {
       const s = this.load(c), p = await this.project(c), ex = await this.executor(c);
       if (s.outbox?.length) clientFail('pending', 'Delivery Events require explicit deliver --retry');
+      if (deliveryRef) {
+        const currentJournal = s.initial?.id + '.delivery.json';
+        const ended = s.initial && terminal(replayRun(s.initial, s.events).run);
+        // Check all retained journals before archival: ordinary C1-C start may have
+        // archived a delivery Run, but cannot authorize repeating provider writes.
+        if (readdirSync(dirname(c.path)).some(name => name.endsWith('.delivery.json') && (name !== currentJournal || ended)))
+          clientFail('delivery_reconciliation', 'Retained delivery requires explicit provider reconciliation and an approved fresh candidate; Event retry does not authorize another delivery');
+      }
       if (s.initial && terminal(replayRun(s.initial, s.events).run)) {
         const archive = join(dirname(c.path), s.initial.id + '.json');
         try { writeFileSync(archive, JSON.stringify(s), { flag: 'wx', mode: 0o600 }); }

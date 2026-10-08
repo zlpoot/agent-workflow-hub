@@ -50,6 +50,35 @@ async function harness(t, { profile='webskill', policyChanges={}, legacyRef=fals
   return{base,repo,client,builder,counts,comments,deps,policy,sha,events,sessionPath,attempts,fault(type,kind='lost'){fault={type,kind};},isDraft:()=>draft};
 }
 const options={title:'Controlled fixture delivery',body:'References Hub task; fixture only.'};
+async function assertReconciliationGate(h) {
+  const snapshot=dir=>Object.fromEntries(readdirSync(dir,{recursive:true,withFileTypes:true}).filter(e=>e.isFile()).map(e=>{const path=join(e.parentPath,e.name);return[path,readFileSync(path).toString('base64')];}));
+  const state=snapshot(dirname(h.sessionPath())),logs=snapshot(join(h.repo,'.handoff')),counts={...h.counts},comments=[...h.comments],run=await h.client.status(),events=h.events(run.run.id);
+  await assert.rejects(deliver(h.client,options,h.deps),e=>e.code==='delivery_reconciliation');
+  assert.deepEqual(h.counts,counts);assert.deepEqual([...h.comments],comments);assert.deepEqual(snapshot(dirname(h.sessionPath())),state);assert.deepEqual(snapshot(join(h.repo,'.handoff')),logs);
+  assert.deepEqual(await h.client.status(),run);assert.deepEqual(h.events(run.run.id),events);
+}
+test('terminal delivery after post-push ACK retry refuses ordinary deliver without provider replay',async t=>{
+  const h=await harness(t);h.fault('GITHUB_PUSH_COMPLETED');await assert.rejects(deliver(h.client,options,h.deps));
+  const r=await h.client.retryDelivery();assert.equal(r.run.state,'failed');assert.equal(h.counts.push,1);assert.equal(h.counts.pr,0);await assertReconciliationGate(h);
+});
+test('ambiguous post-PR outcome requires reconciliation before ordinary deliver',async t=>{
+  const h=await harness(t),create=h.builder.createPR;h.builder.createPR=async(...args)=>{await create(...args);throw new BuilderError('PR response unavailable','api');};
+  await assert.rejects(deliver(h.client,options,h.deps));assert.equal((await h.client.status()).run.state,'failed');assert.equal(h.counts.pr,1);await assertReconciliationGate(h);
+});
+test('terminal delivery after confirmed Handoff preserves all records and refuses provider replay',async t=>{
+  const h=await harness(t);h.fault('pr_ready_waiting_for_independent_review');await assert.rejects(deliver(h.client,options,h.deps));
+  const r=await h.client.retryDelivery();assert.equal(r.run.state,'failed');assert(h.isDraft());assert(readFileSync(join(h.repo,'.handoff',r.run.id,'handoff.confirmed.json')));await assertReconciliationGate(h);
+});
+test('ordinary C1-C start preserves compatibility but cannot bypass an archived delivery journal',async t=>{
+  const h=await harness(t);h.fault('GITHUB_PUSH_COMPLETED');await assert.rejects(deliver(h.client,options,h.deps));const old=await h.client.retryDelivery();
+  const journal=join(dirname(h.sessionPath()),old.run.id+'.delivery.json'),before=readFileSync(journal);const fresh=await h.client.start(8);assert.notEqual(fresh.run.id,old.run.id);
+  await assertReconciliationGate(h);assert(before.equals(readFileSync(journal)));
+});
+test('initial RUN_STARTED lost ACK resumes only the same fixed deliver before journal creation',async t=>{
+  const h=await harness(t);h.fault('RUN_STARTED');await assert.rejects(deliver(h.client,options,h.deps));const s=JSON.parse(readFileSync(h.sessionPath())),pending=s.pending;
+  await assert.rejects(h.client.retryDelivery(),e=>e.code==='delivery_state');assert.equal(h.counts.connect,0);
+  const r=await deliver(h.client,{...options,holdDraft:true},h.deps);assert.equal(r.run_id,s.initial.id);assert.deepEqual(h.attempts.filter(e=>e.id===pending.id),[pending,pending]);assert.equal(h.counts.push,1);assert.equal(h.counts.pr,1);
+});
 for(const profile of ['webskill','future-ui','hub'])test(`fixed ${profile} delivery preserves Work Item/PR references and waits for independent Review`,async t=>{
   const h=await harness(t,{profile}),before=git(h.repo,['status','--porcelain']),result=await deliver(h.client,options,h.deps),events=h.events(result.run_id);
   assert.equal(result.authority_verified,false);assert.equal(result.disposition,'waiting_for_independent_review');assert.equal(h.counts.ready,1);
