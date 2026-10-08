@@ -17,7 +17,7 @@ for (const [i, f] of fixtures.entries()) {
   store.registerWorkItem(principal, f.work_item); store.createRun(principal, f.run);
   const append = (sequence, type, data) => store.append(principal, f.run.id, { schema_version: '1.0', kind: 'event', id: `fixture-${i}-${sequence}`,
     run_id: f.run.id, sequence, type, occurred_at: new Date(Date.now() - (10 - sequence) * 1000).toISOString(), payload: { schema_version: '1.0', data, extensions: {} } });
-  append(1, 'RUN_STARTED', { source_sha: f.run.source.sha }); append(2, 'STEP_STARTED', { step_id: 'verify', name: 'Verify contract' });
+  append(1, 'RUN_STARTED', { source_sha: f.run.source.sha }); append(2, 'STEP_STARTED', { step_id: 'verify', name: '验证接口契约' });
   if (!i) append(3, 'RUN_FAILED', { reason: 'Synthetic failure for read-only preview' });
 }
 const cookie = randomBytes(32).toString('base64url');

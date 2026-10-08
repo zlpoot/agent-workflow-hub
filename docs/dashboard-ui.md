@@ -12,6 +12,8 @@ Overview exposes counts with Registry/Event provenance and refresh watermark. Pr
 
 Loading/empty/error/connecting/partial/offline/outdated states are distinct. A failed refresh retains the last good snapshot and its refresh timestamp. Executor presence becomes unknown while the snapshot is offline/outdated. Connected appears only after SSE actually opens. Detail close remains visible and Escape/keyboard navigation are supported. No mutation, pairing, admin, credential/Profile edit, Codex launch, deliver, Review or merge action exists.
 
+The default interface is Simplified Chinese (`zh-CN`), including navigation, statuses, search/filter labels, details, policy diagnostics, timestamps and safe error messages. Chinese status/event search matches translated presentation labels; protocol states, identifiers, source references, commands and recorded facts remain unchanged. Unknown diagnostics fall back to their recorded value, while unknown errors use a fixed safe Chinese message. The browser smoke also checks the Chinese document/title and searches by Chinese status.
+
 ## Browser contract and recovery
 
 Only fixed same-origin GET `/dashboard/v1` endpoints are reachable from the adapter. Fetch uses same-origin cookies, no-store and redirect:error; EventSource uses the fixed same-origin stream. No bearer/config/URL/API passthrough, filesystem/SQLite or server imports, browser storage, cookie reads, third-party resources, telemetry or evidence bodies are present. Contract validators are generated at build time from `contracts/dashboard-v1.openapi.json`; browser runtime needs no eval. Incompatible or secret-shaped extra fields fail closed; error bodies/exception input are not reflected into UI.
