@@ -1,5 +1,9 @@
 # agent-workflow-hub
 
+## C1-G Dashboard read-only MVP
+
+Issue [#30](https://github.com/zlpoot/agent-workflow-hub/issues/30) 新增独立只读浏览器界面：Overview / Projects / Executors / Runs / Timeline、真实未知/离线状态、#23 契约校验和 SSE 恢复。使用锁定的 Radix Themes；Future UI 保留为本地语义适配入口。`pnpm dashboard:fixture` 启动仅内存 fixture 的 loopback 预览。P2 通过共享 scope 投影消除空闲全量 SQLite 重读；真实 gateway 默认关闭，原 CP 保持不变。启动、测试与独立 live/session/deployment 门禁见 [Dashboard UI 规范](docs/dashboard-ui.md)。
+
 ## C1-E Dashboard read contract
 
 Issue [#23](https://github.com/zlpoot/agent-workflow-hub/issues/23) 增加版本化只读 [Dashboard API](docs/dashboard-api.md) 与 [OpenAPI 3.1](contracts/dashboard-v1.openapi.json)：Projects/Executors/Runs/Timeline、全局 SSE cursor 和安全 diagnostic 投影。可选 viewer gateway 默认关闭，与 CP Client 凭据独立；本阶段不部署或修改原 CP，不实现 Dashboard 页面。
@@ -32,7 +36,7 @@ pnpm check
 pnpm handoff:check examples/ready.json --expected-head aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```
 
-`pnpm check` 顺序执行 TypeScript 类型检查、编译和 Node.js 内置测试（含启动真实 CLI 进程的行为测试）。`dist/` 是编译产物；只运行 CLI 时先执行 `pnpm build`。安装需要从 npm registry 下载锁定的开发依赖（TypeScript、Node 类型及其类型依赖），没有依赖安装脚本。CLI 自身不需要网络。
+`pnpm check` 顺序执行服务端/浏览器 TypeScript 类型检查、编译和 Node.js 内置测试（含启动真实 CLI 进程的行为测试）。`dist/` 是编译产物；只运行 CLI 时先执行 `pnpm build`。安装从 npm registry 下载锁定依赖；只有 esbuild 的固定构建脚本获准执行，浏览器依赖不进入独立 Client 包。CLI 自身不需要网络。浏览器 smoke 与 SSE 负载是显式的定向验证。
 
 ## 固定命令与结果
 

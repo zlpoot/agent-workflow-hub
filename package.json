@@ -4,20 +4,32 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "build": "tsc",
+    "typecheck": "tsc --noEmit && tsc -p dashboard/tsconfig.json",
+    "build": "tsc && node scripts/dashboard-build.mjs",
     "test": "node --test tests/*.test.mjs",
     "check": "pnpm typecheck && pnpm build && pnpm test",
     "handoff:check": "node dist/cli.js",
     "builder": "node dist/builder-cli.js",
     "control-plane": "node dist/control-plane-cli.js",
     "client": "node dist/client/cli.js",
-    "client:pack": "pnpm build && node scripts/client-pack.mjs"
+    "client:pack": "pnpm build && node scripts/client-pack.mjs",
+    "dashboard:fixture": "node scripts/dashboard-fixture.mjs",
+    "dashboard:smoke": "node scripts/dashboard-smoke.mjs",
+    "dashboard:load": "node scripts/dashboard-load.mjs"
   },
   "devDependencies": {
+    "@radix-ui/themes": "3.3.0",
     "@types/node": "24.10.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
+    "playwright": "1.62.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "typescript": "5.9.3"
   },
   "dependencies": {

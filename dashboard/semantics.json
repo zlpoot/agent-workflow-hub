@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "library": {
+    "name": "@radix-ui/themes",
+    "version": "3.3.0"
+  },
+  "future_ui": {
+    "role": "semantic_adapter",
+    "integration": "local_declaration",
+    "runtime_dependency": false
+  },
+  "authority_verified": false,
+  "components": {
+    "navigation": {
+      "component": "Tabs",
+      "states": [
+        "selected",
+        "unselected"
+      ],
+      "interaction": "view_only"
+    },
+    "collection": {
+      "component": "Table",
+      "states": [
+        "loading",
+        "empty",
+        "ready",
+        "partial",
+        "outdated",
+        "error"
+      ]
+    },
+    "status": {
+      "component": "Badge",
+      "states": [
+        "online",
+        "offline",
+        "unknown"
+      ],
+      "source": "server_registration_or_heartbeat"
+    },
+    "search": {
+      "component": "TextField",
+      "interaction": "local_filter"
+    },
+    "detail": {
+      "component": "Dialog",
+      "close": "visible_button_and_escape",
+      "authority": "read_only"
+    }
+  },
+  "profile": {
+    "accent": "teal",
+    "gray": "slate",
+    "radius": "medium",
+    "density": "comfortable",
+    "locale": "zh-CN"
+  },
+  "limitations": [
+    "Local mapping is not an upstream Future UI adapter conformance claim",
+    "Runtime declarations never imply GitHub approval",
+    "No runtime capability or WebMCP binding"
+  ]
+}
