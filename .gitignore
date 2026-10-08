@@ -9,3 +9,7 @@ dist/
 credentials/
 *.token
 *.jwt
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.awh-runtime/

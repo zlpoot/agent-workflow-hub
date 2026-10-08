@@ -31,6 +31,7 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
     workflow('c07-r2', 'codex/c07-r2-receive-pack', 13, ['pnpm check'], null),
     workflow('c07-r3', 'codex/c07-r3-scoped-helper', 16, ['pnpm check'], null),
     workflow('c1a', 'codex/c1a-protocol', 19, ['pnpm check'], null),
+    workflow('c1b', 'codex/c1b-control-plane', 20, ['pnpm check'], null),
   ]) }),
   Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([
     workflow('bootstrap', 'codex/awh-c06-bootstrap', 6,
