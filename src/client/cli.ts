@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { AwhClient, CLIENT_EVENT_TYPES } from './client.js';
@@ -35,7 +36,8 @@ export async function main(args: string[]): Promise<unknown> {
   if (command === 'event') return client.event(options.get('--retry') ? null : options.get('--type')!, options.has('--data') ? readJson(options.get('--data')!) : undefined);
   return client.finish(options.get('--outcome') === 'failed', options.has('--data') ? readJson(options.get('--data')!) : undefined);
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// Node resolves ESM URLs, while npm's Unix bin may leave argv[1] as a symlink.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
   main(process.argv.slice(2)).then(result => console.log(JSON.stringify(result))).catch(error => {
     const known = error instanceof ClientError;
     console.error(JSON.stringify({ error: { code: known ? error.code : 'client', message: known ? error.message : 'Client operation failed; configuration, input and remote diagnostics suppressed',

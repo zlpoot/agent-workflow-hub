@@ -185,7 +185,17 @@ test('local package installs offline with bundled runtime and real bin; full CLI
   const shim = join(prefix,'node_modules/.bin/awh' + (process.platform === 'win32' ? '.cmd' : ''));
   const bin = process.platform === 'win32' ? spawnSync(process.env.ComSpec ?? 'cmd.exe',['/d','/s','/c',`""${shim}" --version"`],{cwd:h.repo,encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true}) : spawnSync(shim,['--version'],{cwd:h.repo,encoding:'utf8'});
   assert.equal(bin.status,0,bin.stderr); assert.equal(JSON.parse(bin.stdout).version,CLIENT_VERSION);
-  const invoke = async args => { const r = await runCli(cli,args,h.repo); assert.equal(r.code,0,r.stderr); assert(!r.stdout.includes(h.token)); return JSON.parse(r.stdout); };
+  // npm's Unix bin is a symlink. A Windows junction exercises the same argv/ESM path mismatch without admin privileges.
+  const alias = join(h.base,'installed-cli-alias'); symlinkSync(dirname(cli),alias,process.platform === 'win32' ? 'junction' : 'dir');
+  const linkedCli = join(alias,'cli.js');
+  const linkedVersion = await runCli(linkedCli,['--version'],h.repo); assert.equal(linkedVersion.code,0,linkedVersion.stderr);
+  assert.notEqual(linkedVersion.stdout.trim(),'','Symlinked installed CLI must execute its entry point');
+  assert.equal(JSON.parse(linkedVersion.stdout).version,CLIENT_VERSION);
+  const help = await runCli(linkedCli,['--help'],h.repo); assert.equal(help.code,0); assert.equal(JSON.parse(help.stdout).deliver,'unavailable until C1-D/#22');
+  const invalid = await runCli(linkedCli,['deliver'],h.repo); assert.equal(invalid.code,2); assert.equal(JSON.parse(invalid.stderr).error.code,'arguments');
+  const imported = await runCli('--input-type=module',['--eval',`await import(${JSON.stringify(new URL('../dist/client/cli.js',import.meta.url).href)})`],h.repo);
+  assert.equal(imported.code,0,imported.stderr); assert.equal(imported.stdout,''); assert.equal(imported.stderr,'');
+  const invoke = async args => { const r = await runCli(linkedCli,args,h.repo); assert.equal(r.code,0,r.stderr); assert(!r.stdout.includes(h.token)); return JSON.parse(r.stdout); };
   unlinkSync(join(h.repo,'.awh/project.yaml'));
   await invoke(['init','--profile',fixture('webskill').manifest.profile.ref]); await invoke(['--config',h.configPath,'register']); const started = await invoke(['--config',h.configPath,'start','--issue','21']);
   const payload = join(h.base,'event.json'); writeFileSync(payload,JSON.stringify({step_id:'installed',name:'Installed CLI smoke test'})); await invoke(['--config',h.configPath,'event','--type','STEP_STARTED','--data',payload]);
