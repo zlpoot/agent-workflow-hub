@@ -3,12 +3,12 @@ import { request as httpsRequest } from 'node:https';
 import { ClientError } from './local.js';
 
 // Direct HTTP(S), never caller proxy auto-discovery, redirects, cookies or GitHub credentials.
-export async function requestJson(endpoint: string, path: string, credential: string, method: 'GET' | 'POST', data?: unknown): Promise<Record<string, unknown>> {
+export async function requestJson(endpoint: string, path: string, credential: string, method: 'GET' | 'POST', data?: unknown, ca?: Buffer): Promise<Record<string, unknown>> {
   const url = new URL(path, endpoint), encoded = data === undefined ? undefined : JSON.stringify(data);
   return new Promise((resolve, reject) => {
     const fail = (code: string, message: string, status?: number) => reject(new ClientError(code, message, status));
     const req = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, { method, agent: false,
-      ...(url.protocol === 'https:' ? { rejectUnauthorized: true } : {}),
+      ...(url.protocol === 'https:' ? { rejectUnauthorized: true, ...(ca ? { ca } : {}) } : {}),
       headers: { Authorization: 'Bearer ' + credential, Accept: 'application/json',
         ...(encoded === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(encoded) }) } }, res => {
       const status = res.statusCode ?? 0;

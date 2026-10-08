@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, X509Certificate } from 'node:crypto';
 import { hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync, unlinkSync, openSync, closeSync } from 'node:fs';
@@ -89,7 +89,7 @@ export function initManifest(identity: RepositoryIdentity, projectId: string, pr
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; if (!same(readManifest(identity), manifest)) clientFail('manifest_conflict', 'Existing Manifest identity cannot be overwritten'); }
   return manifest;
 }
-export interface ClientConfig { schema_version: '1.0'; endpoint: string; credential_file: string; state_directory: string; executor_id: string; executor_type: string; profile_version?: string }
+export interface ClientConfig { schema_version: '1.0'; endpoint: string; credential_file: string; state_directory: string; executor_id: string; executor_type: string; profile_version?: string; ca_certificate_file?: string }
 function outside(root: string, path: string): void {
   const rel = relative(root, path); if (!rel || !rel.startsWith('..' + (process.platform === 'win32' ? '\\' : '/')) && !isAbsolute(rel))
     clientFail('configuration', 'Client configuration, credential and state must be outside the project');
@@ -98,7 +98,7 @@ export function readConfig(path: string, root: string): ClientConfig {
   if (!isAbsolute(path)) clientFail('configuration', 'Explicit absolute Client config path is required');
   outside(root, realpathSync(path));
   const config = readJson(path) as ClientConfig;
-  if (!config || Array.isArray(config) || Object.keys(config).some(key => !['schema_version','endpoint','credential_file','state_directory','executor_id','executor_type','profile_version'].includes(key)) ||
+  if (!config || Array.isArray(config) || Object.keys(config).some(key => !['schema_version','endpoint','credential_file','state_directory','executor_id','executor_type','profile_version','ca_certificate_file'].includes(key)) ||
       config.schema_version !== '1.0' || !validId(config.executor_id) || typeof config.executor_type !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(config.executor_type) ||
       typeof config.credential_file !== 'string' || !isAbsolute(config.credential_file) || typeof config.state_directory !== 'string' || !isAbsolute(config.state_directory) ||
       config.profile_version !== undefined && !validId(config.profile_version)) clientFail('configuration', 'Invalid Client config');
@@ -107,6 +107,16 @@ export function readConfig(path: string, root: string): ClientConfig {
   if (endpoint.username || endpoint.password || endpoint.pathname !== '/' || endpoint.search || endpoint.hash ||
       !['http:', 'https:'].includes(endpoint.protocol) || endpoint.protocol === 'http:' && !['127.0.0.1', '[::1]'].includes(endpoint.hostname) ||
       process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') clientFail('endpoint', 'Endpoint requires verified HTTPS or explicit numeric loopback transport; no redirects or TLS bypass');
+  if (config.ca_certificate_file !== undefined) {
+    if (endpoint.protocol !== 'https:' || typeof config.ca_certificate_file !== 'string' || !isAbsolute(config.ca_certificate_file))
+      clientFail('configuration', 'A CA certificate requires HTTPS and an absolute external path');
+    outside(root, realpathSync(config.ca_certificate_file)); readCaCertificate(config);
+    for (let directory = dirname(realpathSync(config.ca_certificate_file)); ; directory = dirname(directory)) {
+      try { lstatSync(join(directory, '.git')); clientFail('configuration', 'CA certificate must remain outside all repositories'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      if (dirname(directory) === directory) break;
+    }
+  }
   outside(root, realpathSync(config.credential_file)); outside(root, resolve(config.state_directory));
   let parent = resolve(config.state_directory); const suffix: string[] = [];
   for (;;) {
@@ -118,6 +128,17 @@ export function readConfig(path: string, root: string): ClientConfig {
   outside(root, realpathSync(config.state_directory));
   if (lstatSync(config.state_directory).isSymbolicLink()) clientFail('configuration', 'Client state directory cannot be a symbolic link');
   return { ...config, endpoint: endpoint.origin };
+}
+export function readCaCertificate(config: ClientConfig): Buffer | undefined {
+  if (config.ca_certificate_file === undefined) return undefined;
+  try {
+    const pem = regular(config.ca_certificate_file, 64 * 1024);
+    if (!/^\s*-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----\s*$/.test(pem.toString('ascii')))
+      clientFail('certificate', 'Expected one public CA certificate; private key material is forbidden');
+    const ca = new X509Certificate(pem);
+    if (!ca.ca || Date.parse(ca.validFrom) > Date.now() || Date.parse(ca.validTo) <= Date.now()) clientFail('certificate', 'CA certificate is not currently valid');
+    return pem;
+  } catch { return clientFail('certificate', 'Invalid or unavailable CA certificate (details suppressed)'); }
 }
 export function readCredential(config: ClientConfig): string {
   try {

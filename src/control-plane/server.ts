@@ -1,10 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import { TextDecoder } from 'node:util';
 import { ProtocolError } from '../protocol/index.js';
 import { ControlPlaneStore } from './store.js';
 import { ControlPlaneError, fail, MAX_BODY_BYTES, safeData, validId, type Authenticate, type Principal } from './security.js';
 
-export interface ServerOptions { store: ControlPlaneStore; authenticate: Authenticate; poll_interval_ms?: number }
+export interface ServerOptions { store: ControlPlaneStore; authenticate: Authenticate; poll_interval_ms?: number; tls?: { cert: Buffer; key: Buffer } }
 function number(value: string | null, max = Number.MAX_SAFE_INTEGER): number {
   if (value === null) return 0;
   if (!/^(0|[1-9][0-9]{0,15})$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > max)
@@ -163,13 +164,15 @@ export function createControlPlaneServer(options: ServerOptions) {
       }
     }
   };
-  const server = createServer({ maxHeaderSize: 16 * 1024, headersTimeout: 10000, requestTimeout: 15000 }, (request, response) => { void handler(request, response); });
+  const limits = { maxHeaderSize: 16 * 1024, headersTimeout: 10000, requestTimeout: 15000 };
+  const listener = (request: IncomingMessage, response: ServerResponse) => { void handler(request, response); };
+  const server = options.tls ? createHttpsServer({ ...limits, ...options.tls, minVersion: 'TLSv1.2' }, listener) : createServer(limits, listener);
   server.maxHeadersCount = 64;
   server.on('clientError', (_error, socket) => { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); });
   return { server, close: async () => {
     for (const stream of streams) stream.destroy();
     await new Promise<void>((resolve, reject) => {
-      server.close(error => { if (error) reject(error); else resolve(); }); server.closeAllConnections();
+      server.close(error => { if (error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') reject(error); else resolve(); }); server.closeAllConnections();
     });
   } };
 }

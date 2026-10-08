@@ -5,7 +5,7 @@ import { appendEvent, assertEntity, assertClientMetadata, replayRun, validateBin
 import type { ClientMetadata, Event, EventType, Executor, ProjectManifest, ProfilePolicy, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
 import { safeData, MAX_PAYLOAD_BYTES } from '../control-plane/security.js';
 import { CLIENT_VERSION } from './version.js';
-import { atomicJson, clientFail, inspectRepository, locked, machine, readConfig, readCredential, readJson, readManifest, same, type Machine, type RepositoryIdentity, type ClientConfig } from './local.js';
+import { atomicJson, clientFail, inspectRepository, locked, machine, readConfig, readCredential, readCaCertificate, readJson, readManifest, same, type Machine, type RepositoryIdentity, type ClientConfig } from './local.js';
 import { requestJson } from './http.js';
 
 export const CLIENT_EVENT_TYPES = ['STEP_STARTED', 'STEP_COMPLETED', 'VERIFICATION_STARTED', 'VERIFICATION_PASSED', 'VERIFICATION_FAILED', 'RUN_FAILED'] as const;
@@ -35,7 +35,7 @@ export class AwhClient {
   }
   private request(c: Context, path: string, method: 'GET' | 'POST' = 'GET', data?: unknown) {
     if (data !== undefined) safeData(data);
-    return requestJson(c.config.endpoint, path, c.credential, method, data);
+    return requestJson(c.config.endpoint, path, c.credential, method, data, readCaCertificate(c.config));
   }
   private empty(c: Context): Session { return { schema_version: '1.0', manifest: c.manifest, endpoint: c.config.endpoint,
     executor_id: c.executor.id, machine_id: c.machine.id, initial: null, work_item: null, events: [], pending: null }; }

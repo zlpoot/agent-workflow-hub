@@ -41,7 +41,8 @@ Manifest 只请求身份绑定。Policy 来自 CP trusted registry，不从项�
 ```json
 {
   "schema_version": "1.0",
-  "endpoint": "http://127.0.0.1:4311",
+  "endpoint": "https://192.168.2.5:8443",
+  "ca_certificate_file": "/absolute/external/awh-ca.pem",
   "credential_file": "/absolute/external/client.credential",
   "state_directory": "/absolute/external/state",
   "executor_id": "webskill-mac-client",
@@ -52,7 +53,11 @@ Manifest 只请求身份绑定。Policy 来自 CP trusted registry，不从项�
 
 credential_file 放管理员另行生成的专用 CP credential，非 GitHub token；Unix 必须 owner-only，Windows 配置者应设置 owner-only NTFS ACL。CP trusted config 仅持有 hash 与 project/executor scope。不得通过参数、stdout、payload、Git 或交接发送凭据；错误只输出固定诊断。
 
-endpoint 仅支持无 userinfo/path/query/fragment 的 origin：numeric loopback HTTP 或证书校验的 HTTPS。Mac 到 Windows 的第一版使用显式 SSH tunnel：Windows CP 固定 127.0.0.1:4310，Mac 本地 127.0.0.1:4311。不得直接监听 LAN HTTP、跟随重定向、读取 HTTP proxy 自动配置或关闭 TLS 校验。连接/auth/schema/ACK 错误非零退出，无静默切换 endpoint、身份或自动重试。网络总 deadline 15s，response 上限 8 MiB，所有响应要求 `authority_verified=false`。
+endpoint 仅支持无 userinfo/path/query/fragment 的 origin：numeric loopback HTTP 或证书校验的 HTTPS。Owner [最新指令](https://github.com/zlpoot/agent-workflow-hub/pull/26#issuecomment-6050291524) 废止旧 SSH/tunnel 步骤。Windows 原生 Node HTTPS 显式监听 192.168.2.5:8443，Mac 192.168.2.3 直接使用该 HTTPS origin；保留 Windows 127.0.0.1:4310，两端共享原有同一个 SQLite store。防火墙有效规则必须只允许 Mac 来源；配置证书/密钥和 trusted Registry 在仓库外，不增加第三方常驻服务。不得绑定 0.0.0.0 或 LAN 明文 HTTP。
+
+`ca_certificate_file` 为可选 absolute 仓库外单个 public CA PEM，仅 HTTPS 可用。读取 bounded regular file，拒绝项目内（含 canonical ancestor 跳转）、私钥、非 CA、已过期/尚未有效证书。它仅通过当前请求的 Node HTTPS `ca` 选项生效，不导入全局系统信任。未指定时使用 Node 默认 CA。实际 TLS 仍验证签发链、有效期与 endpoint hostname/IP SAN；不覆盖 `checkServerIdentity`。管理员经可信渠道核对 public CA SHA-256 fingerprint 后才交给 Mac；leaf 私钥不离开 Windows。不跟随重定向、读取 HTTP proxy 自动配置、关闭 TLS 检查或静默 HTTP fallback。连接/auth/schema/ACK 错误非零退出，无身份或 endpoint fallback/自动重试。网络总 deadline 15s，response 上限 8 MiB，所有响应要求 `authority_verified=false`。
+
+**主机切换阻断 / #27：** 当前 session namespace 与已保存 binding 包含 endpoint。改址会看不见旧 session，因此 #21 不支持改址、HTTP→HTTPS 的既有 Client 会话迁移或 Windows→Mac CP cutover。现有 Windows Client 保留原 loopback endpoint；尚未注册的 Mac 首次使用 HTTPS。不得删除/改写旧 state、强行换 endpoint 后 start 或把旧 session 交给无关 CP。[#27](https://github.com/zlpoot/agent-workflow-hub/issues/27) 必须先实现稳定逻辑 service ID、显式验证旧/新 CP identity 和同一 DB 的恢复边界，以及锁内原子兼容迁移；保留 machine UUID、Run/Event ID/sequence/timestamp、pending bytes/archived history；冲突/身份不明停机并保持原数据。验收必须覆盖 pending ACK 已提交但未确认时跨 host 单写者切换、幂等回放、恢复原 endpoint 和中断回滚，无丢失/重复 cursor。当前回归明确证明 endpoint 改址不迁移数据、原状态字节未变、恢复原 endpoint 后同一 pending Event 能幂等确认；它不构成跨主机迁移 PASS。此设计与未实现验收作为 #27 cutover 前置 gate。
 
 ## 命令、事件与恢复
 
@@ -77,4 +82,4 @@ namespace 的 exclusive lock 防止并发写；崩溃遗留 lock 必须先确认
 
 管理员在仓库外创建两个独立 CP Client hash/scope 与 trusted Profiles。Windows Future UI、Mac WebSkill 分别安装同一校验过的 tarball，记录实际 machine/platform/arch、包版本/SHA-256、产品 Git root/origin/branch/HEAD/status 前后。只新增 minimal Manifest，在同一 CP register、start 受控 Run、上报 STEP_STARTED/COMPLETED、status 回读并显式失败 finish；检查 server timeline 连续序号及 scope 隔离。不得触碰活动产品分支、产品代码、AGENTS、锁文件或模型/付费流程。
 
-Mac/Windows 都实际连接并通过后才标真实双平台 PASS。SSH、credential、管理员配置、Mac 未执行等缺口都必须明确阻断；Windows 或 fixture PASS 不能代替 Mac。验收中使用的 repo root、config、endpoint、SHA 是外部运行记录，不绑定 Profile 到 Agent 或本机路径。最终 clean-head `pnpm check`、原始失败日志、独立安装证据和实际双方验收记录通过 App-only Builder 发布到同一 Draft PR；有阻断时不 Ready、不关闭 #21。
+Mac/Windows 都实际连接并通过后才标真实双平台 PASS。证书、credential、防火墙管理员配置、Mac 未执行等缺口都必须明确阻断；Windows 或 fixture PASS 不能代替 Mac。验收中使用的 repo root、config、endpoint、SHA 是外部运行记录，不绑定 Profile 到 Agent 或本机路径。最终 clean-head `pnpm check`、原始失败日志、独立安装证据和实际双方验收记录通过 App-only Builder 发布到同一 Draft PR；有阻断时不 Ready、不关闭 #21。

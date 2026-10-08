@@ -11,6 +11,8 @@ import { AwhClient, initManifest, inspectRepository, readManifest, CLIENT_VERSIO
 import { readConfig, machine } from '../dist/client/local.js';
 import { createAuthenticator, createControlPlaneServer, ControlPlaneStore } from '../dist/control-plane/index.js';
 import { npmEntry, npmEnv } from '../scripts/npm-tool.mjs';
+import { tlsFixture } from './tls-fixture.mjs';
+import { requestJson } from '../dist/client/http.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const fixture = name => JSON.parse(readFileSync(new URL(`../examples/protocol/${name}.json`, import.meta.url)));
 const nativePlatform = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
@@ -195,4 +197,63 @@ test('symlinked identity/configuration paths cannot inject project-local state',
   const h = await harness(t), redirect = join(h.base,'redirect');
   try { symlinkSync(h.repo,redirect,process.platform === 'win32' ? 'junction' : 'dir'); } catch (e) { if (['EPERM','EACCES'].includes(e.code)) { t.skip('OS does not permit symlink creation'); return; } throw e; }
   h.updateConfig({state_directory:join(redirect,'state')}); await assert.rejects(h.client.register(),errorCode('configuration'));
+});
+
+test('native verified HTTPS and loopback HTTP share Registry, Run history, credentials and scopes', async t => {
+  const h = await harness(t), tls = tlsFixture(), caPath = join(h.base,'ca.pem'); writeFileSync(caPath,tls.ca);
+  await h.client.register(); const started = await h.client.start(21);
+  const secure = createControlPlaneServer({store:h.store,authenticate:createAuthenticator([{...h.principal,token_sha256:createHash('sha256').update(h.token).digest('hex')}]),tls});
+  await new Promise(r=>secure.server.listen(0,'127.0.0.1',r)); t.after(()=>secure.close());
+  const original = {...h.config}; h.updateConfig({endpoint:`https://127.0.0.1:${secure.server.address().port}`,ca_certificate_file:caPath});
+  const registered = await h.client.register(); assert.equal(registered.executor.machine.id,h.store.getRun(h.principal,started.run.id).machine_id);
+  await assert.rejects(requestJson(h.config.endpoint.replace('https:','http:'),'/v1/projects',h.token,'GET'),errorCode('network'));
+  assert.equal((await requestJson(h.config.endpoint,'/v1/runs/'+started.run.id,h.token,'GET',undefined,tls.ca)).run.id,started.run.id);
+  const newRun=await h.client.start(21);await h.client.event('STEP_STARTED',{step_id:'tls',name:'TLS reporting'});await h.client.event('STEP_COMPLETED',{step_id:'tls',exit_code:0});await h.client.finish(true,{reason:'Controlled TLS run'});
+  const retained=await fetch(h.cp+'/v1/runs/'+newRun.run.id+'/events',{headers:{authorization:'Bearer '+h.token}});
+  assert.deepEqual((await retained.json()).events.map(x=>x.event.sequence),[1,2,3,4]);
+  // Endpoint changes are not migrations: old state remains byte-identical, and #27 must fix this before cutover.
+  assert.equal((await h.client.status()).run.id,newRun.run.id);
+  assert.equal(h.store.getRun(h.principal,started.run.id).state,'running');
+  h.updateConfig(original); delete h.config.ca_certificate_file; h.updateConfig({});
+  assert.equal((await h.client.status()).run.id,started.run.id);
+});
+
+for (const failure of ['untrusted','default-ca','wrong-ip','expired','down']) test(`TLS ${failure} fails before authenticated HTTP and never leaks credentials or falls back`, async t => {
+  const h = await harness(t), tls = tlsFixture({ip:failure==='wrong-ip'?'192.168.2.99':'127.0.0.1',expired:failure==='expired'});
+  const secure = createControlPlaneServer({store:h.store,authenticate:createAuthenticator([{...h.principal,token_sha256:createHash('sha256').update(h.token).digest('hex')}]),tls});
+  let authenticated = 0; secure.server.on('request',()=>authenticated++);
+  await new Promise(r=>secure.server.listen(0,'127.0.0.1',r)); const port = secure.server.address().port; t.after(()=>secure.close());
+  if(failure==='down') await secure.close();
+  const caPath=join(h.base,'ca.pem');writeFileSync(caPath,failure==='untrusted'?tlsFixture().ca:tls.ca);
+  h.updateConfig({endpoint:`https://127.0.0.1:${port}`,ca_certificate_file:caPath});
+  if(failure==='default-ca'){delete h.config.ca_certificate_file;h.updateConfig({});}
+  const failed=await runCli(join(root,'dist/client/cli.js'),['--config',h.configPath,'register'],h.repo);
+  assert.equal(failed.code,2);assert.equal(JSON.parse(failed.stderr).error.code,'network');
+  assert(!failed.stderr.includes(h.token));assert(!failed.stdout.includes(h.token));assert.equal(authenticated,0);assert.equal(h.requests,0);
+  assert.equal(h.store.listProjects(h.principal).length,0);
+});
+
+test('explicit CA is external, public-only, current and per HTTPS endpoint; no TLS environment bypass', async t => {
+  const h=await harness(t), tls=tlsFixture(), path=join(h.base,'ca.pem');writeFileSync(path,tls.ca);
+  h.updateConfig({ca_certificate_file:path});await assert.rejects(h.client.register(),errorCode('configuration'));
+  h.updateConfig({endpoint:'https://127.0.0.1:1'});
+  for(const invalid of [tls.key,Buffer.concat([tls.ca,tls.key]),tls.cert,tlsFixture({caExpired:true}).ca]){
+    writeFileSync(path,invalid);await assert.rejects(h.client.register(),errorCode('certificate'));
+  }
+  const inside=join(h.repo,'ca.pem');writeFileSync(inside,tls.ca);h.updateConfig({ca_certificate_file:inside});await assert.rejects(h.client.register(),errorCode('configuration'));
+  const otherRepo=consumer(h.base,'other-ca-repo');const otherCa=join(otherRepo,'ca.pem');writeFileSync(otherCa,tls.ca);h.updateConfig({ca_certificate_file:otherCa});await assert.rejects(h.client.register(),errorCode('configuration'));
+  h.updateConfig({ca_certificate_file:path});writeFileSync(path,tls.ca);
+  const failed=await runCli(join(root,'dist/client/cli.js'),['--config',h.configPath,'register'],h.repo,{...cleanEnv(),NODE_TLS_REJECT_UNAUTHORIZED:'0'});
+  assert.equal(failed.code,2);assert.equal(JSON.parse(failed.stderr).error.code,'endpoint');assert(!failed.stderr.includes(h.token));assert.equal(h.requests,0);
+});
+
+test('endpoint cutover is blocked operationally: retained pending bytes and machine identity recover losslessly at original endpoint', async t => {
+  const h=await harness(t,{proxy:true});await h.client.register();h.fault('lost');await assert.rejects(h.client.start(21));
+  const originalEndpoint=h.config.endpoint,path=h.sessionPath(),pending=readFileSync(path),identity=readFileSync(join(h.config.state_directory,'machine.json'));
+  h.updateConfig({endpoint:h.cp});assert.equal((await new AwhClient(h.configPath,h.repo).status()).run,null);
+  assert(pending.equals(readFileSync(path)));assert(identity.equals(readFileSync(join(h.config.state_directory,'machine.json'))));
+  h.updateConfig({endpoint:originalEndpoint});const restored=new AwhClient(h.configPath,h.repo);
+  assert.equal((await restored.status()).pending_event.id,JSON.parse(pending).pending.id);
+  const replay=await restored.start(21);assert.equal(replay.disposition,'idempotent');assert.equal(h.store.listEvents(h.principal,replay.run.id).length,1);
+  assert.deepEqual(replay.event,JSON.parse(pending).pending);assert(identity.equals(readFileSync(join(h.config.state_directory,'machine.json'))));
 });
