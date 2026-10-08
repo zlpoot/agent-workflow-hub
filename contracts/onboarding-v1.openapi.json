@@ -1,0 +1,2206 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AWH Trusted Onboarding 离线契约",
+    "version": "1.0.0",
+    "description": "Hub #31。仅 fixture dispatcher；未开放生产 Operator/Pairing 路由。生产通道、安全会话、旧 v2 集成需独立 Gate。"
+  },
+  "paths": {
+    "/onboarding/v1/nonce": {
+      "get": {
+        "operationId": "issueNonce",
+        "summary": "issueNonce",
+        "security": [
+          {
+            "OperatorSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nonce"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding/v1/requests": {
+      "post": {
+        "operationId": "requestProject",
+        "summary": "requestProject",
+        "security": [
+          {
+            "OperatorSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-awh-nonce",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding/v1/requests/{id}/decision": {
+      "post": {
+        "operationId": "decideProject",
+        "summary": "decideProject",
+        "security": [
+          {
+            "OperatorSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-awh-nonce",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Decision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding/v1/requests/{id}": {
+      "get": {
+        "operationId": "readProjectRequest",
+        "summary": "readProjectRequest",
+        "security": [
+          {
+            "OperatorSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding/v1/invitations": {
+      "post": {
+        "operationId": "createInvitation",
+        "summary": "createInvitation",
+        "security": [
+          {
+            "OperatorSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-awh-nonce",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationRequest"
+              }
+            }
+          }
+        },
+        "description": "仅返回非敏感 id/state/expiry。配对材料只经单独受信 CLI/Client delivery sink；无 browser secret。"
+      }
+    },
+    "/onboarding/v1/invitations/{id}/revoke": {
+      "post": {
+        "operationId": "revokeInvitation",
+        "summary": "revokeInvitation",
+        "security": [
+          {
+            "OperatorSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-awh-nonce",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Origin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Empty"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding/v1/projects/{id}/diagnostics": {
+      "get": {
+        "operationId": "operatorDiagnostics",
+        "summary": "operatorDiagnostics",
+        "security": [
+          {
+            "OperatorSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Diagnostics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding/v1/audit": {
+      "get": {
+        "operationId": "readAudit",
+        "summary": "readAudit",
+        "security": [
+          {
+            "OperatorSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Audit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pairing/v1/claim": {
+      "post": {
+        "operationId": "claimInvitation",
+        "summary": "claimInvitation",
+        "security": [
+          {
+            "PairingMaterial": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRequest"
+              }
+            }
+          }
+        },
+        "description": "专用 Client 受信通道；拒绝浏览器 Cookie/Origin。credential 仅经私有 Client sink 发送，JSON 无 bearer。"
+      }
+    },
+    "/pairing/v1/diagnostics/{id}": {
+      "get": {
+        "operationId": "clientDiagnostics",
+        "summary": "clientDiagnostics",
+        "security": [
+          {
+            "ClientCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Diagnostics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "脱敏 fixture 响应；不代表生产验收或 GitHub 权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ProjectRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "repository",
+          "profile_ref",
+          "profile_version"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+            "maxLength": 200
+          },
+          "profile_ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$",
+            "maxLength": 128
+          },
+          "profile_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          }
+        }
+      },
+      "Decision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          }
+        }
+      },
+      "Empty": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "InvitationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "repository",
+          "profile_ref",
+          "profile_version",
+          "client_id",
+          "executor_id",
+          "executor_type",
+          "machine_id",
+          "platform",
+          "service_id",
+          "endpoint",
+          "ca_sha256",
+          "delivery_id"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+            "maxLength": 200
+          },
+          "profile_ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$",
+            "maxLength": 128
+          },
+          "profile_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "client_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "executor_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "executor_type": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "machine_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "platform": {
+            "enum": [
+              "windows",
+              "macos",
+              "linux"
+            ]
+          },
+          "service_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "ca_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delivery_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          }
+        }
+      },
+      "ClaimRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "invitation_id",
+          "project_id",
+          "repository",
+          "profile_ref",
+          "profile_version",
+          "client_id",
+          "executor_id",
+          "executor_type",
+          "machine_id",
+          "platform",
+          "service_id",
+          "endpoint",
+          "ca_sha256",
+          "git_root_verified",
+          "user_confirmed"
+        ],
+        "properties": {
+          "invitation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+            "maxLength": 200
+          },
+          "profile_ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$",
+            "maxLength": 128
+          },
+          "profile_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "client_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "executor_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "executor_type": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "machine_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "platform": {
+            "enum": [
+              "windows",
+              "macos",
+              "linux"
+            ]
+          },
+          "service_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "ca_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "git_root_verified": {
+            "const": true
+          },
+          "user_confirmed": {
+            "const": true
+          }
+        }
+      },
+      "RequestView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "project_id",
+          "repository",
+          "profile_ref",
+          "profile_version",
+          "state",
+          "created_at",
+          "authority_verified",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+            "maxLength": 200
+          },
+          "profile_ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$",
+            "maxLength": 128
+          },
+          "profile_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "source": {
+            "const": "offline_fixture"
+          }
+        }
+      },
+      "InvitationView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "project_id",
+          "state",
+          "expires_at",
+          "attempts_remaining",
+          "authority_verified",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "claimed",
+              "revoked",
+              "expired",
+              "locked"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attempts_remaining": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "source": {
+            "const": "offline_fixture"
+          }
+        }
+      },
+      "ClaimView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "client_id",
+          "project_id",
+          "state",
+          "git_identity",
+          "authority_verified",
+          "source"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "state": {
+            "enum": [
+              "active"
+            ]
+          },
+          "git_identity": {
+            "const": "client_local_claim"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "source": {
+            "const": "offline_fixture"
+          }
+        }
+      },
+      "Nonce": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nonce",
+          "expires_at",
+          "authority_verified",
+          "source"
+        ],
+        "properties": {
+          "nonce": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "source": {
+            "const": "offline_fixture"
+          }
+        }
+      },
+      "Check": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state",
+          "code"
+        ],
+        "properties": {
+          "state": {
+            "enum": [
+              "passed",
+              "blocked",
+              "not_checked"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z_]+$"
+          }
+        }
+      },
+      "Diagnostics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "state",
+          "binding",
+          "policy",
+          "checks",
+          "authority_verified",
+          "source"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "state": {
+            "enum": [
+              "blocked",
+              "not_checked"
+            ]
+          },
+          "binding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "policy": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "branch",
+                  "verification_commands"
+                ],
+                "properties": {
+                  "branch": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "verification_commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "maxItems": 16
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enrollment",
+              "client",
+              "git_identity",
+              "branch_verification",
+              "provider_app_permissions"
+            ],
+            "properties": {
+              "enrollment": {
+                "$ref": "#/components/schemas/Check"
+              },
+              "client": {
+                "$ref": "#/components/schemas/Check"
+              },
+              "git_identity": {
+                "$ref": "#/components/schemas/Check"
+              },
+              "branch_verification": {
+                "$ref": "#/components/schemas/Check"
+              },
+              "provider_app_permissions": {
+                "$ref": "#/components/schemas/Check"
+              }
+            }
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "source": {
+            "const": "offline_fixture"
+          }
+        }
+      },
+      "AuditEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cursor",
+          "at",
+          "actor",
+          "action",
+          "target",
+          "project_id",
+          "repository",
+          "result",
+          "code"
+        ],
+        "properties": {
+          "cursor": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[a-z_]+$"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "enum": [
+              "accepted",
+              "denied"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[a-z_]+$"
+          }
+        }
+      },
+      "Audit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entries",
+          "next_cursor",
+          "authority_verified",
+          "source"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AuditEntry"
+            }
+          },
+          "next_cursor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "source": {
+            "const": "offline_fixture"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error",
+          "authority_verified",
+          "source"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[a-z_]+$"
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 160
+              }
+            }
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "source": {
+            "const": "offline_fixture"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "OperatorSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "awh_operator",
+        "description": "独立受信 Operator session；不接受 Viewer 或 CP Client。POST 另需 Origin 与 one-use nonce。"
+      },
+      "PairingMaterial": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Pairing awh_pair_<256-bit>，仅可信非浏览器 Client 通道；禁止日志/URL/browser。"
+      },
+      "ClientCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "awh_cp_<256-bit> 专用 Client credential；只有已认领单 project/executor scope。"
+      }
+    }
+  }
+}
