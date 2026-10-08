@@ -1,5 +1,7 @@
 # agent-workflow-hub
 
+Issue [#22](https://github.com/zlpoot/agent-workflow-hub/issues/22) 的 C1-D 在现有 Builder 上新增观测 Adapter 和安装包内固定范围 `awh deliver`。CP 保存 Run/Event，GitHub 保持开发事实源。交付、event-only retry、Draft/independent Review 边界与真实双端验收见 [delivery](docs/delivery.md)。
+
 ## C1-C Client
 
 Issue [#21](https://github.com/zlpoot/agent-workflow-hub/issues/21) 增加可独立安装的 `@zlpoot/awh-client` CLI：minimal Manifest、真实 Git origin binding、稳定 machine identity、专用 CP 配置，以及 register/start/event/status/finish。`pnpm client:pack` 生成包含运行依赖的 tarball，消费者在仓库外安装，无需 Hub checkout。安装、固定命令、显式重试、原生 verified HTTPS 和真实双端验收边界见 [Client 规范](docs/client.md)。`deliver` 等待 #22；双平台 PASS 必须由同一个 CP 的实际两端证据证明。

@@ -397,6 +397,22 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`, 'PATCH', { body: safeText(body) }), number);
     },
     readComment,
+    // Adapter may lose observation connectivity after a real Ready mutation. Restore and read back
+    // this same App-owned, fixed-workflow candidate; never announce an uncertain delivery as Ready.
+    restoreDraft: async (number: number, expectedHead: string) => {
+      const p = await readPR(number);
+      if (!sha(expectedHead) || p.head !== expectedHead) fail('Draft restoration exact head mismatch');
+      if (!p.draft) {
+        const result = await call('/graphql', 'POST', {
+          query: 'mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{isDraft}}}',
+          variables: { id: p.node_id },
+        });
+        if (result.errors || result.data?.convertPullRequestToDraft?.pullRequest?.isDraft !== true) fail('Draft restoration failed');
+      }
+      const final = await readPR(number);
+      if (!final.draft || final.head !== expectedHead || final.base !== p.base) fail('Draft restoration readback or version mismatch');
+      return final;
+    },
     ready: async (number: number, expectedHead: string, record: unknown, comment: number) => {
       const validation = validateHandoff(record, expectedHead);
       if (!validation.ready_claim_valid) fail('Confirmed Handoff validation failed');
