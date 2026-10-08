@@ -58,7 +58,8 @@ function diagnostics(run: Run, view: DashboardReadView) {
   const data = verification?.event.payload.data;
   const observedChecks = data && 'checks' in data ? data.checks : null;
   const expected = policy?.verification.commands ?? null;
-  const match = observedChecks !== null && expected !== null && JSON.stringify(observedChecks.map(check => check.command)) === JSON.stringify(expected) && observedChecks.every(check => check.exit_code === 0);
+  const match = verification?.event.type === 'VERIFICATION_PASSED' && observedChecks !== null && expected !== null &&
+    JSON.stringify(observedChecks.map(check => check.command)) === JSON.stringify(expected) && observedChecks.every(check => check.exit_code === 0);
   const comparison = (status: 'passed' | 'blocked' | 'not_checked', observed: unknown, expected: unknown, provenance: string, hint: string) =>
     ({ status, observed, expected, provenance, action_hint: hint, authority_verified: false as const });
   return { branch: comparison(policy ? run.source.ref === policy.branch.ref ? 'passed' : 'blocked' : 'not_checked', run.source.ref, policy?.branch.ref ?? null,

@@ -131,6 +131,28 @@ test('checks are a runtime declaration comparison; no diagnostic establishes Git
   const retry = h.projection.detail('runs', mac.run.id);
   assert.equal(retry.diagnostics.checks.status, 'not_checked'); assert.equal(retry.diagnostics.verification_subject_sha, '3'.repeat(40));
 });
+test('failed verification with all-zero checks stays blocked in RunDetail and the read API', async t => {
+  const h = await http(t), p = principal(mac), subject = '2'.repeat(40);
+  const checks = mac.profile_policy.verification.commands.map(command => ({ command, exit_code: 0 }));
+  const event = (sequence, type, data) => ({ ...started(mac), id: `failed-verification-${sequence}`, sequence, type,
+    occurred_at: `2026-10-07T00:00:0${sequence}.000Z`, payload: { schema_version: '1.0', data, extensions: {} } });
+  h.store.append(p, mac.run.id, started(mac));
+  h.store.append(p, mac.run.id, event(2, 'VERIFICATION_STARTED', { subject_sha: subject }));
+  // Legal Protocol failure: commands succeeded, but an independent verification gate did not.
+  h.store.append(p, mac.run.id, event(3, 'VERIFICATION_FAILED', { subject_sha: subject, checks, reason: 'independent gate failed' }));
+  const detail = h.projection.detail('runs', mac.run.id); conforms('RunDetail', detail);
+  assert.equal(detail.state, 'failed'); assert.equal(detail.diagnostics.checks.status, 'blocked');
+  assert.deepEqual(detail.diagnostics.checks.observed, checks);
+  assert.equal(detail.diagnostics.checks.provenance, 'runtime_verification_declaration');
+  assert.equal(detail.diagnostics.verification_subject_sha, subject); assert.equal(detail.diagnostics.verification_cursor, 3);
+  const response = await h.call(`/dashboard/v1/runs/${mac.run.id}`);
+  assert.equal(response.status, 200); conforms('RunResponse', response.body);
+  assert.equal(response.body.item.state, 'failed'); assert.equal(response.body.item.diagnostics.checks.status, 'blocked');
+  assert.equal(response.body.item.authority_verified, false); assert.equal(response.body.item.diagnostics.checks.authority_verified, false);
+  assert.equal(response.body.item.diagnostics.github_app.status, 'not_checked');
+  assert.equal(response.body.item.diagnostics.provider_permissions.status, 'not_checked');
+  assert.equal(h.projection.timeline(mac.run.id, 2, 100).items[0].result, 'failed');
+});
 test('overlapping steps retain correct identities and terminal failure clears current step', t => {
   const h = setup(t), p = principal(mac); h.store.append(p, mac.run.id, started(mac));
   const event = (sequence, type, data) => ({ ...started(mac), id: `step-event-${sequence}`, sequence, type,
