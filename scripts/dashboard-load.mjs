@@ -20,7 +20,7 @@ const { DashboardProjection: OldProjection } = await import('../dist/dashboard-u
 const f = JSON.parse(readFileSync('examples/protocol/future-ui.json', 'utf8'));
 const viewer = { id: 'viewer', project_ids: [f.project.id] }, principal = { id: 'fixture-client', project_ids: [f.project.id], executor_ids: [f.executor.id] };
 const results = [];
-for (const size of [{ name: 'small', runs: 2, events: 4 }, { name: 'near-cap', runs: 1000, events: 10000 }]) {
+for (const size of [{ name: 'small', runs: 2, events: 4 }, { name: 'near-cap', runs: 1000, events: 9999 }]) {
   console.log('Measuring fixture ' + size.name + ' (synthetic only)');
   const dir = mkdtempSync(join(tmpdir(), 'awh-sse-load-')), path = join(dir, 'fixture.sqlite');
   const store = new ControlPlaneStore(path, [f.profile_policy]);
@@ -34,7 +34,8 @@ for (const size of [{ name: 'small', runs: 2, events: 4 }, { name: 'near-cap', r
     for (let i = 0; i < size.runs; ++i) {
       const id = 'load-run-' + String(i).padStart(4, '0'), initial = { ...f.run, id }, projected = { ...initial, state: 'running', started_at: initial.created_at };
       addRun.run(id, f.project.id, f.executor.id, f.work_item.id, principal.id, JSON.stringify(initial), JSON.stringify(projected));
-      for (let j = 1; j <= size.events / size.runs; ++j) {
+      const perRun = Math.floor(size.events / size.runs) + (i < size.events % size.runs ? 1 : 0);
+      for (let j = 1; j <= perRun; ++j) {
         const event = { schema_version: '1.0', kind: 'event', id: `load-${i}-${j}`, run_id: id, sequence: j,
           type: j === 1 ? 'RUN_STARTED' : j % 2 === 0 ? 'STEP_STARTED' : 'STEP_COMPLETED', occurred_at: f.run.created_at,
           payload: { schema_version: '1.0', data: j === 1 ? { source_sha: f.run.source.sha } : j % 2 === 0 ? { step_id: 'verify-' + j, name: 'Verify' } : { step_id: 'verify-' + (j - 1), exit_code: 0 }, extensions: {} } };
@@ -90,8 +91,17 @@ for (const size of [{ name: 'small', runs: 2, events: 4 }, { name: 'near-cap', r
       assert.equal(response.status, 200); await response.arrayBuffer(); latencies.push(performance.now() - start);
     }
     const http_write_max_ms = +Math.max(...latencies).toFixed(2); assert(http_write_max_ms < 1000, 'CP heartbeat starved by idle viewers');
+    const lastRun = 'load-run-' + String(size.runs - 1).padStart(4, '0');
+    const nextSequence = Math.floor(size.events / size.runs) + 1;
+    const liveEvent = { schema_version: '1.0', kind: 'event', id: 'load-live-append', run_id: lastRun, sequence: nextSequence,
+      type: nextSequence % 2 === 0 ? 'STEP_STARTED' : 'STEP_COMPLETED', occurred_at: new Date().toISOString(),
+      payload: { schema_version: '1.0', data: nextSequence % 2 === 0 ? { step_id: 'live-step', name: 'Live load fixture' } : { step_id: 'verify-' + (nextSequence - 1), exit_code: 0 }, extensions: {} } };
+    const appendStart = performance.now();
+    const appended = await fetch(origin + `/v1/runs/${lastRun}/events`, { method: 'POST', headers: { Authorization: 'Bearer ' + clientToken, 'Content-Type': 'application/json' }, body: JSON.stringify(liveEvent) });
+    assert.equal(appended.status, 201); const appendBody = await appended.json(); assert.equal(appendBody.cursor, size.events + 1);
+    const http_event_append_ms = +(performance.now() - appendStart).toFixed(2); assert(http_event_append_ms < 1000, 'CP Event append starved by idle viewers');
     for (const abort of aborts) abort.abort(); await Promise.allSettled(readers.map(reader => reader.cancel()));
-    const result = { fixture: size, baseline, before, after, actual_64_stream_idle: idle, http_heartbeat_writes: 5, http_write_max_ms,
+    const result = { fixture: size, baseline, before, after, actual_64_stream_idle: idle, http_heartbeat_writes: 5, http_write_max_ms, http_event_append_ms, final_event_cursor: appendBody.cursor,
       method: 'Two 64-viewer poll batches using exact merged serializer vs shared cache, then actual idle streams and CP HTTP writes; fixture only' };
     results.push(result); console.log(JSON.stringify(result));
   } finally { for (const abort of aborts) abort.abort(); await service?.close(); writer?.close(); store.close(); assert.equal(dirname(dir), tmpdir()); assert(basename(dir).startsWith('awh-sse-load-')); rmSync(dir, { recursive: true, force: true }); }
