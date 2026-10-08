@@ -31,6 +31,7 @@ function fake(overrides = {}) {
   const requests = [], git = [];
   const targetRepo = overrides.repository ?? REPO;
   const targetBranch = overrides.branch ?? BRANCH;
+  const bootstrapDocument = targetBranch === 'codex/awh-v01-acceptance' ? 'docs/management/awh-v01-acceptance.md' : 'docs/management/agent-workflow-hub.md';
   const installed = overrides.installed ?? [REPO];
   let clock = now, ready = false;
   const deps = {
@@ -63,7 +64,7 @@ function fake(overrides = {}) {
       else if (url.includes('/git/ref/heads/')) data = { ref: `refs/heads/${targetBranch}`,
         url: `https://api.github.com/repos/${targetRepo}/git/refs/heads/${targetBranch}`,
         object: { type: 'commit', sha: head, url: `https://api.github.com/repos/${targetRepo}/git/commits/${head}` } };
-      else if (url.includes('/compare/')) data = { status: 'ahead', files: [{ filename: 'docs/management/agent-workflow-hub.md', status: 'added' }] };
+      else if (url.includes('/compare/')) data = { status: 'ahead', files: [{ filename: bootstrapDocument, status: 'added' }] };
       else if (url.endsWith('/graphql')) { ready = true; data = { data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }; }
       else if (url.endsWith('/issues/comments/10')) data = comment(10, overrides.handoffBody ?? handoffBody, targetRepo);
       else if (url.endsWith('/issues/comments/9')) data = comment(9, `Builder evidence\n${head}`, targetRepo);
@@ -79,7 +80,7 @@ function fake(overrides = {}) {
       if (args[1][0] === 'config' && args[1].includes('--get')) return { status: 0, stdout: `https://github.com/${targetRepo}.git\n` };
       if (args[1][0] === 'config') return { status: 0, stdout: 'core.bare\nremote.origin.url\n' };
       if (args[1][0] === 'branch') return { status: 0, stdout: targetBranch + '\n' };
-      if (args[1][0] === 'diff') return { status: 0, stdout: 'docs/management/agent-workflow-hub.md\0' };
+      if (args[1][0] === 'diff') return { status: 0, stdout: bootstrapDocument + '\0' };
       return { status: 0, stdout: '', stderr: '' };
     },
     ...overrides.deps,
