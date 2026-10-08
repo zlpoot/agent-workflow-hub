@@ -1,5 +1,9 @@
 # agent-workflow-hub
 
+## C1-E Dashboard read contract
+
+Issue [#23](https://github.com/zlpoot/agent-workflow-hub/issues/23) 增加版本化只读 [Dashboard API](docs/dashboard-api.md) 与 [OpenAPI 3.1](contracts/dashboard-v1.openapi.json)：Projects/Executors/Runs/Timeline、全局 SSE cursor 和安全 diagnostic 投影。可选 viewer gateway 默认关闭，与 CP Client 凭据独立；本阶段不部署或修改原 CP，不实现 Dashboard 页面。
+
 ## C1-C Client
 
 Issue [#21](https://github.com/zlpoot/agent-workflow-hub/issues/21) 增加可独立安装的 `@zlpoot/awh-client` CLI：minimal Manifest、真实 Git origin binding、稳定 machine identity、专用 CP 配置，以及 register/start/event/status/finish。`pnpm client:pack` 生成包含运行依赖的 tarball，消费者在仓库外安装，无需 Hub checkout。安装、固定命令、显式重试、原生 verified HTTPS 和真实双端验收边界见 [Client 规范](docs/client.md)。`deliver` 等待 #22；双平台 PASS 必须由同一个 CP 的实际两端证据证明。

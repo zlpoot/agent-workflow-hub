@@ -1,0 +1,2364 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AWH read-only Dashboard contract",
+    "version": "1.0.0",
+    "description": "Hub #23. No provider writes, browser Client bearer, secret projection or Review/Merge authority."
+  },
+  "servers": [
+    {
+      "url": "/dashboard/v1",
+      "description": "Configurable logical same-origin endpoint; first supplied authenticator is loopback HTTP only. No fixed machine IP/path."
+    }
+  ],
+  "paths": {
+    "/snapshot": {
+      "get": {
+        "operationId": "dashboardSnapshot",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Read projection; GitHub authority is never established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            },
+            "description": ""
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque keyset token bound to resource, viewer project scope and filters; not an authorization grant."
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": "Explicit scoped project filter; outside-scope IDs return 403."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read projection; GitHub authority is never established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{id}": {
+      "get": {
+        "operationId": "getProject",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read projection; GitHub authority is never established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs": {
+      "get": {
+        "operationId": "listRuns",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            },
+            "description": ""
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque keyset token bound to resource, viewer project scope and filters; not an authorization grant."
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": "Explicit scoped project filter; outside-scope IDs return 403."
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "created",
+                "running",
+                "verifying",
+                "awaiting_review",
+                "reviewing",
+                "review_passed",
+                "completed",
+                "failed"
+              ]
+            },
+            "description": ""
+          },
+          {
+            "name": "executor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read projection; GitHub authority is never established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}": {
+      "get": {
+        "operationId": "getRun",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read projection; GitHub authority is never established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executors": {
+      "get": {
+        "operationId": "listExecutors",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            },
+            "description": ""
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque keyset token bound to resource, viewer project scope and filters; not an authorization grant."
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": "Explicit scoped project filter; outside-scope IDs return 403."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read projection; GitHub authority is never established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executors/{id}": {
+      "get": {
+        "operationId": "getExecutor",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read projection; GitHub authority is never established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{id}/timeline": {
+      "get": {
+        "operationId": "runTimeline",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": ""
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            },
+            "description": ""
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read projection; GitHub authority is never established.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelinePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events/stream": {
+      "get": {
+        "operationId": "dashboardStream",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "description": ""
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": "Explicit scoped project filter; outside-scope IDs return 403."
+          },
+          {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE: timeline-event (id = global persistent cursor); view-refresh (no id); heartbeat comments. Supply exactly one saved cursor.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_query, invalid_cursor, cursor_required, invalid_id, invalid_route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "viewer_unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "read_only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "busy, projection_limit, stream_limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-sse-events": {
+          "timeline-event": {
+            "$ref": "#/components/schemas/TimelineEvent"
+          },
+          "view-refresh": {
+            "$ref": "#/components/schemas/ViewRefresh"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ViewerSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "awh_viewer",
+        "description": "Separately provisioned opaque, expiring HttpOnly, SameSite=Strict, Path=/dashboard/v1 cookie. Secure for a future HTTPS gateway. No CP Client/GitHub bearer."
+      }
+    },
+    "schemas": {
+      "GitHubRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "repository",
+          "kind",
+          "number",
+          "url",
+          "authority_verified"
+        ],
+        "properties": {
+          "provider": {
+            "const": "github"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"
+          },
+          "kind": {
+            "enum": [
+              "issue",
+              "pull_request",
+              "issue_comment",
+              "review"
+            ]
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authority_verified": {
+            "const": false
+          }
+        }
+      },
+      "ProfileBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ref",
+          "version"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          }
+        }
+      },
+      "Source": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "repository",
+          "sha",
+          "ref",
+          "url"
+        ],
+        "properties": {
+          "provider": {
+            "const": "github"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"
+          },
+          "sha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "WorkItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "reference"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "reference": {
+            "$ref": "#/components/schemas/GitHubRef"
+          }
+        }
+      },
+      "Step": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RunSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "id",
+          "project_id",
+          "work_item",
+          "state",
+          "state_provenance",
+          "executor_id",
+          "machine_id",
+          "source",
+          "profile",
+          "current_step",
+          "last_step",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "updated_at",
+          "github_refs"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "work_item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "created",
+              "running",
+              "verifying",
+              "awaiting_review",
+              "reviewing",
+              "review_passed",
+              "completed",
+              "failed"
+            ]
+          },
+          "state_provenance": {
+            "const": "runtime_projection"
+          },
+          "executor_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "machine_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileBinding"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Step"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Step"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "github_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitHubRef"
+            }
+          }
+        }
+      },
+      "ProjectSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "id",
+          "name",
+          "repository",
+          "profile_ref",
+          "enabled",
+          "last_activity",
+          "active_runs",
+          "metadata_provenance"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "name": {
+            "type": "null"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"
+          },
+          "profile_ref": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "null"
+          },
+          "last_activity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            }
+          },
+          "metadata_provenance": {
+            "const": "stored_registry"
+          }
+        }
+      },
+      "ProjectDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "id",
+          "name",
+          "repository",
+          "profile_ref",
+          "enabled",
+          "last_activity",
+          "active_runs",
+          "metadata_provenance"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "name": {
+            "type": "null"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"
+          },
+          "profile_ref": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "null"
+          },
+          "last_activity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active_runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            }
+          },
+          "metadata_provenance": {
+            "const": "stored_registry"
+          }
+        }
+      },
+      "ExecutorSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "id",
+          "display_name",
+          "type",
+          "machine",
+          "platform",
+          "last_seen",
+          "heartbeat_at",
+          "status",
+          "observed_at",
+          "freshness_ms",
+          "presence_provenance",
+          "current_runs"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "machine": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "platform",
+              "name",
+              "arch"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+              },
+              "platform": {
+                "enum": [
+                  "windows",
+                  "macos",
+                  "linux"
+                ]
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "arch": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "platform": {
+            "enum": [
+              "windows",
+              "macos",
+              "linux"
+            ]
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "heartbeat_at": {
+            "type": "null"
+          },
+          "status": {
+            "enum": [
+              "online",
+              "offline",
+              "unknown"
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "freshness_ms": {
+            "const": 60000
+          },
+          "presence_provenance": {
+            "const": "server_registration_or_heartbeat"
+          },
+          "current_runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "project_id",
+                "state"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+                },
+                "project_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+                },
+                "state": {
+                  "enum": [
+                    "created",
+                    "running",
+                    "verifying",
+                    "awaiting_review",
+                    "reviewing",
+                    "review_passed",
+                    "completed",
+                    "failed"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Comparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "observed",
+          "expected",
+          "provenance",
+          "action_hint",
+          "authority_verified"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "passed",
+              "blocked",
+              "not_checked"
+            ]
+          },
+          "observed": {},
+          "expected": {},
+          "provenance": {
+            "type": "string"
+          },
+          "action_hint": {
+            "type": "string"
+          },
+          "authority_verified": {
+            "const": false
+          }
+        }
+      },
+      "Diagnostics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "branch",
+          "checks",
+          "work_item",
+          "policy_version",
+          "github_app",
+          "provider_permissions",
+          "verification_subject_sha",
+          "verification_cursor"
+        ],
+        "properties": {
+          "branch": {
+            "$ref": "#/components/schemas/Comparison"
+          },
+          "checks": {
+            "$ref": "#/components/schemas/Comparison"
+          },
+          "work_item": {
+            "$ref": "#/components/schemas/Comparison"
+          },
+          "policy_version": {
+            "$ref": "#/components/schemas/Comparison"
+          },
+          "github_app": {
+            "$ref": "#/components/schemas/Comparison"
+          },
+          "provider_permissions": {
+            "$ref": "#/components/schemas/Comparison"
+          },
+          "verification_subject_sha": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{40}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification_cursor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RunDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "id",
+          "project_id",
+          "work_item",
+          "state",
+          "state_provenance",
+          "executor_id",
+          "machine_id",
+          "source",
+          "profile",
+          "current_step",
+          "last_step",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "updated_at",
+          "github_refs",
+          "diagnostics"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "work_item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "created",
+              "running",
+              "verifying",
+              "awaiting_review",
+              "reviewing",
+              "review_passed",
+              "completed",
+              "failed"
+            ]
+          },
+          "state_provenance": {
+            "const": "runtime_projection"
+          },
+          "executor_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "machine_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileBinding"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Step"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Step"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "github_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitHubRef"
+            }
+          },
+          "diagnostics": {
+            "$ref": "#/components/schemas/Diagnostics"
+          }
+        }
+      },
+      "TimelineEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "cursor",
+          "event_id",
+          "sequence",
+          "project_id",
+          "run_id",
+          "executor_id",
+          "machine_id",
+          "actor",
+          "actor_provenance",
+          "source_sha",
+          "type",
+          "step_id",
+          "timestamp",
+          "result",
+          "github_refs",
+          "evidence",
+          "provenance"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "event_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "executor_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "machine_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "actor": {
+            "type": "null"
+          },
+          "actor_provenance": {
+            "const": "not_recorded"
+          },
+          "source_sha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "type": {
+            "enum": [
+              "RUN_STARTED",
+              "STEP_STARTED",
+              "STEP_COMPLETED",
+              "VERIFICATION_STARTED",
+              "VERIFICATION_PASSED",
+              "VERIFICATION_FAILED",
+              "GITHUB_PUSH_COMPLETED",
+              "GITHUB_PR_CREATED",
+              "HANDOFF_PUBLISHED",
+              "REVIEW_STARTED",
+              "REVIEW_PASSED",
+              "RUN_COMPLETED",
+              "RUN_FAILED"
+            ]
+          },
+          "step_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "result": {
+            "enum": [
+              "passed",
+              "failed",
+              "unknown"
+            ]
+          },
+          "github_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitHubRef"
+            }
+          },
+          "evidence": {
+            "type": "null"
+          },
+          "provenance": {
+            "const": "runtime_event_declaration"
+          }
+        }
+      },
+      "Snapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "cursor",
+          "projects",
+          "runs",
+          "executors"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectSummary"
+            }
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            }
+          },
+          "executors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutorSummary"
+            }
+          }
+        }
+      },
+      "ViewRefresh": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "snapshot_cursor"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "snapshot_cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error",
+          "authority_verified"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "authority_verified": {
+            "const": false
+          }
+        }
+      },
+      "ProjectPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "items",
+          "next_cursor",
+          "snapshot_cursor"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectSummary"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot_cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "RunPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "items",
+          "next_cursor",
+          "snapshot_cursor"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot_cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "ExecutorPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "items",
+          "next_cursor",
+          "snapshot_cursor"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutorSummary"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot_cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "TimelinePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "items",
+          "next_cursor",
+          "snapshot_cursor"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineEvent"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot_cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      },
+      "ProjectResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "item"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "item": {
+            "$ref": "#/components/schemas/ProjectDetail"
+          }
+        }
+      },
+      "RunResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "item"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "item": {
+            "$ref": "#/components/schemas/RunDetail"
+          }
+        }
+      },
+      "ExecutorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "item"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "item": {
+            "$ref": "#/components/schemas/ExecutorSummary"
+          }
+        }
+      }
+    }
+  },
+  "x-cursor-semantics": {
+    "rest": "ID-ascending live keyset; bound to resource, sorted viewer scope and filters. Limit 1..100. No total count or frozen multi-request Registry snapshot. Restart on invalid_cursor.",
+    "timeline": "Global SQLite Event cursor (not Run sequence). Ascending; gaps are normal; never per-scope renumbered.",
+    "reconnect": "Fetch REST snapshot at W. First stream after=W. On reconnect refresh snapshot then replay after the last processed event cursor C, not the refreshed W. Dedupe by global cursor; project/run filters are applied again. New sessions with narrower scope rebootstrap.",
+    "retention": "Append-only history is retained, no compaction in v1; future cursor rejected. Copying/rebinding the database requires the separately gated host-migration work."
+  },
+  "x-bounds": {
+    "projects": 64,
+    "runs": 1000,
+    "executors": 1000,
+    "work_items": 1000,
+    "events": 10000,
+    "policies": 256,
+    "streams": 64,
+    "buffer_bytes": 131072,
+    "drain_timeout_ms": 15000
+  },
+  "x-security": "Default disabled. Separate trusted viewer session registry; no session issuance/admin route. Exact loopback Host/socket plus Origin/Fetch-Metadata guard; no CORS. All non-GET dashboard methods fail before body parsing. Sessions never authenticate legacy /v1 Client routes. Expiry rechecked during streams.",
+  "x-negative-examples": [
+    {
+      "request": "GET /dashboard/v1/projects with Authorization: Bearer <CP Client credential>",
+      "status": 401,
+      "code": "viewer_unauthorized"
+    },
+    {
+      "request": "GET /dashboard/v1/runs?project_id=outside-viewer-scope",
+      "status": 403,
+      "code": "forbidden"
+    },
+    {
+      "request": "GET /dashboard/v1/runs?cursor=invalid",
+      "status": 400,
+      "code": "invalid_cursor"
+    },
+    {
+      "request": "GET /dashboard/v1/events/stream?after=0 plus Last-Event-ID: 0",
+      "status": 400,
+      "code": "invalid_cursor"
+    },
+    {
+      "request": "POST /dashboard/v1/runs using viewer cookie",
+      "status": 405,
+      "code": "read_only"
+    }
+  ]
+}
