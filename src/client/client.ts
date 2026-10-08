@@ -6,6 +6,7 @@ import type { ClientMetadata, Event, EventType, Executor, ProjectManifest, Profi
 import { safeData, MAX_PAYLOAD_BYTES } from '../control-plane/security.js';
 import { connectBuilder } from '../builder.js';
 import { taskBinding, bindWorkflow, REPEATABLE_VERSION, type TaskBinding } from '../profiles.js';
+import { qualifyRecovery, assertRecoveryInspection, exclusiveRecoveryFile, type RecoveryRecord, type RecoveryLink, type RecoveryInspection, type RecoveryJournal } from './recovery.js';
 import { CLIENT_VERSION } from './version.js';
 import { atomicJson, clientFail, inspectRepository, locked, machine, readConfig, readCredential, readCaCertificate, readJson, readManifest, same, type Machine, type RepositoryIdentity, type ClientConfig } from './local.js';
 import { requestJson } from './http.js';
@@ -14,9 +15,9 @@ import type { Json } from '../protocol/index.js';
 
 export const CLIENT_EVENT_TYPES = ['STEP_STARTED', 'STEP_COMPLETED', 'VERIFICATION_STARTED', 'VERIFICATION_PASSED', 'VERIFICATION_FAILED', 'RUN_FAILED'] as const;
 interface Session { schema_version: '1.0'; manifest: ProjectManifest; endpoint: string; executor_id: string; machine_id: string;
-  initial: Run | null; work_item: WorkItem | null; events: Event[]; pending: Event | null; outbox?: Event[]; task_binding?: TaskBinding; previous_run?: string }
+  initial: Run | null; work_item: WorkItem | null; events: Event[]; pending: Event | null; outbox?: Event[]; task_binding?: TaskBinding; previous_run?: string; recovery?: RecoveryLink }
 export interface DeliveryObservation {
-  run: Run; executor_id: string; journal: string; task_binding?: TaskBinding;
+  run: Run; executor_id: string; journal: string; task_binding?: TaskBinding; recovery?: RecoveryLink;
   emit(type: EventType, data: unknown, extensions?: Record<string, Json>): Promise<void>;
   retainFailure(reason: string, stage: string): Promise<void>;
 }
@@ -50,7 +51,7 @@ export class AwhClient {
     executor_id: c.executor.id, machine_id: c.machine.id, initial: null, work_item: null, events: [], pending: null }; }
   private validateSession(c: Context, value: unknown): Session {
     const s = value as Session;
-    if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).filter(k => !['outbox','task_binding','previous_run'].includes(k)).sort().join(',') !== 'endpoint,events,executor_id,initial,machine_id,manifest,pending,schema_version,work_item' ||
+    if (!s || typeof s !== 'object' || Array.isArray(s) || Object.keys(s).filter(k => !['outbox','task_binding','previous_run','recovery'].includes(k)).sort().join(',') !== 'endpoint,events,executor_id,initial,machine_id,manifest,pending,schema_version,work_item' ||
         s.schema_version !== '1.0' || !same(checked('manifest', s.manifest), c.manifest) || s.endpoint !== c.config.endpoint ||
         s.executor_id !== c.executor.id || s.machine_id !== c.machine.id || !Array.isArray(s.events) ||
         s.outbox !== undefined && !Array.isArray(s.outbox) || s.events.length + (s.pending ? 1 : 0) + (s.outbox?.length ?? 0) > 256)
@@ -75,6 +76,10 @@ export class AwhClient {
           clientFail('state', 'Frozen Task binding differs from the Run');
       } else if (initial.profile.version === REPEATABLE_VERSION) clientFail('state', 'Repeatable Run has no frozen Task binding');
       if (s.previous_run !== undefined && (typeof s.previous_run !== 'string' || !/^run-[a-f0-9-]{36}$/.test(s.previous_run))) clientFail('state', 'Invalid previous Run reference');
+      if (s.recovery && (Object.keys(s.recovery).sort().join(',') !== 'attempt_id,new_sha,old_sha,predecessor_run_id' ||
+          !/^recovery-[a-f0-9-]{36}$/.test(s.recovery.attempt_id) || !/^run-[a-f0-9-]{36}$/.test(s.recovery.predecessor_run_id) ||
+          !/^[a-f0-9]{40}$/.test(s.recovery.old_sha) || s.recovery.new_sha !== initial.source.sha || s.previous_run !== s.recovery.predecessor_run_id))
+        clientFail('recovery', 'Recovery Session link is invalid');
       s.events.forEach(e => checked('event', e)); replayRun(initial, s.events);
       if (s.pending !== null) { checked('event', s.pending); appendEvent(initial, s.events, s.pending); }
       s.outbox?.forEach(e => checked('event', e));
@@ -126,7 +131,7 @@ export class AwhClient {
     const c = this.context(), s = this.load(c), p = await this.project(c), executor = await this.executor(c);
     return { project: p, ...executor, run: s.initial ? await this.run(c, s.initial) : null,
       task: s.task_binding ?? (s.initial ? { issue: s.work_item!.reference.number, branch: s.initial.source.ref, source_sha: s.initial.source.sha, profile: s.initial.profile } : null),
-      previous_run: s.previous_run ?? null, history: this.history(c).map(old => ({ run_id: old.initial!.id, issue: old.work_item!.reference.number, branch: old.initial!.source.ref, state: replayRun(old.initial!, old.events).run.state })),
+      previous_run: s.previous_run ?? null, recovery: s.recovery ?? null, history: this.history(c).map(old => ({ run_id: old.initial!.id, issue: old.work_item!.reference.number, branch: old.initial!.source.ref, state: replayRun(old.initial!, old.events).run.state })),
       pending_event: s.pending ? { id: s.pending.id, sequence: s.pending.sequence, type: s.pending.type } : null,
       pending_delivery_events: (s.pending ? 1 : 0) + (s.outbox?.length ?? 0), authority_verified: false };
   }
@@ -139,7 +144,7 @@ export class AwhClient {
     const task = s.task_binding ? { ...s.task_binding, ...(candidate?.type === 'GITHUB_PR_CREATED' ? { pull_request: candidate.payload.data.pull_request.number } : {}) } : null;
     const e = checked('event', { schema_version: '1.0', kind: 'event', id: 'event-' + randomUUID(), run_id: s.initial.id, sequence: history.length + 1,
       type, occurred_at: [new Date().toISOString(), run.updated_at].sort().at(-1),
-      payload: { schema_version: '1.0', data, extensions: { ...(task ? { task_binding: task } : {}), ...extensions, client: c.metadata, source_dirty: c.identity.dirty } } });
+      payload: { schema_version: '1.0', data, extensions: { ...(task ? { task_binding: task } : {}), ...(s.recovery ? { verification_recovery: s.recovery } : {}), ...extensions, client: c.metadata, source_dirty: c.identity.dirty } } });
     if (Buffer.byteLength(JSON.stringify(e.payload)) > MAX_PAYLOAD_BYTES) clientFail('payload_size', 'Event payload exceeds the Control Plane limit');
     appendEvent(s.initial, history, e); return e;
   }
@@ -178,7 +183,7 @@ export class AwhClient {
         try { writeFileSync(archive, readFileSync(c.path), { flag: 'wx', mode: 0o600 }); }
         catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; if (!same(readJson(archive, 16 * 1024 * 1024, false), s)) clientFail('state', 'Archived Run conflict'); }
         const previous = s.initial.id;
-        delete s.task_binding; delete s.outbox; Object.assign(s, this.empty(c)); s.previous_run = previous;
+        delete s.task_binding; delete s.outbox; delete s.recovery; Object.assign(s, this.empty(c)); s.previous_run = previous;
       }
       if (!s.initial) {
         const r = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(p.id)); keys(r, ['profiles']);
@@ -241,7 +246,8 @@ export class AwhClient {
 
   // Separate from the generic runtime Event CLI: fixed delivery, one writer, no Review emission.
   async observeDelivery<T>(action: (observation: DeliveryObservation) => Promise<T>, issue?: number,
-    preflight?: (binding: TaskBinding) => Promise<void>): Promise<T> {
+    preflight?: (binding: TaskBinding, recovery?: RecoveryLink) => Promise<void>,
+    recovery?: { fromRun: string; inspect: (binding: TaskBinding) => Promise<RecoveryInspection> }): Promise<T> {
     const c = this.context();
     const policies = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(c.manifest.project.id)); keys(policies, ['profiles']);
     if (!Array.isArray(policies.profiles) || policies.profiles.length > 256) clientFail('profile', 'Invalid trusted Profile Registry response');
@@ -257,6 +263,8 @@ export class AwhClient {
     const resolved = bindWorkflow(fixed.selection, binding);
     if (c.identity.repository !== resolved.profile.repository || c.identity.ref !== resolved.workflow.branch || c.identity.dirty)
       clientFail('delivery_source', 'Delivery requires the controlled feature branch at an exact clean HEAD');
+    if (recovery && !binding) clientFail('recovery', 'Recovery is available only for the repeatable docs-only template');
+    if (recovery && binding) await this.recoverVerificationRun(c, binding, recovery.fromRun, recovery.inspect);
     if (binding) {
       await locked(c.path + '.lock', async () => {
         const s = this.load(c);
@@ -267,7 +275,7 @@ export class AwhClient {
           clientFail('delivery_state', 'A different or delivered Run is still active');
       });
       if (!preflight) clientFail('delivery_policy', 'Repeatable delivery requires App Issue preflight');
-      await preflight(binding);
+      await preflight(binding, this.load(c).recovery);
     }
     await this.startRun(binding?.issue ?? fixed.workflow.work_item.issue, c.manifest.profile.ref, binding);
     return locked(c.path + '.lock', async () => {
@@ -287,7 +295,7 @@ export class AwhClient {
         while (s.pending) { await this.flush(c, s); if (s.outbox?.length) { s.pending = s.outbox.shift()!; this.save(c, s); } }
       };
       const o: DeliveryObservation = { run: structuredClone(s.initial), executor_id: c.executor.id,
-        journal: join(dirname(c.path), s.initial.id + '.delivery.json'), ...(s.task_binding ? { task_binding: s.task_binding } : {}),
+        journal: join(dirname(c.path), s.initial.id + '.delivery.json'), ...(s.task_binding ? { task_binding: s.task_binding } : {}), ...(s.recovery ? { recovery: s.recovery } : {}),
         emit: async (type, data, extensions) => { enqueue(type, data, extensions); await flush(); },
         retainFailure: async (reason, stage) => {
           const alreadyPending = !!s.pending || !!s.outbox?.length;
@@ -378,15 +386,19 @@ export class AwhClient {
     if (names.length > 1024) clientFail('state_limit', 'Archived Run limit reached');
     return names.map(n => this.validateSession(c, readJson(join(dirname(c.path), n), 16 * 1024 * 1024, false)));
   }
-  private async completedJournals(c: Context, current: Session, binding: TaskBinding, names: string[]) {
+  private async completedJournals(c: Context, current: Session, binding: TaskBinding, names: string[], freshPredecessor?: string) {
+    const recovered = await this.recoveryRecords(c, current);
+    const exempt = (old: Session) => old.initial!.id === freshPredecessor || recovered.has(old.initial!.id);
     const history = this.history(c), sessions = [...history, ...(current.initial ? [current] : [])];
-    if (sessions.some(s => s.initial!.source.ref === binding.branch && (s !== current || terminal(replayRun(s.initial!, s.events).run))))
+    if (sessions.some(s => s.initial!.source.ref === binding.branch && (s !== current || terminal(replayRun(s.initial!, s.events).run)) &&
+        !(s.initial!.id === freshPredecessor || recovered.get(s.initial!.id)?.successor_run_id === current.initial?.id && !terminal(replayRun(current.initial!, current.events).run))))
       clientFail('delivery_reconciliation', 'Task branch is already consumed; use a new Issue and branch');
     if (sessions.some(old => old.events.some(e => e.type === 'GITHUB_PUSH_COMPLETED' || e.type === 'GITHUB_PR_CREATED' || e.type === 'STEP_STARTED' && e.payload.data.step_id === 'builder-preflight') &&
         !names.includes(old.initial!.id + '.delivery.json')))
       clientFail('delivery_reconciliation', 'Delivery Journal is missing; preserve history and reconcile provider state');
     for (const name of names) {
       const old = sessions.find(s => s.initial!.id + '.delivery.json' === name);
+      if (old && exempt(old)) continue;
       const j = readJson(join(dirname(c.path), name)) as { run_id: string; source_sha: string; disposition: string; refs: Record<string, Json>; task_binding?: TaskBinding };
       if (!old || old.pending || old.outbox?.length || j.run_id !== old.initial!.id || j.source_sha !== old.initial!.source.sha ||
           j.disposition !== 'completed' || replayRun(old.initial!, old.events).run.state !== 'completed')
@@ -398,6 +410,82 @@ export class AwhClient {
         clientFail('delivery_reconciliation', 'Completed Journal candidate or CP replay disagrees; history retained');
     }
   }
+
+  // Immutable one-shot receipt. A consumed/incomplete attempt never grants a second Run.
+  private digest(value: string | Buffer): string { return createHash('sha256').update(value).digest('hex'); }
+  private async recoveryRecords(c: Context, current: Session): Promise<Map<string, RecoveryRecord>> {
+    const names = readdirSync(dirname(c.path)).filter(n => n.endsWith('.recovery.json'));
+    if (names.length > 1024) clientFail('state_limit', 'Recovery receipt limit reached');
+    const sessions = [...this.history(c), ...(current.initial ? [current] : [])], result = new Map<string, RecoveryRecord>();
+    for (const name of names) {
+      const r = readJson(join(dirname(c.path), name)) as RecoveryRecord;
+      if (!r || Object.keys(r).sort().join(',') !== 'created_at,evidence_json,hashes,inspection,kind,link,namespace_sha256,predecessor_binding,schema_version,successor_binding,successor_run_id' ||
+          r.schema_version !== '1.0' || r.kind !== 'verification_recovery' || !r.link || name !== r.link.predecessor_run_id + '.recovery.json' ||
+          r.namespace_sha256 !== this.digest(dirname(c.path)) || !timestamp(r.created_at) || !r.hashes ||
+          Object.keys(r.hashes).sort().join(',') !== 'cp_events,evidence,journal,session')
+        clientFail('recovery', 'Invalid immutable recovery receipt');
+      assertRecoveryInspection(r.inspection, r.successor_binding);
+      const old = sessions.find(s => s.initial!.id === r.link.predecessor_run_id), next = sessions.find(s => s.initial!.id === r.successor_run_id);
+      if (!old || !next || !same(next.recovery, r.link) || !same(next.task_binding, r.successor_binding) ||
+          !same(old.task_binding, r.predecessor_binding) || r.link.old_sha !== old.initial!.source.sha || r.link.new_sha !== next.initial!.source.sha ||
+          r.hashes.session !== this.digest(readFileSync(join(dirname(c.path), old.initial!.id + '.json'))) ||
+          r.hashes.journal !== this.digest(readFileSync(join(dirname(c.path), old.initial!.id + '.delivery.json'))) ||
+          (r.evidence_json === null ? r.hashes.evidence !== null : typeof r.evidence_json !== 'string' || r.hashes.evidence !== this.digest(r.evidence_json)) ||
+          r.hashes.cp_events !== this.digest(JSON.stringify(old.events)))
+        clientFail('recovery', 'Recovery attempt is incomplete or its retained predecessor bytes changed; no replay allowed');
+      const timeline = await this.timeline(old.initial!.id);
+      qualifyRecovery(old.initial!, old.events, old.task_binding, !!old.pending || !!old.outbox?.length,
+        readJson(join(dirname(c.path), old.initial!.id + '.delivery.json')) as RecoveryJournal,
+        r.evidence_json === null ? null : JSON.parse(r.evidence_json), r.successor_binding, timeline.run, timeline.events.map(e => e.event));
+      const first = next.events[0] ?? next.pending;
+      if (!first || first.type !== 'RUN_STARTED' || !same(first.payload.extensions.verification_recovery, r.link))
+        clientFail('recovery', 'Recovery successor has no matching immutable Event link');
+      await this.run(c, next.initial!); result.set(old.initial!.id, r);
+    }
+    return result;
+  }
+  private async recoverVerificationRun(c: Context, binding: TaskBinding, fromRun: string,
+    inspect: (binding: TaskBinding) => Promise<RecoveryInspection>): Promise<void> {
+    if (!/^run-[a-f0-9-]{36}$/.test(fromRun)) clientFail('arguments', 'Recovery requires an exact predecessor Run ID');
+    await locked(c.path + '.lock', async () => {
+      const s = this.load(c), receiptPath = join(dirname(c.path), fromRun + '.recovery.json');
+      if (!s.initial || s.initial.id !== fromRun || existsSync(receiptPath))
+        clientFail('recovery', 'Recovery predecessor is not current or the one-shot attempt has already been consumed');
+      const rawSession = readFileSync(c.path), journalPath = join(dirname(c.path), fromRun + '.delivery.json');
+      const journal = readJson(journalPath) as RecoveryJournal, rawJournal = readFileSync(journalPath);
+      const evidencePath = join(c.identity.root, '.handoff', fromRun, 'verification.json');
+      const evidence = journal.stage === 'verification' ? readJson(evidencePath, 16 * 1024) : null;
+      const evidenceJson = evidence === null ? null : readFileSync(evidencePath, 'utf8');
+      const timeline = await this.timeline(fromRun);
+      qualifyRecovery(s.initial, s.events, s.task_binding, !!s.pending || !!s.outbox?.length, journal, evidence, binding, timeline.run, timeline.events.map(e => e.event));
+      const journals = readdirSync(dirname(c.path)).filter(n => n.endsWith('.delivery.json'));
+      await this.completedJournals(c, s, binding, journals, fromRun);
+      await this.project(c); await this.executor(c);
+      const inspection = await inspect(binding); assertRecoveryInspection(inspection, binding);
+      if (!same(inspectRepository(this.cwd), c.identity) || c.identity.dirty || !rawSession.equals(readFileSync(c.path)) || !rawJournal.equals(readFileSync(journalPath)) ||
+          evidenceJson !== null && evidenceJson !== readFileSync(evidencePath, 'utf8'))
+        clientFail('recovery', 'Recovery source or predecessor changed during qualification');
+      const now = new Date().toISOString(), initial: Run = { ...s.initial, id: 'run-' + randomUUID(), source: { ...s.initial.source, sha: binding.source_sha },
+        state: 'created', created_at: now, updated_at: now, started_at: null, completed_at: null };
+      const link: RecoveryLink = { attempt_id: 'recovery-' + randomUUID(), predecessor_run_id: fromRun, old_sha: s.initial.source.sha, new_sha: binding.source_sha };
+      const receipt: RecoveryRecord = { schema_version: '1.0', kind: 'verification_recovery', link, namespace_sha256: this.digest(dirname(c.path)),
+        predecessor_binding: s.task_binding!, successor_binding: binding, successor_run_id: initial.id,
+        hashes: { session: this.digest(rawSession), journal: this.digest(rawJournal), evidence: evidenceJson === null ? null : this.digest(evidenceJson), cp_events: this.digest(JSON.stringify(s.events)) },
+        evidence_json: evidenceJson, inspection, created_at: now };
+      safeData(receipt); exclusiveRecoveryFile(receiptPath, JSON.stringify(receipt, null, 2));
+      const archive = join(dirname(c.path), fromRun + '.json');
+      if (existsSync(archive)) { readJson(archive, 16 * 1024 * 1024, false); if (!rawSession.equals(readFileSync(archive))) clientFail('recovery', 'Recovery archive bytes conflict'); }
+      else exclusiveRecoveryFile(archive, rawSession);
+      const next: Session = { ...this.empty(c), initial, work_item: s.work_item, task_binding: binding, previous_run: fromRun, recovery: link };
+      next.pending = this.makeEvent(c, next, 'RUN_STARTED', { source_sha: initial.source.sha }); this.save(c, next);
+      const work = await this.request(c, '/v1/work-items/register', 'POST', next.work_item); keys(work, ['work_item','disposition']);
+      if (!['created','idempotent'].includes(String(work.disposition)) || !same(checked('work_item', work.work_item), next.work_item)) clientFail('response_binding', 'Recovery Work Item acknowledgment mismatch');
+      const created = await this.request(c, '/v1/runs', 'POST', initial); keys(created, ['run','disposition']);
+      if (!['created','idempotent'].includes(String(created.disposition)) || !same(checked('run', created.run), initial)) clientFail('response_binding', 'Recovery Run acknowledgment mismatch');
+      await this.flush(c, next);
+    });
+  }
+
   async retryDelivery() {
     const c = this.context(); deliveryPolicy(c.manifest.profile.ref);
     return locked(c.path + '.lock', async () => {

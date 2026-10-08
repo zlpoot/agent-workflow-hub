@@ -11,7 +11,7 @@ import { deliveryPolicy } from './delivery-policy.js';
 import { bindWorkflow, type TaskBinding } from '../profiles.js';
 import { CLIENT_VERSION } from './version.js';
 
-export interface DeliveryOptions { title: string; body: string; holdDraft?: boolean; issue?: number }
+export interface DeliveryOptions { title: string; body: string; holdDraft?: boolean; issue?: number; recoverFromRun?: string }
 export interface VerificationLog { command: string; exit_code: number; stdout: string; stderr: string; elapsed_ms: number }
 export interface DeliveryDependencies {
   connect: typeof connectBuilder;
@@ -39,24 +39,35 @@ const defaults: DeliveryDependencies = { connect: connectBuilder, verify: async 
 
 // Builder returns checked provider identifiers; only these references enter the observation stream.
 export async function deliver(client: AwhClient, options: DeliveryOptions, overrides: Partial<DeliveryDependencies> = {}) {
-  if (Object.keys(options).some(k => !['title','body','holdDraft','issue'].includes(k)) || typeof options.title !== 'string' || !options.title.trim() ||
+  if (Object.keys(options).some(k => !['title','body','holdDraft','issue','recoverFromRun'].includes(k)) || typeof options.title !== 'string' || !options.title.trim() ||
       options.title.length > 256 || typeof options.body !== 'string' || options.body.length > 16000 || options.issue !== undefined && (!Number.isSafeInteger(options.issue) || options.issue < 1) || options.holdDraft !== undefined && typeof options.holdDraft !== 'boolean')
     clientFail('arguments', 'Delivery requires a bounded PR title/body and fixed options');
+  if (options.recoverFromRun !== undefined && (!/^run-[a-f0-9-]{36}$/.test(options.recoverFromRun) || options.issue === undefined))
+    clientFail('arguments', 'Recovery requires --issue and an exact predecessor Run ID');
   safeData(options);
   const identity = inspectRepository(client.cwd), deps = { ...defaults, ...overrides };
   ignoredDeliveryLogs(identity);
   let prepared: Awaited<ReturnType<typeof connectBuilder>> | undefined;
-  return client.observeDelivery(async o => execute(o), options.issue, async binding => {
+  return client.observeDelivery(async o => execute(o), options.issue, async (binding, recovery) => {
     const selected = deliveryPolicy(readManifest(identity).profile.ref, binding.profile_version);
+    if (recovery) {
+      // Recheck immediately before write-token minting, including initial-ACK resume.
+      await deps.connect({ cwd: () => identity.root }, selected.selection, binding, 'recover');
+    }
     prepared = await deps.connect({ cwd: () => identity.root }, selected.selection, binding);
     if (prepared.preflight().issue_state !== 'open') clientFail('issue', 'A new Task requires an open ordinary Issue');
-  });
+  }, options.recoverFromRun ? { fromRun: options.recoverFromRun, inspect: async binding => {
+    const inspector = await deps.connect({ cwd: () => identity.root }, deliveryPolicy(readManifest(identity).profile.ref, binding.profile_version).selection, binding, 'recover');
+    const p = inspector.preflight();
+    return { repository: p.repo, issue: binding.issue, branch: binding.branch, source_sha: binding.source_sha, actor: p.actor, app_id: p.app_id,
+      remote_branch_absent: p.recovery_inspection?.remote_branch_absent as true, same_branch_pr_absent: p.recovery_inspection?.same_branch_pr_absent as true, contents_permission: p.permissions.contents as 'read' };
+  } } : undefined);
 
   async function execute(o: DeliveryObservation) {
     const selected = deliveryPolicy(readManifest(identity).profile.ref, o.run.profile.version), fixed = { selection: selected.selection, ...bindWorkflow(selected.selection, o.task_binding) };
     if (existsSync(o.journal)) clientFail('delivery_state', 'Recorded delivery cannot be repeated; reconcile uncertain provider operations explicitly');
-    const journal: { schema_version: string; run_id: string; source_sha: string; stage: string; disposition: string; refs: Record<string, Json>; task_binding?: TaskBinding } =
-      { schema_version: '1.0', run_id: o.run.id, source_sha: identity.sha, stage: 'created', disposition: 'in_progress', refs: {}, ...(o.task_binding ? { task_binding: o.task_binding } : {}) };
+    const journal: { schema_version: string; run_id: string; source_sha: string; stage: string; disposition: string; refs: Record<string, Json>; task_binding?: TaskBinding; recovery?: typeof o.recovery } =
+      { schema_version: '1.0', run_id: o.run.id, source_sha: identity.sha, stage: 'created', disposition: 'in_progress', refs: {}, ...(o.task_binding ? { task_binding: o.task_binding } : {}), ...(o.recovery ? { recovery: o.recovery } : {}) };
     writeFileSync(o.journal, JSON.stringify(journal), { flag: 'wx', mode: 0o600 });
     const stage = (name: string) => { journal.stage = name; atomicJson(o.journal, journal); };
     const exact = () => { const now = inspectRepository(client.cwd); if (!same(now, identity) || now.dirty) clientFail('exact_head', 'Delivery source changed or became dirty; original exact-head verification cannot be reused'); };
@@ -97,7 +108,7 @@ export async function deliver(client: AwhClient, options: DeliveryOptions, overr
       refs({ repository: fixed.profile.repository, pull_request: pr.number, base_sha: pr.base, head_sha: pr.head, pr_url: pr.url });
       await o.emit('GITHUB_PR_CREATED', { pull_request: github('pull_request', pr.number), base_sha: pr.base, head_sha: pr.head });
       stage('evidence'); exact();
-      const metadata = JSON.stringify({ environment: { platform: process.platform, arch: process.arch, node: process.version, client_version: CLIENT_VERSION },
+      const metadata = JSON.stringify({ ...(o.recovery ? { verification_recovery: o.recovery } : {}), environment: { platform: process.platform, arch: process.arch, node: process.version, client_version: CLIENT_VERSION },
         ...(o.task_binding ? { task_binding: { ...o.task_binding, pull_request: pr.number } } : {}), command_order: fixed.workflow.verification_commands, before_sha: before.sha, after_sha: identity.sha, clean_before: !before.dirty, clean_after: true,
         started_at: startedAt, finished_at: new Date().toISOString(), run_id: o.run.id, actor: preflight.actor, checks,
         statistics: logs.map(log => ({ command: log.command, elapsed_ms: log.elapsed_ms, tests: statistic(log.stdout, 'tests'), pass: statistic(log.stdout, 'pass'), fail: statistic(log.stdout, 'fail') })) }, null, 2);
@@ -117,14 +128,14 @@ export async function deliver(client: AwhClient, options: DeliveryOptions, overr
         verification: { subject_sha: pr.head, lifecycle: 'completed', outcome: 'pass', checks, evidence_refs: evidenceRecords.map(e => e.url) },
         handoff: { next_step: 'review', publication: 'pending' } };
       const task = o.task_binding ? { ...o.task_binding, pull_request: pr.number } : null;
-      const render = () => 'AWH-HANDOFF v0.1\n```json\n' + JSON.stringify(handoff, null, 2) + '\n```\n' + JSON.stringify(validateHandoff(handoff, identity.sha)) + (task ? '\nAWH Task Binding v0.2\n' + JSON.stringify(task) : '');
+      const render = () => 'AWH-HANDOFF v0.1\n```json\n' + JSON.stringify(handoff, null, 2) + '\n```\n' + JSON.stringify(validateHandoff(handoff, identity.sha)) + (task ? '\nAWH Task Binding v0.2\n' + JSON.stringify(task) : '') + (o.recovery ? '\nVerification Recovery\n' + JSON.stringify(o.recovery) : '');
       stage('handoff-pending'); atomicJson(join(evidenceDirectory, 'handoff.pending.json'), handoff);
       const pendingBody = render(), comment = await builder.createComment(pr.number, pendingBody);
       refs({ handoff_comment: comment.id, handoff_url: comment.url });
       if ((await builder.readComment(pr.number, comment.id)).body !== pendingBody) clientFail('handoff_readback', 'Pending Handoff readback mismatch');
       const handoffData = () => ({ handoff_version: '0.1', publication: handoff.handoff.publication,
         pull_request: github('pull_request', pr.number), comment: github('issue_comment', comment.id), base_sha: pr.base, head_sha: pr.head, subject_sha: identity.sha });
-      const extensions = { ...(task ? { task_binding: task as unknown as Json } : {}), evidence: evidenceRecords.map(e => github('issue_comment', e.id)), work_item: { provider: 'github', repository: fixed.workflow.work_item.repo, kind: 'issue', number: fixed.workflow.work_item.issue } };
+      const extensions = { ...(o.recovery ? { verification_recovery: o.recovery as unknown as Json } : {}), ...(task ? { task_binding: task as unknown as Json } : {}), evidence: evidenceRecords.map(e => github('issue_comment', e.id)), work_item: { provider: 'github', repository: fixed.workflow.work_item.repo, kind: 'issue', number: fixed.workflow.work_item.issue } };
       await o.emit('HANDOFF_PUBLISHED', handoffData(), { ...extensions, builder_milestone: 'evidence_published_and_handoff_pending' });
       stage('handoff-confirmed'); handoff.handoff.publication = 'confirmed';
       const validation = validateHandoff(handoff, identity.sha); if (!validation.ready_claim_valid) clientFail('handoff', 'Confirmed Handoff did not pass the original read-only validator');
@@ -138,7 +149,7 @@ export async function deliver(client: AwhClient, options: DeliveryOptions, overr
       stage('waiting'); await o.emit('HANDOFF_PUBLISHED', handoffData(), { ...extensions, builder_milestone: options.holdDraft ? 'waiting_for_human_acceptance' : 'pr_ready_waiting_for_independent_review' });
       journal.disposition = options.holdDraft ? 'draft_waiting_for_acceptance' : 'waiting_for_independent_review'; atomicJson(o.journal, journal);
       return { run_id: o.run.id, pr: final, evidence: { id: evidence.id, url: evidence.url }, handoff: { id: comment.id, url: comment.url },
-        disposition: journal.disposition, ...(task ? { task } : {}), authority_verified: false };
+        disposition: journal.disposition, ...(o.recovery ? { verification_recovery: o.recovery } : {}), ...(task ? { task } : {}), authority_verified: false };
     } catch (error) {
       let restorationFailed = false;
       if (readyCandidate) { try { await readyCandidate.builder.restoreDraft(readyCandidate.number, identity.sha); } catch { restorationFailed = true; } }

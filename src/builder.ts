@@ -62,8 +62,8 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
 }
 
 // Returns only fixed Builder operations. Credentials and generic API requests stay in this closure.
-export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' = 'deliver') {
-  if (!['deliver','observe'].includes(mode) || mode === 'observe' && !binding) fail('Only frozen Task lifecycle observation supports read-only mode');
+export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' = 'deliver') {
+  if (!['deliver','observe','recover'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Task recovery or lifecycle observation supports read-only mode');
   const { profile, workflow } = bindWorkflow(selection, binding);
   const REPO = profile.repository, BRANCH = workflow.branch, ROOT = `/repos/${REPO}`;
   const d = { ...defaults, ...overrides };
@@ -184,7 +184,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       if (e instanceof BuilderError) throw e;
       return fail('GitHub request failed (network, timeout, redirect or invalid JSON; details suppressed)');
     }
-    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length)))) fail('Invalid GitHub response');
+    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && (mode === 'recover' && path === `${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1` || path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length))))) fail('Invalid GitHub response');
     return value as Json;
   };
   const app = await request('/app', jwt);
@@ -236,7 +236,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         issue.html_url !== 'https://github.com/' + REPO + '/issues/' + binding.issue)
       fail('Task must bind an ordinary Issue in the selected repository');
     issueState = issue.state;
-    if (mode === 'deliver') {
+    if (mode !== 'observe') {
     if (issue.state !== 'open') fail('New Task delivery requires an open ordinary Issue');
     const main = await request(ROOT + '/git/ref/heads/' + profile.base, read.token);
     if (!sha(main.object?.sha)) fail('Invalid Task baseline');
@@ -251,10 +251,10 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     if (head.status !== 0 || branch.status !== 0 || head.stdout.trim() !== binding.source_sha || branch.stdout.trim() !== binding.branch)
       fail('Task binding differs from the real Git branch or HEAD');
   }
-  const { token, expiry } = mode === 'observe' ? observer! : await mint(true);
+  const { token, expiry } = mode !== 'deliver' ? observer! : await mint(true);
   const live = () => { if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
-  const writable = () => { if (mode === 'observe') fail('Lifecycle observation cannot mutate GitHub'); };
-  const call = (path: string, method = 'GET', body?: unknown) => { live(); if (mode === 'observe' && method !== 'GET') fail('Lifecycle observation cannot mutate GitHub'); return request(path, token, method, body); };
+  const writable = () => { if (mode !== 'deliver') fail('Lifecycle observation cannot mutate GitHub'); };
+  const call = (path: string, method = 'GET', body?: unknown) => { live(); if (mode !== 'deliver' && method !== 'GET') fail('Lifecycle observation cannot mutate GitHub'); return request(path, token, method, body); };
   // No caller ref/path: independently read only this workflow's feature branch.
   // null means controlled ABSENT; PRESENT is a validated commit SHA.
   const readFeatureRefState = async (): Promise<string | null> => {
@@ -311,11 +311,16 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   };
   const readComment = async (number: number, comment: number) =>
     commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`), number);
+  if (mode === 'recover') {
+    if (await readFeatureRefState() !== null) fail('Recovery Task branch already exists remotely');
+    const prs = await call(`${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1`);
+    if (!Array.isArray(prs) || prs.length !== 0) fail('Recovery requires no PR on the canonical Task branch');
+  }
   return Object.freeze({
     preflight: () => ({ repo: REPO, app_id: Number(appId), installation_id: inst.id as number, actor,
-      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: mode === 'observe' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : { ...PERMISSIONS }, ...(binding ? { task_binding: binding, issue_state: issueState } : {}) }),
+      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: mode !== 'deliver' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : { ...PERMISSIONS }, ...(binding ? { task_binding: binding, issue_state: issueState } : {}), ...(mode === 'recover' ? { recovery_inspection: { remote_branch_absent: true as const, same_branch_pr_absent: true as const } } : {}) }),
     push: async () => {
-      if (mode === 'observe') fail('Lifecycle observation cannot push');
+      if (mode !== 'deliver') fail('Lifecycle observation cannot push');
       live();
       const inspectEnv = gitEnvironment(d.env, root);
       const env = { ...inspectEnv };

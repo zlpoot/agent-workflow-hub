@@ -1559,3 +1559,18 @@ test('v0.2 post-merge sync uses read-only token on original Task even after main
  assert.equal(f.requests.filter(r=>r.url.endsWith('/access_tokens')).length,2);assert(!f.requests.some(r=>r.url.endsWith('/access_tokens')&&JSON.parse(r.body).permissions.contents==='write'));
  await assert.rejects(b.push(),/cannot push/);await assert.rejects(b.createComment(5,'Mutation prohibited'),/cannot mutate/);assert(!f.git.some(r=>r[1].includes('diff')||r[1].includes('push')));
 });
+
+test('0.4.1 recovery inspection checks docs, open Issue, absent ref and all-state PRs with read-only scope; refuses mutations',async()=>{
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{if(u.includes('/pulls?state=all&head=')){f.requests.push({url:u,...o});return new Response('[]');}return fetch(u,o);};
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'recover');
+ assert.deepEqual(b.preflight().recovery_inspection,{remote_branch_absent:true,same_branch_pr_absent:true});assert.equal(b.preflight().permissions.contents,'read');
+ const tokens=f.requests.filter(x=>x.url.endsWith('/access_tokens')).map(x=>JSON.parse(x.body));assert.deepEqual(tokens,[{permissions:{metadata:'read'}},{repositories:['future-ui'],permissions:{contents:'read',issues:'read',pull_requests:'read'}}]);
+ assert(f.requests.some(x=>x.url.endsWith('/git/ref/heads/codex/awh-task-90')));assert(f.requests.some(x=>x.url.endsWith('/pulls?state=all&head=zlpoot%3Acodex%2Fawh-task-90&per_page=100&page=1')));
+ await assert.rejects(b.push(),/cannot push/);await assert.rejects(b.createComment(5,'Forbidden'),/cannot mutate/);await assert.rejects(b.createPR('Forbidden','Forbidden'),/cannot mutate/);assert(!f.git.some(x=>x[1].includes('push')));
+});
+for(const drift of ['remote-ref','existing-pr','malformed-pr-list','closed-issue','product-path','broad-read-token','ref-network','pr-network'])test('0.4.1 read-only recovery inspector refuses '+drift,async()=>{
+ const f=repeatableFake({...drift==='remote-ref'?{consumed:true}:{},...drift==='closed-issue'?{issue:{state:'closed'}}:{},...drift==='product-path'?{paths:['src/product.ts']}:{},...drift==='broad-read-token'?{readPermissions:{contents:'write'}}:{}}),fetch=f.deps.fetch;
+ f.deps.fetch=async(u,o)=>{if(drift==='ref-network'&&u.endsWith('/git/ref/heads/codex/awh-task-90'))throw Error('Fixture upstream secret');if(u.includes('/pulls?state=all&head=')){f.requests.push({url:u,...o});if(drift==='pr-network')throw Error('Fixture upstream secret');return new Response(JSON.stringify(drift==='existing-pr'?[{number:99}]:drift==='malformed-pr-list'?{}:[]));}return fetch(u,o);};
+ await assert.rejects(connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'recover'));
+ assert(!f.requests.some(x=>x.url.endsWith('/access_tokens')&&JSON.parse(x.body).permissions.contents==='write'));assert(!f.git.some(x=>x[1].includes('push')));
+});
