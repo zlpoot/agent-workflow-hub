@@ -31,6 +31,15 @@ function git(root: string, args: string[], optional = false): string {
   return r.stdout.trim();
 }
 export interface RepositoryIdentity { root: string; repository: string; sha: string; ref: string; dirty: boolean }
+export function ignoredDeliveryLogs(identity: RepositoryIdentity): void {
+  if (!git(identity.root, ['check-ignore', '--no-index', '.handoff/awh-evidence'], true))
+    clientFail('delivery_logs', 'Delivery evidence requires an ignored .handoff directory');
+  const path = join(identity.root, '.handoff');
+  try {
+    const st = lstatSync(path);
+    if (!st.isDirectory() || st.isSymbolicLink() || realpathSync(path) !== path) clientFail('delivery_logs', 'Delivery log directory cannot be redirected');
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+}
 export function inspectRepository(cwd = process.cwd()): RepositoryIdentity {
   let candidate = realpathSync(cwd);
   for (;;) {

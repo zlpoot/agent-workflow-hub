@@ -87,6 +87,24 @@ function fake(overrides = {}) {
   return { deps, requests, git, advance: ms => { clock += ms; } };
 }
 
+test('Adapter Draft restoration is fixed App-owned exact-head and read back', async () => {
+  let restored = false;
+  const f = fake({ response: (url, options, value) => {
+    if (url.endsWith('/graphql')) { assert(JSON.parse(options.body).query.includes('convertPullRequestToDraft')); restored = true; return { data: { convertPullRequestToDraft: { pullRequest: { isDraft: true } } } }; }
+    if (url.endsWith('/pulls/5')) return { ...value, draft: restored };
+    return value;
+  } });
+  const builder = await connectBuilder(f.deps);
+  await assert.rejects(builder.restoreDraft(5, 'c'.repeat(40)), /exact head/);
+  assert(!f.requests.some(r => r.url.endsWith('/graphql')));
+  const p = await builder.restoreDraft(5, head); assert(p.draft); assert.equal(p.head, head); assert.equal(p.base, base);
+  assert.equal(f.requests.filter(r => r.url.endsWith('/graphql')).length, 1);
+});
+test('Draft restoration refuses foreign actor before mutation', async () => {
+  const f = fake({ response: (url, options, value) => url.endsWith('/pulls/5') ? { ...value, user: { login: 'foreign', type: 'User' } } : value });
+  const builder = await connectBuilder(f.deps); await assert.rejects(builder.restoreDraft(5, head), /identity/);
+  assert(!f.requests.some(r => r.url.endsWith('/graphql')));
+});
 test('JWT RS256 signature and skew/expiry claims at clock boundaries', () => {
   for (const clock of [60000, now, now + 876]) {
     const jwt = createJwt('123', pem, clock), [h, p, s] = jwt.split('.');
@@ -274,7 +292,7 @@ test('unsafe local Git transport, wrong branch and Git errors are refused safely
 
 test('Builder exposes only fixed operations, requires App bot for PR/comments, rejects secret text', async () => {
   const f = fake(), b = await connectBuilder(f.deps);
-  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready'].sort());
+  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready', 'restoreDraft', 'readLifecycle'].sort());
   await b.createPR('Title', 'Implements #4');
   assert.deepEqual(JSON.parse(f.requests.at(-1).body), { title: 'Title', body: 'Implements #4', head: BRANCH, base: 'main', draft: true });
   await b.updatePR(5, 'Final title', 'Final body');
@@ -542,6 +560,7 @@ const workflows = [
   ['hub', 'c1e', HUB_REPO, 'codex/c1e-dashboard-api-contract'],
   ['hub', 'c1g', HUB_REPO, 'codex/c1g-dashboard-readonly'],
   ['hub', 'c1h', HUB_REPO, 'codex/c12-trusted-onboarding'],
+  ['hub', 'c1d', HUB_REPO, 'codex/c1d-builder-adapter'],
   ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
   ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
 ];
@@ -1457,4 +1476,39 @@ test('ref-state gate: read or dry-run failure skips the after-ref read and real 
     await assert.rejects((await connectBuilder(f.deps)).push(), e => e.stage === stageName(stage));
     assert.deepEqual(f.events, stage === 'ls-remote' ? ['ref_before', 'read'] : ['ref_before', 'read', 'dry-run']);
   }
+});
+
+
+const nativeReview = (id, state = 'APPROVED', commit = head, login = 'independent-reviewer') => ({ id, state, commit_id: commit, user: { login, type: 'User' } });
+function lifecycleFixture(reviews = [], { merged = false, issueClosed = false, mutate } = {}) {
+  return fake({ response: (url, options, value) => {
+    if (url.includes('/reviews?')) value = reviews;
+    else if (url.endsWith('/issues/4')) value = { number: 4, state: issueClosed ? 'closed' : 'open' };
+    else if (url.endsWith('/pulls/5')) value = { ...value, merged, state: merged ? 'closed' : 'open', merge_commit_sha: merged ? 'c'.repeat(40) : null };
+    return mutate ? mutate(url, value) : value;
+  } });
+}
+test('MVP provider closeout reads exact native approval, merged PR and closed Issue without mutations', async () => {
+  const f=lifecycleFixture([nativeReview(101)],{merged:true,issueClosed:true});
+  const b=await connectBuilder(f.deps),r=await b.readLifecycle(5,head);
+  assert.equal(r.review.id,101);assert(r.merged&&r.issue_closed);assert.equal(r.merge_sha,'c'.repeat(40));assert.equal(r.authority_verified,false);
+  assert(f.requests.filter(x=>!x.url.endsWith('/access_tokens')).every(x=>x.method==='GET'));
+});
+test('MVP wrong-head, dismissed, bot and superseded approvals cannot complete; change requests block',async()=>{
+  for(const reviews of [[nativeReview(1,'APPROVED',base)], [nativeReview(1),nativeReview(2,'DISMISSED')], [nativeReview(1),nativeReview(2,'CHANGES_REQUESTED')], [{...nativeReview(1),user:{login:actor,type:'Bot'}}]]) {
+    const f=lifecycleFixture(reviews,{merged:true,issueClosed:true});const r=await(await connectBuilder(f.deps)).readLifecycle(5,head);assert.equal(r.review,null);
+  }
+  const f=lifecycleFixture([nativeReview(1),nativeReview(2,'COMMENTED')]);assert.equal((await(await connectBuilder(f.deps)).readLifecycle(5,head)).review.id,1);
+});
+test('MVP provider read refuses wrong head, malformed Review and changing merge state',async()=>{
+  let reads=0;
+  for(const mutate of [(url,v)=>url.endsWith('/pulls/5')?{...v,head:{...v.head,sha:base}}:v, (url,v)=>url.includes('/reviews?')?[{id:1,state:'APPROVED'}]:v, (url,v)=>url.endsWith('/pulls/5')&&++reads===2?{...v,state:'closed',merged:true,merge_commit_sha:base}:v]) {
+    const f=lifecycleFixture([],{mutate});await assert.rejects((await connectBuilder(f.deps)).readLifecycle(5,head));
+  }
+});
+test('fixed MVP selections preserve separate repositories, work items and docs-only verification',()=>{
+  const hub=selectWorkflow({profile:'hub',workflow:'v01-mvp'}),future=selectWorkflow({profile:'future-ui',workflow:'mvp-docs'});
+  assert.deepEqual(hub.workflow.work_item,{repo:HUB_REPO,issue:39});assert.equal(hub.workflow.branch,'codex/v01-mvp');
+  assert.deepEqual(future.workflow.work_item,{repo:FUTURE_REPO,issue:88});assert.equal(future.workflow.branch,'codex/awh-v01-acceptance');
+  assert.deepEqual(future.workflow.verification_commands,['git diff --check origin/main...HEAD']);assert(!future.workflow.bootstrap_paths.includes('package.json'));
 });

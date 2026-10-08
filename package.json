@@ -19,7 +19,8 @@
     "client:pack": "pnpm build && node scripts/client-pack.mjs",
     "dashboard:fixture": "node scripts/dashboard-fixture.mjs",
     "dashboard:smoke": "node scripts/dashboard-smoke.mjs",
-    "dashboard:load": "node scripts/dashboard-load.mjs"
+    "dashboard:load": "node scripts/dashboard-load.mjs",
+    "mvp": "node dist/mvp-cli.js"
   },
   "devDependencies": {
     "@radix-ui/themes": "3.3.0",
