@@ -183,7 +183,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       if (e instanceof BuilderError) throw e;
       return fail('GitHub request failed (network, timeout, redirect or invalid JSON; details suppressed)');
     }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) fail('Invalid GitHub response');
+    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length)))) fail('Invalid GitHub response');
     return value as Json;
   };
   const app = await request('/app', jwt);
@@ -388,6 +388,54 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return prSummary(await call(`${ROOT}/pulls/${id(number)}`, 'PATCH', { title: safeText(title), body: safeText(body) }));
     },
     readPR,
+    // Read-only closeout: never submit Review, merge or Issue mutations.
+    readLifecycle: async (number: number, expectedHead: string) => {
+      if (!sha(expectedHead)) fail('Invalid expected head');
+      const inspect = (p: Json) => {
+        if (p.number !== id(number) || p.user?.login !== actor || p.user?.type !== 'Bot' ||
+            p.head?.sha !== expectedHead || p.head?.ref !== BRANCH || p.base?.ref !== profile.base ||
+            p.head?.repo?.full_name !== REPO || p.base?.repo?.full_name !== REPO ||
+            !['open','closed'].includes(p.state) || typeof p.merged !== 'boolean' ||
+            p.merged && (p.state !== 'closed' || !sha(p.merge_commit_sha)))
+          fail('Lifecycle PR identity or exact head mismatch');
+        return p;
+      };
+      const before = inspect(await call(ROOT + '/pulls/' + id(number)));
+      const latest = new Map<string, Json>();
+      for (let page = 1; ; page++) {
+        if (page > 10) fail('Lifecycle Review history exceeds bounded read limit');
+        const rows = await call(ROOT + '/pulls/' + id(number) + '/reviews?per_page=100&page=' + page);
+        if (!Array.isArray(rows) || rows.length > 100) fail('Invalid native Review response');
+        for (const review of rows) {
+          if (!positive(review.id) || !sha(review.commit_id) || typeof review.user?.login !== 'string' ||
+              !['APPROVED','CHANGES_REQUESTED','COMMENTED','DISMISSED','PENDING'].includes(review.state))
+            fail('Invalid native Review record');
+          // Comments do not supersede an effective decision. Dismissals do.
+          if (review.user.type === 'User' && review.user.login !== actor && review.state !== 'COMMENTED' && review.state !== 'PENDING')
+            latest.set(review.user.login, review);
+        }
+        if (rows.length < 100) break;
+      }
+      const decisions = [...latest.values()];
+      const blocked = decisions.some(r => r.state === 'CHANGES_REQUESTED');
+      const approval = blocked ? undefined : decisions.find(r => r.state === 'APPROVED' && r.commit_id === expectedHead);
+      let issueClosed = false;
+      if (workflow.work_item.repo === REPO) {
+        const issue = await call(ROOT + '/issues/' + workflow.work_item.issue);
+        if (issue.number !== workflow.work_item.issue || issue.pull_request || !['open','closed'].includes(issue.state))
+          fail('Lifecycle Work Item mismatch');
+        issueClosed = issue.state === 'closed';
+      }
+      const after = inspect(await call(ROOT + '/pulls/' + id(number)));
+      if (before.state !== after.state || before.merged !== after.merged || before.merge_commit_sha !== after.merge_commit_sha)
+        fail('Lifecycle changed during read; retry read explicitly');
+      return { repository: REPO, pull_request: number, head_sha: expectedHead,
+        state: after.state, merged: after.merged as boolean, merge_sha: after.merged ? after.merge_commit_sha as string : null,
+        issue: workflow.work_item.issue, issue_repository: workflow.work_item.repo, issue_closed: issueClosed,
+        review: approval ? { id: approval.id as number, login: approval.user.login as string,
+          subject_sha: approval.commit_id as string, url: 'https://github.com/' + REPO + '/pull/' + number + '#pullrequestreview-' + approval.id } : null,
+        changes_requested: blocked, authority_verified: false as const };
+    },
     createComment: async (number: number, body: string) => {
       await readPR(number);
       return commentSummary(await call(`${ROOT}/issues/${id(number)}/comments`, 'POST', { body: safeText(body) }), number);
@@ -397,6 +445,22 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`, 'PATCH', { body: safeText(body) }), number);
     },
     readComment,
+    // Adapter may lose observation connectivity after a real Ready mutation. Restore and read back
+    // this same App-owned, fixed-workflow candidate; never announce an uncertain delivery as Ready.
+    restoreDraft: async (number: number, expectedHead: string) => {
+      const p = await readPR(number);
+      if (!sha(expectedHead) || p.head !== expectedHead) fail('Draft restoration exact head mismatch');
+      if (!p.draft) {
+        const result = await call('/graphql', 'POST', {
+          query: 'mutation($id:ID!){convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{isDraft}}}',
+          variables: { id: p.node_id },
+        });
+        if (result.errors || result.data?.convertPullRequestToDraft?.pullRequest?.isDraft !== true) fail('Draft restoration failed');
+      }
+      const final = await readPR(number);
+      if (!final.draft || final.head !== expectedHead || final.base !== p.base) fail('Draft restoration readback or version mismatch');
+      return final;
+    },
     ready: async (number: number, expectedHead: string, record: unknown, comment: number) => {
       const validation = validateHandoff(record, expectedHead);
       if (!validation.ready_claim_valid) fail('Confirmed Handoff validation failed');

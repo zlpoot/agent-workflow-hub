@@ -208,7 +208,7 @@ test('local package installs offline with bundled runtime and real bin; full CLI
   const installed = spawnSync(process.execPath,[npmEntry(),'install','--prefix',prefix,'--offline','--ignore-scripts','--no-audit','--no-fund',artifact.artifact],{cwd:prefix,env:npmEnv(join(h.base,'npm-cache')),encoding:'utf8',timeout:60000,windowsHide:true});
   assert.equal(installed.status,0,'Independent offline installation failed');
   const packageRoot = join(prefix,'node_modules/@zlpoot/awh-client'), cli = join(packageRoot,'dist/client/cli.js');
-  assert.equal(JSON.parse(readFileSync(join(packageRoot,'package.json'))).version,CLIENT_VERSION); assert(!artifact.files.some(f => /builder|control-plane\/(store|server)\.js/.test(f)));
+  assert.equal(JSON.parse(readFileSync(join(packageRoot,'package.json'))).version,CLIENT_VERSION); assert(artifact.files.includes('dist/builder.js')); assert(!artifact.files.some(f => /builder-cli|control-plane\/(store|server)\.js/.test(f)));
   const shim = join(prefix,'node_modules/.bin/awh' + (process.platform === 'win32' ? '.cmd' : ''));
   const bin = process.platform === 'win32' ? spawnSync(process.env.ComSpec ?? 'cmd.exe',['/d','/s','/c',`""${shim}" --version"`],{cwd:h.repo,encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true}) : spawnSync(shim,['--version'],{cwd:h.repo,encoding:'utf8'});
   assert.equal(bin.status,0,bin.stderr); assert.equal(JSON.parse(bin.stdout).version,CLIENT_VERSION);
@@ -218,7 +218,7 @@ test('local package installs offline with bundled runtime and real bin; full CLI
   const linkedVersion = await runCli(linkedCli,['--version'],h.repo); assert.equal(linkedVersion.code,0,linkedVersion.stderr);
   assert.notEqual(linkedVersion.stdout.trim(),'','Symlinked installed CLI must execute its entry point');
   assert.equal(JSON.parse(linkedVersion.stdout).version,CLIENT_VERSION);
-  const help = await runCli(linkedCli,['--help'],h.repo); assert.equal(help.code,0); assert.equal(JSON.parse(help.stdout).deliver,'unavailable until C1-D/#22');
+  const help = await runCli(linkedCli,['--help'],h.repo); assert.equal(help.code,0); assert.equal(JSON.parse(help.stdout).deliver,'fixed Builder policy; explicit event-only retry');
   const invalid = await runCli(linkedCli,['deliver'],h.repo); assert.equal(invalid.code,2); assert.equal(JSON.parse(invalid.stderr).error.code,'arguments');
   const imported = await runCli('--input-type=module',['--eval',`await import(${JSON.stringify(new URL('../dist/client/cli.js',import.meta.url).href)})`],h.repo);
   assert.equal(imported.code,0,imported.stderr); assert.equal(imported.stdout,''); assert.equal(imported.stderr,'');

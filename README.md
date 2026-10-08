@@ -1,5 +1,7 @@
 # agent-workflow-hub
 
+当前候选：[#39 v0.1 MVP](https://github.com/zlpoot/agent-workflow-hub/issues/39)。Windows 单机、静态可信 Profile、现有 CP 与安装型 Client；`deliver → timeline → sync` 串联 GitHub 交付和实际审查/合并/关闭观察，见 [v0.1 使用说明](docs/mvp.md)。动态 Onboarding 不再是首版前置条件。
+
 ## C1-G Dashboard read-only MVP
 
 Issue [#30](https://github.com/zlpoot/agent-workflow-hub/issues/30) 新增独立只读浏览器界面：Overview / Projects / Executors / Runs / Timeline、真实未知/离线状态、#23 契约校验和 SSE 恢复。使用锁定的 Radix Themes；Future UI 保留为本地语义适配入口。`pnpm dashboard:fixture` 启动仅内存 fixture 的 loopback 预览。P2 通过共享 scope 投影消除空闲全量 SQLite 重读；真实 gateway 默认关闭，原 CP 保持不变。启动、测试与独立 live/session/deployment 门禁见 [Dashboard UI 规范](docs/dashboard-ui.md)。
@@ -7,10 +9,11 @@ Issue [#30](https://github.com/zlpoot/agent-workflow-hub/issues/30) 新增独立
 ## C1-E Dashboard read contract
 
 Issue [#23](https://github.com/zlpoot/agent-workflow-hub/issues/23) 增加版本化只读 [Dashboard API](docs/dashboard-api.md) 与 [OpenAPI 3.1](contracts/dashboard-v1.openapi.json)：Projects/Executors/Runs/Timeline、全局 SSE cursor 和安全 diagnostic 投影。可选 viewer gateway 默认关闭，与 CP Client 凭据独立；本阶段不部署或修改原 CP，不实现 Dashboard 页面。
+Issue [#22](https://github.com/zlpoot/agent-workflow-hub/issues/22) 的 C1-D 在现有 Builder 上新增观测 Adapter 和安装包内固定范围 `awh deliver`。CP 保存 Run/Event，GitHub 保持开发事实源。交付、event-only retry、Draft/independent Review 边界与真实双端验收见 [delivery](docs/delivery.md)。
 
 ## C1-C Client
 
-Issue [#21](https://github.com/zlpoot/agent-workflow-hub/issues/21) 增加可独立安装的 `@zlpoot/awh-client` CLI：minimal Manifest、真实 Git origin binding、稳定 machine identity、专用 CP 配置，以及 register/start/event/status/finish。`pnpm client:pack` 生成包含运行依赖的 tarball，消费者在仓库外安装，无需 Hub checkout。安装、固定命令、显式重试、原生 verified HTTPS 和真实双端验收边界见 [Client 规范](docs/client.md)。`deliver` 等待 #22；双平台 PASS 必须由同一个 CP 的实际两端证据证明。
+Issue [#21](https://github.com/zlpoot/agent-workflow-hub/issues/21) 增加可独立安装的 `@zlpoot/awh-client` CLI：minimal Manifest、真实 Git origin binding、稳定 machine identity、专用 CP 配置，以及 register/start/event/status/finish。`pnpm client:pack` 生成包含运行依赖的 tarball，消费者在仓库外安装，无需 Hub checkout。安装、固定命令、显式重试、原生 verified HTTPS 和真实双端验收边界见 [Client 规范](docs/client.md)。本候选已整合 #22 的 `deliver`；双平台 PASS 必须由同一个 CP 的实际两端证据证明。
 
 ## C1-B Control Plane
 

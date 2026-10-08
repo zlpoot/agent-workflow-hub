@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { ControlPlaneStore } from '../dist/control-plane/store.js';
+import { mvpPolicy, seedMvpProfile } from '../dist/mvp-cli.js';
+test('static MVP seed appends one immutable version; old Profile/Run/Event/identity tables unchanged; repeat is idempotent',t=>{
+  const dir=mkdtempSync(join(tmpdir(),'awh-mvp-')),path=join(dir,'runtime.sqlite');
+  t.after(()=>{assert.equal(dirname(dir),tmpdir());assert(dir.startsWith(join(tmpdir(),'awh-mvp-')));rmSync(dir,{recursive:true,force:true});});
+  const fixture=JSON.parse(readFileSync(new URL('../examples/protocol/future-ui.json',import.meta.url))),original=fixture.profile_policy;
+  original.ref='future-ui/c1c-acceptance';fixture.manifest.profile.ref=original.ref;fixture.run.profile.ref=original.ref;fixture.run.source.ref=original.branch.ref;
+  const principal={id:'existing-client',project_ids:['future-ui'],executor_ids:[fixture.executor.id]};
+  const old=new ControlPlaneStore(path,[original]);old.registerProject(principal,fixture.manifest);old.registerExecutor(principal,fixture.executor);
+  old.registerWorkItem(principal,fixture.work_item);old.createRun(principal,fixture.run);
+  old.append(principal,fixture.run.id,{schema_version:'1.0',kind:'event',id:'preserved-event',run_id:fixture.run.id,sequence:1,type:'RUN_STARTED',occurred_at:'2026-10-07T00:00:00.001Z',payload:{schema_version:'1.0',data:{source_sha:fixture.run.source.sha},extensions:{}}});old.close();
+  const read=new DatabaseSync(path,{readOnly:true});
+  const snapshot=()=>Object.fromEntries(['projects','executors','executor_clients','work_items','runs','events'].map(table=>[table,read.prepare('SELECT * FROM '+table).all()]));
+  const before=snapshot(),profiles=read.prepare('SELECT * FROM profiles').all();const result=seedMvpProfile(path);assert.equal(result.database_version,2);assert.deepEqual(snapshot(),before);
+  assert.deepEqual(read.prepare('SELECT * FROM profiles WHERE ref = ? AND version = ?').all(original.ref,original.version),profiles);
+  assert.equal(read.prepare('SELECT count(*) n FROM profiles').get().n,2);seedMvpProfile(path);assert.equal(read.prepare('SELECT count(*) n FROM profiles').get().n,2);
+  assert.equal(mvpPolicy().branch.ref,'codex/awh-v01-acceptance');read.close();
+});
+test('static MVP seed refuses a missing/new or unsupported DB instead of creating/migrating one',t=>{
+  const dir=mkdtempSync(join(tmpdir(),'awh-mvp-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  assert.throws(()=>seedMvpProfile(join(dir,'missing.sqlite')));
+  const path=join(dir,'old.sqlite'),db=new DatabaseSync(path);db.exec('PRAGMA user_version=1');db.close();assert.throws(()=>seedMvpProfile(path));
+  const read=new DatabaseSync(path,{readOnly:true});assert.equal(read.prepare('PRAGMA user_version').get().user_version,1);read.close();
+});

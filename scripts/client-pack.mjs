@@ -14,7 +14,7 @@ const stage = mkdtempSync(join(output, '.client-stage-'));
 try {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json')));
   mkdirSync(join(stage, 'dist/control-plane'), { recursive: true });
-  for (const path of ['client','protocol','validator.js']) cpSync(join(root, 'dist', path), join(stage, 'dist', path), { recursive: true });
+  for (const path of ['client','protocol','validator.js','profiles.js','builder.js']) cpSync(join(root, 'dist', path), join(stage, 'dist', path), { recursive: true });
   cpSync(join(root, 'dist/control-plane/security.js'), join(stage, 'dist/control-plane/security.js'));
   if (existsSync(join(root, 'docs/client.md'))) cpSync(join(root, 'docs/client.md'), join(stage, 'README.md'));
   const packageJson = { name: CLIENT_PACKAGE, version: CLIENT_VERSION, private: true, type: 'module', engines: { node: '>=24' },
@@ -40,7 +40,7 @@ try {
     cwd: stage, env: npmEnv(join(stage, '.cache')), encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
   assert(!r.error && r.status === 0, 'Local npm pack failed (diagnostics suppressed)');
   const [packed] = JSON.parse(r.stdout); assert.equal(packed.name, CLIENT_PACKAGE); assert.equal(packed.version, CLIENT_VERSION);
-  assert(packed.files.every(f => !/^(?:src|tests|\.handoff|credentials)\//.test(f.path) && !/(?:builder|control-plane-cli|control-plane\/store|control-plane\/server)\.js$/.test(f.path)));
+  assert(packed.files.every(f => !/^(?:src|tests|\.handoff|credentials)\//.test(f.path) && !/(?:builder-cli|control-plane-cli|control-plane\/store|control-plane\/server)\.js$/.test(f.path)));
   const archive = join(output, packed.filename); assert.equal(dirname(archive), output);
   console.log(JSON.stringify({ package: CLIENT_PACKAGE, version: CLIENT_VERSION, artifact: archive,
     sha256: createHash('sha256').update(readFileSync(archive)).digest('hex'), files: packed.files.map(f => f.path), bundled_runtime_dependencies: Object.fromEntries(copied), published_to_registry: false }));

@@ -17,8 +17,8 @@ export interface ProjectProfile {
 }
 export interface BuilderSelection { profile: string; workflow: string }
 export class ProfileError extends Error {}
-const workflow = (id: string, branch: string, issue: number, commands: string[], paths: string[] | null): Workflow =>
-  Object.freeze({ id, branch, work_item: Object.freeze({ repo: HUB_REPO, issue }),
+const workflow = (id: string, branch: string, issue: number, commands: string[], paths: string[] | null, repository = HUB_REPO): Workflow =>
+  Object.freeze({ id, branch, work_item: Object.freeze({ repo: repository, issue }),
     verification_commands: Object.freeze(commands), bootstrap_paths: paths ? Object.freeze(paths) : null });
 
 // Repository/workflow policy is checked-in data, never caller-provided URLs, agents or machine paths.
@@ -35,9 +35,13 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
     workflow('c1c', 'codex/c1c-client', 21, ['pnpm check'], null),
     workflow('c1e', 'codex/c1e-dashboard-api-contract', 23, ['pnpm check'], null),
     workflow('c1g', 'codex/c1g-dashboard-readonly', 30, ['pnpm check'], null),
+    workflow('v01-mvp', 'codex/v01-mvp', 39, ['pnpm check'], null),
     workflow('c1h', 'codex/c12-trusted-onboarding', 31, ['pnpm check'], null),
+    workflow('c1d', 'codex/c1d-builder-adapter', 22, ['pnpm check'], null),
   ]) }),
   Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([
+    workflow('mvp-docs', 'codex/awh-v01-acceptance', 88, ['git diff --check origin/main...HEAD'],
+      ['docs/management/awh-v01-acceptance.md', '.awh/project.yaml', '.gitignore'], FUTURE_REPO),
     workflow('bootstrap', 'codex/awh-c06-bootstrap', 6,
       ['pnpm lint', 'pnpm typecheck', 'pnpm test'], ['docs/management/agent-workflow-hub.md']),
   ]) }),
