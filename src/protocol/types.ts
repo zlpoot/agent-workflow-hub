@@ -77,6 +77,13 @@ export interface EventData {
   VERIFICATION_FAILED: { subject_sha: string; checks: Check[]; reason: string };
   GITHUB_PUSH_COMPLETED: { commit: GitHubCommitRef };
   GITHUB_PR_CREATED: { pull_request: GitHubNumberRef<'pull_request'>; base_sha: string; head_sha: string };
+  PR_REVISION_LINKED: {
+    revision_id: string; source_sha: string; previous_head: string; new_head: string; base_sha: string; ref: string;
+    pull_request: GitHubNumberRef<'pull_request'>; previous_handoff: GitHubNumberRef<'issue_comment'>;
+    evidence: { comment: GitHubNumberRef<'issue_comment'>; sha256: string };
+    handoff: { comment: GitHubNumberRef<'issue_comment'>; sha256: string };
+    checks: Check[];
+  };
   HANDOFF_PUBLISHED: {
     handoff_version: '0.1'; publication: 'pending' | 'confirmed' | 'failed';
     pull_request: GitHubNumberRef<'pull_request'>; comment: GitHubNumberRef<'issue_comment'>;

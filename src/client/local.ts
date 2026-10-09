@@ -20,7 +20,7 @@ export const platform = (): 'windows' | 'macos' | 'linux' => {
   if (process.platform === 'win32') return 'windows'; if (process.platform === 'darwin') return 'macos';
   if (process.platform === 'linux') return 'linux'; return clientFail('platform', 'Unsupported Client platform');
 };
-function git(root: string, args: string[], optional = false): string {
+export function git(root: string, args: string[], optional = false): string {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(GIT_|GH_|GITHUB_|AWH_|SSH_|NODE_OPTIONS$)/i.test(k)));
   Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
     GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: root.replaceAll('\\', '/'),

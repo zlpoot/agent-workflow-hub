@@ -1,6 +1,6 @@
 # Client / C1-C and C1-D
 
-Current v0.2 candidate: [Hub #41](https://github.com/zlpoot/agent-workflow-hub/issues/41), Client 0.4.1 and the [Windows repeatable workflow](repeatable.md). The verification-recovery patch requires independent Review and separate Human authorization before real #90 recovery.
+Current v0.2.1 candidate: [Hub #43](https://github.com/zlpoot/agent-workflow-hub/issues/43), Client 0.4.2 and [controlled document revision linking](link-revision.md), stacked on the reviewed [v0.2 workflow](repeatable.md). Independent Review and separate Human authorization are required before production CP upgrade, Client installation/registration or real revision linking.
 
 当前 v0.1 MVP 候选按 [MVP 使用说明](mvp.md) 执行：Windows 静态配置、独立 Client 0.3.0、deliver/timeline/sync；下文保留原 C1-C/C1-D 历史范围和恢复约束，Mac 双端与动态 Onboarding 不再是本候选前置条件。
 

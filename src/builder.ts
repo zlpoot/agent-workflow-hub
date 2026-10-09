@@ -62,9 +62,10 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
 }
 
 // Returns only fixed Builder operations. Credentials and generic API requests stay in this closure.
-export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' = 'deliver') {
-  if (!['deliver','observe','recover'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Task recovery or lifecycle observation supports read-only mode');
+export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' | 'revision' = 'deliver') {
+  if (!['deliver','observe','recover','revision'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Tasks support restricted Builder modes');
   const { profile, workflow } = bindWorkflow(selection, binding);
+  if (mode === 'revision' && workflow.id !== 'repeatable-docs') fail('Revision publication requires the trusted docs-only Task policy');
   const REPO = profile.repository, BRANCH = workflow.branch, ROOT = `/repos/${REPO}`;
   const d = { ...defaults, ...overrides };
   const appId = d.env.AWH_GITHUB_APP_ID;
@@ -236,7 +237,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         issue.html_url !== 'https://github.com/' + REPO + '/issues/' + binding.issue)
       fail('Task must bind an ordinary Issue in the selected repository');
     issueState = issue.state;
-    if (mode !== 'observe') {
+    if (mode === 'deliver' || mode === 'recover') {
     if (issue.state !== 'open') fail('New Task delivery requires an open ordinary Issue');
     const main = await request(ROOT + '/git/ref/heads/' + profile.base, read.token);
     if (!sha(main.object?.sha)) fail('Invalid Task baseline');
@@ -251,10 +252,27 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     if (head.status !== 0 || branch.status !== 0 || head.stdout.trim() !== binding.source_sha || branch.stdout.trim() !== binding.branch)
       fail('Task binding differs from the real Git branch or HEAD');
   }
-  const { token, expiry } = mode !== 'deliver' ? observer! : await mint(true);
+  const revisionPermissions = { contents: 'read', issues: 'write', metadata: 'read', pull_requests: 'read' };
+  const revisionToken = async () => {
+    const v = await request(`/app/installations/${inst.id}/access_tokens`, jwt, 'POST', {
+      repositories: [REPO.split('/')[1]], permissions: { contents: 'read', issues: 'write', pull_requests: 'read' },
+    });
+    if (typeof v.token !== 'string' || !v.token || !equalPermissions(v.permissions, revisionPermissions) ||
+      !Array.isArray(v.repositories) || v.repositories.length !== 1 || v.repositories[0]?.full_name !== REPO ||
+      !Number.isFinite(Date.parse(v.expires_at)) || Date.parse(v.expires_at) <= d.now() || Date.parse(v.expires_at) > d.now() + 3660000)
+      fail('Revision comment-only token scope, permissions or expiry mismatch');
+    secrets.push(v.token); return { token: v.token as string, expiry: Date.parse(v.expires_at) };
+  };
+  const { token, expiry } = mode === 'revision' ? await revisionToken() : mode !== 'deliver' ? observer! : await mint(true);
   const live = () => { if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
-  const writable = () => { if (mode !== 'deliver') fail('Lifecycle observation cannot mutate GitHub'); };
-  const call = (path: string, method = 'GET', body?: unknown) => { live(); if (mode !== 'deliver' && method !== 'GET') fail('Lifecycle observation cannot mutate GitHub'); return request(path, token, method, body); };
+  const writable = () => { if (mode !== 'deliver' && mode !== 'revision') fail('Lifecycle observation cannot mutate GitHub'); };
+  const call = (path: string, method = 'GET', body?: unknown) => {
+    live();
+    const commentOnly = mode === 'revision' && (method === 'POST' && new RegExp('^' + ROOT + '/issues/[1-9]\\d*/comments$').test(path) ||
+      method === 'PATCH' && new RegExp('^' + ROOT + '/issues/comments/[1-9]\\d*$').test(path));
+    if (mode !== 'deliver' && method !== 'GET' && !commentOnly) fail('Restricted Builder mode cannot perform this mutation');
+    return request(path, token, method, body);
+  };
   // No caller ref/path: independently read only this workflow's feature branch.
   // null means controlled ABSENT; PRESENT is a validated commit SHA.
   const readFeatureRefState = async (): Promise<string | null> => {
@@ -311,14 +329,19 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   };
   const readComment = async (number: number, comment: number) =>
     commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`), number);
+  const revisionComments = new Set<number>();
   if (mode === 'recover') {
     if (await readFeatureRefState() !== null) fail('Recovery Task branch already exists remotely');
     const prs = await call(`${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1`);
     if (!Array.isArray(prs) || prs.length !== 0) fail('Recovery requires no PR on the canonical Task branch');
   }
   return Object.freeze({
+    readRevisionRef: async () => {
+      if (mode !== 'observe' && mode !== 'revision') fail('Only revision observation can read its fixed remote ref');
+      return readFeatureRefState();
+    },
     preflight: () => ({ repo: REPO, app_id: Number(appId), installation_id: inst.id as number, actor,
-      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: mode !== 'deliver' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : { ...PERMISSIONS }, ...(binding ? { task_binding: binding, issue_state: issueState } : {}), ...(mode === 'recover' ? { recovery_inspection: { remote_branch_absent: true as const, same_branch_pr_absent: true as const } } : {}) }),
+      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: mode === 'revision' ? { ...revisionPermissions } : mode !== 'deliver' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : { ...PERMISSIONS }, ...(binding ? { task_binding: binding, issue_state: issueState } : {}), ...(mode === 'recover' ? { recovery_inspection: { remote_branch_absent: true as const, same_branch_pr_absent: true as const } } : {}) }),
     push: async () => {
       if (mode !== 'deliver') fail('Lifecycle observation cannot push');
       live();
@@ -482,10 +505,13 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     createComment: async (number: number, body: string) => {
       writable();
       await readPR(number);
-      return commentSummary(await call(`${ROOT}/issues/${id(number)}/comments`, 'POST', { body: safeText(body) }), number);
+      const comment = commentSummary(await call(`${ROOT}/issues/${id(number)}/comments`, 'POST', { body: safeText(body) }), number);
+      if (mode === 'revision') revisionComments.add(comment.id);
+      return comment;
     },
     editComment: async (number: number, comment: number, body: string) => {
       writable();
+      if (mode === 'revision' && !revisionComments.has(comment)) fail('Revision can edit only its newly created Handoff comment');
       await readPR(number); await readComment(number, comment);
       return commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`, 'PATCH', { body: safeText(body) }), number);
     },

@@ -1,0 +1,538 @@
+{
+  "provenance": {
+    "issue": "zlpoot/agent-workflow-hub#43",
+    "source": "retained restore-before SQLite backup (8/42) + retained real delivery Timeline (1/10); no production access",
+    "runs": 9,
+    "events": 52,
+    "head": "d87adfd443a1661ea736a732d4fba20f8cb7d219"
+  },
+  "tables": {
+    "profiles": [
+      {
+        "ref": "future-ui/c1c-acceptance",
+        "version": "c1c-acceptance-v1",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"profile_policy\",\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\",\"repository\":\"zlpoot/future-ui\",\"base\":\"main\",\"branch\":{\"mode\":\"fixed\",\"ref\":\"codex/awh-c1c-acceptance\"},\"verification\":{\"commands\":[\"awh status\"]},\"github_app\":{\"identity\":\"installation\",\"repository_scope\":\"single\",\"selected_set_policy\":\"exact\",\"permissions\":{\"contents\":\"write\",\"issues\":\"write\",\"metadata\":\"read\",\"pull_requests\":\"write\"}},\"review\":{\"mode\":\"independent_exact_head\",\"builder_is_reviewer\":false},\"delivery\":{\"draft_pr\":true,\"handoff_version\":\"0.1\",\"confirmed_publication_required\":true,\"exact_head_required\":true},\"executor_restrictions\":null}"
+      },
+      {
+        "ref": "webskill/c1c-acceptance",
+        "version": "c1c-acceptance-v1",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"profile_policy\",\"ref\":\"webskill/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\",\"repository\":\"zlpoot/webskill\",\"base\":\"main\",\"branch\":{\"mode\":\"fixed\",\"ref\":\"codex/awh-c1c-acceptance\"},\"verification\":{\"commands\":[\"awh status\"]},\"github_app\":{\"identity\":\"installation\",\"repository_scope\":\"single\",\"selected_set_policy\":\"exact\",\"permissions\":{\"contents\":\"write\",\"issues\":\"write\",\"metadata\":\"read\",\"pull_requests\":\"write\"}},\"review\":{\"mode\":\"independent_exact_head\",\"builder_is_reviewer\":false},\"delivery\":{\"draft_pr\":true,\"handoff_version\":\"0.1\",\"confirmed_publication_required\":true,\"exact_head_required\":true},\"executor_restrictions\":null}"
+      },
+      {
+        "ref": "future-ui/c1c-acceptance",
+        "version": "v01-mvp-docs-v1",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"profile_policy\",\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"v01-mvp-docs-v1\",\"repository\":\"zlpoot/future-ui\",\"base\":\"main\",\"branch\":{\"mode\":\"fixed\",\"ref\":\"codex/awh-v01-acceptance\"},\"verification\":{\"commands\":[\"git diff --check origin/main...HEAD\"]},\"github_app\":{\"identity\":\"installation\",\"repository_scope\":\"single\",\"selected_set_policy\":\"exact\",\"permissions\":{\"contents\":\"write\",\"issues\":\"write\",\"metadata\":\"read\",\"pull_requests\":\"write\"}},\"review\":{\"mode\":\"independent_exact_head\",\"builder_is_reviewer\":false},\"delivery\":{\"draft_pr\":true,\"handoff_version\":\"0.1\",\"confirmed_publication_required\":true,\"exact_head_required\":true},\"executor_restrictions\":null}"
+      },
+      {
+        "ref": "future-ui/c1c-acceptance",
+        "version": "v02-repeatable-v1",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"profile_policy\",\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"v02-repeatable-v1\",\"repository\":\"zlpoot/future-ui\",\"base\":\"main\",\"branch\":{\"mode\":\"issue_prefix\",\"ref\":\"codex/awh-task-\"},\"verification\":{\"commands\":[\"git diff --check origin/main...HEAD\"]},\"github_app\":{\"identity\":\"installation\",\"repository_scope\":\"single\",\"selected_set_policy\":\"exact\",\"permissions\":{\"contents\":\"write\",\"issues\":\"write\",\"metadata\":\"read\",\"pull_requests\":\"write\"}},\"review\":{\"mode\":\"independent_exact_head\",\"builder_is_reviewer\":false},\"delivery\":{\"draft_pr\":true,\"handoff_version\":\"0.1\",\"confirmed_publication_required\":true,\"exact_head_required\":true},\"executor_restrictions\":{\"executor_ids\":[\"c1c-future-ui-windows\"],\"machine_ids\":[\"machine-39b94132-203f-499e-aa63-b17bce1349b8\"]}}"
+      }
+    ],
+    "projects": [
+      {
+        "id": "future-ui",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"project\",\"id\":\"future-ui\",\"repository\":\"zlpoot/future-ui\",\"profile_ref\":\"future-ui/c1c-acceptance\"}"
+      },
+      {
+        "id": "webskill",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"project\",\"id\":\"webskill\",\"repository\":\"zlpoot/webskill\",\"profile_ref\":\"webskill/c1c-acceptance\"}"
+      }
+    ],
+    "executors": [
+      {
+        "id": "c1c-future-ui-windows",
+        "client_id": "awh-future-ui-windows-c1c",
+        "last_seen": "2026-10-08T14:01:57.218Z",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"executor\",\"id\":\"c1c-future-ui-windows\",\"display_name\":\"codex on DESKTOP-5IP6BCN\",\"machine\":{\"id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"platform\":\"windows\"}}"
+      },
+      {
+        "id": "c1c-webskill-mac",
+        "client_id": "awh-webskill-mac-c1c",
+        "last_seen": "2026-10-08T02:39:08.828Z",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"executor\",\"id\":\"c1c-webskill-mac\",\"display_name\":\"codex on 192.168.2.3\",\"machine\":{\"id\":\"machine-6d7cec05-f6dd-456f-b358-704a17ca1f2d\",\"platform\":\"macos\"}}"
+      }
+    ],
+    "executor_clients": [
+      {
+        "executor_id": "c1c-future-ui-windows",
+        "record": "{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.0\"}"
+      },
+      {
+        "executor_id": "c1c-webskill-mac",
+        "record": "{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"192.168.2.3\",\"arch\":\"arm64\",\"client_version\":\"0.1.0\"}"
+      }
+    ],
+    "work_items": [
+      {
+        "id": "work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363",
+        "project_id": "future-ui",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"work_item\",\"id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"project_id\":\"future-ui\",\"reference\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":21}}"
+      },
+      {
+        "id": "work-7b5f32ac2114e47dec27a5900b53fbf88a8b2b2429c2d35da831abccb22e3121",
+        "project_id": "webskill",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"work_item\",\"id\":\"work-7b5f32ac2114e47dec27a5900b53fbf88a8b2b2429c2d35da831abccb22e3121\",\"project_id\":\"webskill\",\"reference\":{\"provider\":\"github\",\"repository\":\"zlpoot/webskill\",\"kind\":\"issue\",\"number\":21}}"
+      },
+      {
+        "id": "work-ec74c11df6f958b1c8fa1d5e4b44f8dae101f55fcee1a905a918943e359923ce",
+        "project_id": "future-ui",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"work_item\",\"id\":\"work-ec74c11df6f958b1c8fa1d5e4b44f8dae101f55fcee1a905a918943e359923ce\",\"project_id\":\"future-ui\",\"reference\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":88}}"
+      },
+      {
+        "id": "work-06ab3f43fbf873b01a6613ffd997b6ade4926fd3875e0c7d8c635579d1186e4f",
+        "project_id": "future-ui",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"work_item\",\"id\":\"work-06ab3f43fbf873b01a6613ffd997b6ade4926fd3875e0c7d8c635579d1186e4f\",\"project_id\":\"future-ui\",\"reference\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":90}}"
+      }
+    ],
+    "runs": [
+      {
+        "id": "run-fc0daea3-dae5-49b7-9c2a-e2101211f8df",
+        "project_id": "future-ui",
+        "executor_id": "c1c-future-ui-windows",
+        "work_item_id": "work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363",
+        "client_id": "awh-future-ui-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-fc0daea3-dae5-49b7-9c2a-e2101211f8df\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"ec3cbdf16290cc35d7b87b5e0857771bed82defd\",\"ref\":\"feat/r1-04-phase-b-storyboard-keyframe\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T00:50:53.637Z\",\"updated_at\":\"2026-10-08T00:50:53.637Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-fc0daea3-dae5-49b7-9c2a-e2101211f8df\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"ec3cbdf16290cc35d7b87b5e0857771bed82defd\",\"ref\":\"feat/r1-04-phase-b-storyboard-keyframe\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T00:50:53.637Z\",\"updated_at\":\"2026-10-08T00:50:56.190Z\",\"started_at\":\"2026-10-08T00:50:53.639Z\",\"completed_at\":\"2026-10-08T00:50:56.190Z\"}"
+      },
+      {
+        "id": "run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c",
+        "project_id": "future-ui",
+        "executor_id": "c1c-future-ui-windows",
+        "work_item_id": "work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363",
+        "client_id": "awh-future-ui-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"ec3cbdf16290cc35d7b87b5e0857771bed82defd\",\"ref\":\"feat/r1-04-phase-b-storyboard-keyframe\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T01:07:12.562Z\",\"updated_at\":\"2026-10-08T01:07:12.562Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"ec3cbdf16290cc35d7b87b5e0857771bed82defd\",\"ref\":\"feat/r1-04-phase-b-storyboard-keyframe\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T01:07:12.562Z\",\"updated_at\":\"2026-10-08T01:07:15.459Z\",\"started_at\":\"2026-10-08T01:07:12.563Z\",\"completed_at\":\"2026-10-08T01:07:15.459Z\"}"
+      },
+      {
+        "id": "run-f460a0c8-9877-45f0-babd-40bdd96495ff",
+        "project_id": "future-ui",
+        "executor_id": "c1c-future-ui-windows",
+        "work_item_id": "work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363",
+        "client_id": "awh-future-ui-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-f460a0c8-9877-45f0-babd-40bdd96495ff\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T01:49:23.625Z\",\"updated_at\":\"2026-10-08T01:49:23.625Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-f460a0c8-9877-45f0-babd-40bdd96495ff\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T01:49:23.625Z\",\"updated_at\":\"2026-10-08T01:49:26.044Z\",\"started_at\":\"2026-10-08T01:49:23.627Z\",\"completed_at\":\"2026-10-08T01:49:26.044Z\"}"
+      },
+      {
+        "id": "run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a",
+        "project_id": "future-ui",
+        "executor_id": "c1c-future-ui-windows",
+        "work_item_id": "work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363",
+        "client_id": "awh-future-ui-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T02:17:58.597Z\",\"updated_at\":\"2026-10-08T02:17:58.597Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T02:17:58.597Z\",\"updated_at\":\"2026-10-08T02:18:01.981Z\",\"started_at\":\"2026-10-08T02:17:58.598Z\",\"completed_at\":\"2026-10-08T02:18:01.981Z\"}"
+      },
+      {
+        "id": "run-6f0f1db4-afa2-4601-ae07-7c61278b3953",
+        "project_id": "future-ui",
+        "executor_id": "c1c-future-ui-windows",
+        "work_item_id": "work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363",
+        "client_id": "awh-future-ui-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-6f0f1db4-afa2-4601-ae07-7c61278b3953\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T02:34:23.441Z\",\"updated_at\":\"2026-10-08T02:34:23.441Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-6f0f1db4-afa2-4601-ae07-7c61278b3953\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-7be47dc868c2fec1f3a62ca3df2a930f8030ff264492300b54fbef11ae88f363\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T02:34:23.441Z\",\"updated_at\":\"2026-10-08T02:34:27.986Z\",\"started_at\":\"2026-10-08T02:34:23.443Z\",\"completed_at\":\"2026-10-08T02:34:27.986Z\"}"
+      },
+      {
+        "id": "run-0dfff73a-bf28-43a3-98d8-739652314fea",
+        "project_id": "webskill",
+        "executor_id": "c1c-webskill-mac",
+        "work_item_id": "work-7b5f32ac2114e47dec27a5900b53fbf88a8b2b2429c2d35da831abccb22e3121",
+        "client_id": "awh-webskill-mac-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-0dfff73a-bf28-43a3-98d8-739652314fea\",\"project_id\":\"webskill\",\"work_item_id\":\"work-7b5f32ac2114e47dec27a5900b53fbf88a8b2b2429c2d35da831abccb22e3121\",\"executor_id\":\"c1c-webskill-mac\",\"machine_id\":\"machine-6d7cec05-f6dd-456f-b358-704a17ca1f2d\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/webskill\",\"sha\":\"9ca883f71cd210c4171fd53e8bdd990be7e4a400\",\"ref\":\"9ca883f71cd210c4171fd53e8bdd990be7e4a400\"},\"profile\":{\"ref\":\"webskill/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T02:39:09.804Z\",\"updated_at\":\"2026-10-08T02:39:09.804Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-0dfff73a-bf28-43a3-98d8-739652314fea\",\"project_id\":\"webskill\",\"work_item_id\":\"work-7b5f32ac2114e47dec27a5900b53fbf88a8b2b2429c2d35da831abccb22e3121\",\"executor_id\":\"c1c-webskill-mac\",\"machine_id\":\"machine-6d7cec05-f6dd-456f-b358-704a17ca1f2d\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/webskill\",\"sha\":\"9ca883f71cd210c4171fd53e8bdd990be7e4a400\",\"ref\":\"9ca883f71cd210c4171fd53e8bdd990be7e4a400\"},\"profile\":{\"ref\":\"webskill/c1c-acceptance\",\"version\":\"c1c-acceptance-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T02:39:09.804Z\",\"updated_at\":\"2026-10-08T02:39:10.562Z\",\"started_at\":\"2026-10-08T02:39:09.805Z\",\"completed_at\":\"2026-10-08T02:39:10.562Z\"}"
+      },
+      {
+        "id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "project_id": "future-ui",
+        "executor_id": "c1c-future-ui-windows",
+        "work_item_id": "work-ec74c11df6f958b1c8fa1d5e4b44f8dae101f55fcee1a905a918943e359923ce",
+        "client_id": "awh-future-ui-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-ec74c11df6f958b1c8fa1d5e4b44f8dae101f55fcee1a905a918943e359923ce\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"ref\":\"codex/awh-v01-acceptance\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"v01-mvp-docs-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T12:15:31.226Z\",\"updated_at\":\"2026-10-08T12:15:31.226Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-ec74c11df6f958b1c8fa1d5e4b44f8dae101f55fcee1a905a918943e359923ce\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"ref\":\"codex/awh-v01-acceptance\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"v01-mvp-docs-v1\"},\"state\":\"completed\",\"created_at\":\"2026-10-08T12:15:31.226Z\",\"updated_at\":\"2026-10-08T12:51:23.025Z\",\"started_at\":\"2026-10-08T12:15:31.228Z\",\"completed_at\":\"2026-10-08T12:51:23.025Z\"}"
+      },
+      {
+        "id": "run-fad6ec5a-1069-429e-a820-790f6e6782cb",
+        "project_id": "future-ui",
+        "executor_id": "c1c-future-ui-windows",
+        "work_item_id": "work-06ab3f43fbf873b01a6613ffd997b6ade4926fd3875e0c7d8c635579d1186e4f",
+        "client_id": "awh-future-ui-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-06ab3f43fbf873b01a6613ffd997b6ade4926fd3875e0c7d8c635579d1186e4f\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"ref\":\"codex/awh-task-90\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"v02-repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T14:03:04.267Z\",\"updated_at\":\"2026-10-08T14:03:04.267Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-06ab3f43fbf873b01a6613ffd997b6ade4926fd3875e0c7d8c635579d1186e4f\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"ref\":\"codex/awh-task-90\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"v02-repeatable-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T14:03:04.267Z\",\"updated_at\":\"2026-10-08T14:03:05.505Z\",\"started_at\":\"2026-10-08T14:03:04.268Z\",\"completed_at\":\"2026-10-08T14:03:05.505Z\"}"
+      },
+      {
+        "id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "project_id": "future-ui",
+        "executor_id": "c1c-future-ui-windows",
+        "work_item_id": "work-06ab3f43fbf873b01a6613ffd997b6ade4926fd3875e0c7d8c635579d1186e4f",
+        "client_id": "awh-future-ui-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-06ab3f43fbf873b01a6613ffd997b6ade4926fd3875e0c7d8c635579d1186e4f\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"ref\":\"codex/awh-task-90\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"v02-repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-09T00:04:54.101Z\",\"updated_at\":\"2026-10-09T00:04:54.101Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"project_id\":\"future-ui\",\"work_item_id\":\"work-06ab3f43fbf873b01a6613ffd997b6ade4926fd3875e0c7d8c635579d1186e4f\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"source\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"ref\":\"codex/awh-task-90\"},\"profile\":{\"ref\":\"future-ui/c1c-acceptance\",\"version\":\"v02-repeatable-v1\"},\"state\":\"awaiting_review\",\"created_at\":\"2026-10-09T00:04:54.101Z\",\"updated_at\":\"2026-10-09T00:05:30.191Z\",\"started_at\":\"2026-10-09T00:04:54.107Z\",\"completed_at\":null}"
+      }
+    ],
+    "events": [
+      {
+        "cursor": 1,
+        "run_id": "run-fc0daea3-dae5-49b7-9c2a-e2101211f8df",
+        "event_id": "event-835059b5-5458-443b-a6a7-f2ef199c5733",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-835059b5-5458-443b-a6a7-f2ef199c5733\",\"run_id\":\"run-fc0daea3-dae5-49b7-9c2a-e2101211f8df\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T00:50:53.639Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"ec3cbdf16290cc35d7b87b5e0857771bed82defd\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 2,
+        "run_id": "run-fc0daea3-dae5-49b7-9c2a-e2101211f8df",
+        "event_id": "event-844b075f-0868-4cda-875e-b5effd7b3e56",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-844b075f-0868-4cda-875e-b5effd7b3e56\",\"run_id\":\"run-fc0daea3-dae5-49b7-9c2a-e2101211f8df\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T00:50:54.119Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 3,
+        "run_id": "run-fc0daea3-dae5-49b7-9c2a-e2101211f8df",
+        "event_id": "event-273756bf-67df-4ec9-a39d-f22c73464b80",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-273756bf-67df-4ec9-a39d-f22c73464b80\",\"run_id\":\"run-fc0daea3-dae5-49b7-9c2a-e2101211f8df\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T00:50:55.211Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 4,
+        "run_id": "run-fc0daea3-dae5-49b7-9c2a-e2101211f8df",
+        "event_id": "event-8a71e114-9d3f-4452-8a06-39d205223097",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-8a71e114-9d3f-4452-8a06-39d205223097\",\"run_id\":\"run-fc0daea3-dae5-49b7-9c2a-e2101211f8df\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T00:50:56.190Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 5,
+        "run_id": "run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c",
+        "event_id": "event-5c4ed649-4046-4f9e-9c43-95eac5a16e81",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-5c4ed649-4046-4f9e-9c43-95eac5a16e81\",\"run_id\":\"run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T01:07:12.563Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"ec3cbdf16290cc35d7b87b5e0857771bed82defd\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 6,
+        "run_id": "run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c",
+        "event_id": "event-fd42fcfa-cc27-4abc-be4f-71ab4213fb61",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-fd42fcfa-cc27-4abc-be4f-71ab4213fb61\",\"run_id\":\"run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T01:07:13.050Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 7,
+        "run_id": "run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c",
+        "event_id": "event-9064fb38-913e-4db5-917d-c91e324b6522",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-9064fb38-913e-4db5-917d-c91e324b6522\",\"run_id\":\"run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T01:07:14.404Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 8,
+        "run_id": "run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c",
+        "event_id": "event-eb31894e-f812-48ab-b5df-23bd8698928d",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-eb31894e-f812-48ab-b5df-23bd8698928d\",\"run_id\":\"run-a3b5e447-4452-49b9-acf3-2c6ec24b1e3c\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T01:07:15.459Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 9,
+        "run_id": "run-f460a0c8-9877-45f0-babd-40bdd96495ff",
+        "event_id": "event-f410665d-848e-4ba2-b468-bdabe4cea650",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-f410665d-848e-4ba2-b468-bdabe4cea650\",\"run_id\":\"run-f460a0c8-9877-45f0-babd-40bdd96495ff\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T01:49:23.627Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 10,
+        "run_id": "run-f460a0c8-9877-45f0-babd-40bdd96495ff",
+        "event_id": "event-d336f19f-7dce-4e66-ba21-ed0d2db9daa8",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-d336f19f-7dce-4e66-ba21-ed0d2db9daa8\",\"run_id\":\"run-f460a0c8-9877-45f0-babd-40bdd96495ff\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T01:49:24.343Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 11,
+        "run_id": "run-f460a0c8-9877-45f0-babd-40bdd96495ff",
+        "event_id": "event-5efcbe1e-4fea-4a96-bcf2-113e6a8d3416",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-5efcbe1e-4fea-4a96-bcf2-113e6a8d3416\",\"run_id\":\"run-f460a0c8-9877-45f0-babd-40bdd96495ff\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T01:49:24.815Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 12,
+        "run_id": "run-f460a0c8-9877-45f0-babd-40bdd96495ff",
+        "event_id": "event-25da3e38-9558-45da-a504-a0db645184c7",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-25da3e38-9558-45da-a504-a0db645184c7\",\"run_id\":\"run-f460a0c8-9877-45f0-babd-40bdd96495ff\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T01:49:26.044Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 13,
+        "run_id": "run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a",
+        "event_id": "event-2f815002-c919-48ff-b6ea-2bf283e11acb",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-2f815002-c919-48ff-b6ea-2bf283e11acb\",\"run_id\":\"run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T02:17:58.598Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 14,
+        "run_id": "run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a",
+        "event_id": "event-0a902fb1-b51c-44a0-943a-fb155fe59fc4",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-0a902fb1-b51c-44a0-943a-fb155fe59fc4\",\"run_id\":\"run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T02:17:59.157Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 15,
+        "run_id": "run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a",
+        "event_id": "event-618a3993-ab99-4f24-a6b4-3c565ee6ce9f",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-618a3993-ab99-4f24-a6b4-3c565ee6ce9f\",\"run_id\":\"run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T02:18:00.679Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 16,
+        "run_id": "run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a",
+        "event_id": "event-a75280d7-f9bd-44e1-a559-7ec4eaf06d6e",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-a75280d7-f9bd-44e1-a559-7ec4eaf06d6e\",\"run_id\":\"run-4d8d1d87-b960-4abd-a0ac-231cccaacc2a\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T02:18:01.981Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 17,
+        "run_id": "run-6f0f1db4-afa2-4601-ae07-7c61278b3953",
+        "event_id": "event-1f8b3829-1856-4fdd-beae-2d24ecfcb5c2",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-1f8b3829-1856-4fdd-beae-2d24ecfcb5c2\",\"run_id\":\"run-6f0f1db4-afa2-4601-ae07-7c61278b3953\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T02:34:23.443Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"3c1a0693891b6480d005cbfd483642339d2a302d\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 18,
+        "run_id": "run-6f0f1db4-afa2-4601-ae07-7c61278b3953",
+        "event_id": "event-e7a225e0-9046-410c-9c81-caf84a4251fc",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-e7a225e0-9046-410c-9c81-caf84a4251fc\",\"run_id\":\"run-6f0f1db4-afa2-4601-ae07-7c61278b3953\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T02:34:24.118Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 19,
+        "run_id": "run-6f0f1db4-afa2-4601-ae07-7c61278b3953",
+        "event_id": "event-156928e5-c39c-4e0a-b606-3478fb5ed81c",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-156928e5-c39c-4e0a-b606-3478fb5ed81c\",\"run_id\":\"run-6f0f1db4-afa2-4601-ae07-7c61278b3953\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T02:34:24.718Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 20,
+        "run_id": "run-6f0f1db4-afa2-4601-ae07-7c61278b3953",
+        "event_id": "event-d9a68887-588d-4be0-9cb8-89a885d9dcea",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-d9a68887-588d-4be0-9cb8-89a885d9dcea\",\"run_id\":\"run-6f0f1db4-afa2-4601-ae07-7c61278b3953\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T02:34:27.986Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 21,
+        "run_id": "run-0dfff73a-bf28-43a3-98d8-739652314fea",
+        "event_id": "event-8466160a-5ca6-41ae-8f70-81def8ee75b4",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-8466160a-5ca6-41ae-8f70-81def8ee75b4\",\"run_id\":\"run-0dfff73a-bf28-43a3-98d8-739652314fea\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T02:39:09.805Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"9ca883f71cd210c4171fd53e8bdd990be7e4a400\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"192.168.2.3\",\"arch\":\"arm64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 22,
+        "run_id": "run-0dfff73a-bf28-43a3-98d8-739652314fea",
+        "event_id": "event-e72df415-1357-4655-b029-36a3644b63ce",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-e72df415-1357-4655-b029-36a3644b63ce\",\"run_id\":\"run-0dfff73a-bf28-43a3-98d8-739652314fea\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T02:39:10.007Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Mac Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"192.168.2.3\",\"arch\":\"arm64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 23,
+        "run_id": "run-0dfff73a-bf28-43a3-98d8-739652314fea",
+        "event_id": "event-6ae5b5c2-50ce-44a3-a2c4-a693b5ab3993",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-6ae5b5c2-50ce-44a3-a2c4-a693b5ab3993\",\"run_id\":\"run-0dfff73a-bf28-43a3-98d8-739652314fea\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T02:39:10.193Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"192.168.2.3\",\"arch\":\"arm64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 24,
+        "run_id": "run-0dfff73a-bf28-43a3-98d8-739652314fea",
+        "event_id": "event-6bd2d689-5898-4b2c-8df1-e1c2d1021a2d",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-6bd2d689-5898-4b2c-8df1-e1c2d1021a2d\",\"run_id\":\"run-0dfff73a-bf28-43a3-98d8-739652314fea\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T02:39:10.562Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"192.168.2.3\",\"arch\":\"arm64\",\"client_version\":\"0.1.0\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 25,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-9f8cbd18-d9e1-43c7-a89c-2690f6169b77",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-9f8cbd18-d9e1-43c7-a89c-2690f6169b77\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T12:15:31.228Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 26,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-c4bea05c-d839-4be2-a432-a3ee95635b5d",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-c4bea05c-d839-4be2-a432-a3ee95635b5d\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T12:15:31.256Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"name\":\"GitHub App fixed-scope preflight\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 27,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-925e2e2f-92f9-41f3-a4ad-20bf2e778e06",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-925e2e2f-92f9-41f3-a4ad-20bf2e778e06\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T12:15:36.058Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 28,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-96e41d6b-ed2e-4d49-a823-f44c4af7186b",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-96e41d6b-ed2e-4d49-a823-f44c4af7186b\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":4,\"type\":\"VERIFICATION_STARTED\",\"occurred_at\":\"2026-10-08T12:15:36.400Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 29,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-5c50d79c-4a2b-4912-ab34-6fed58148ef0",
+        "sequence": 5,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-5c50d79c-4a2b-4912-ab34-6fed58148ef0\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":5,\"type\":\"VERIFICATION_PASSED\",\"occurred_at\":\"2026-10-08T12:15:37.305Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"checks\":[{\"command\":\"git diff --check origin/main...HEAD\",\"exit_code\":0}]},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 30,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-cbda6097-5e3d-434d-b3b8-aaf5307c2aa6",
+        "sequence": 6,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-cbda6097-5e3d-434d-b3b8-aaf5307c2aa6\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":6,\"type\":\"GITHUB_PUSH_COMPLETED\",\"occurred_at\":\"2026-10-08T12:15:43.981Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"commit\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"ref\":\"codex/awh-v01-acceptance\"}},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 31,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-70b48629-4952-48cd-8deb-fc4e9f8388d9",
+        "sequence": 7,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-70b48629-4952-48cd-8deb-fc4e9f8388d9\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":7,\"type\":\"GITHUB_PR_CREATED\",\"occurred_at\":\"2026-10-08T12:15:48.606Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":89},\"base_sha\":\"259330e51eaf5fd8e7521f7aa196fa68c545d813\",\"head_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 32,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-30ef30de-864e-4f9c-8fb6-25048fbca5fe",
+        "sequence": 8,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-30ef30de-864e-4f9c-8fb6-25048fbca5fe\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":8,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-08T12:15:58.858Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"pending\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":89},\"comment\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6059639901},\"base_sha\":\"259330e51eaf5fd8e7521f7aa196fa68c545d813\",\"head_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\"},\"extensions\":{\"evidence\":[{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6059638757}],\"work_item\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":88},\"builder_milestone\":\"evidence_published_and_handoff_pending\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 33,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-5ec2c536-0652-48ee-8d6b-257fa33dfe48",
+        "sequence": 9,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-5ec2c536-0652-48ee-8d6b-257fa33dfe48\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":9,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-08T12:16:06.364Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"confirmed\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":89},\"comment\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6059639901},\"base_sha\":\"259330e51eaf5fd8e7521f7aa196fa68c545d813\",\"head_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\"},\"extensions\":{\"evidence\":[{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6059638757}],\"work_item\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":88},\"builder_milestone\":\"handoff_confirmed\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 34,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-d651aa55-f6ce-4168-a593-78d010f65d8f",
+        "sequence": 10,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-d651aa55-f6ce-4168-a593-78d010f65d8f\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":10,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-08T12:16:06.379Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"confirmed\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":89},\"comment\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6059639901},\"base_sha\":\"259330e51eaf5fd8e7521f7aa196fa68c545d813\",\"head_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\"},\"extensions\":{\"evidence\":[{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6059638757}],\"work_item\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":88},\"builder_milestone\":\"waiting_for_human_acceptance\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 35,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-2090879d-cde1-4be0-a048-499e7a5dfd52",
+        "sequence": 11,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-2090879d-cde1-4be0-a048-499e7a5dfd52\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":11,\"type\":\"REVIEW_STARTED\",\"occurred_at\":\"2026-10-08T12:51:22.993Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":89},\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"reviewer_executor_id\":\"github:zlpoot\"},\"extensions\":{\"provider_observation\":{\"repository\":\"zlpoot/future-ui\",\"pull_request\":89,\"head_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"state\":\"closed\",\"merged\":true,\"merge_sha\":\"57529534c43ba978cf76ade07b62988b002a8c6d\",\"issue\":88,\"issue_repository\":\"zlpoot/future-ui\",\"issue_closed\":true,\"review\":{\"id\":5456729853,\"login\":\"zlpoot\",\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"url\":\"https://github.com/zlpoot/future-ui/pull/89#pullrequestreview-5456729853\"},\"changes_requested\":false,\"authority_verified\":false},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 36,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-1fb71d85-2daa-401c-85dd-404a674032b3",
+        "sequence": 12,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-1fb71d85-2daa-401c-85dd-404a674032b3\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":12,\"type\":\"REVIEW_PASSED\",\"occurred_at\":\"2026-10-08T12:51:23.012Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":89},\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"reviewer_executor_id\":\"github:zlpoot\",\"review\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"review\",\"number\":5456729853}},\"extensions\":{\"provider_observation\":{\"repository\":\"zlpoot/future-ui\",\"pull_request\":89,\"head_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"state\":\"closed\",\"merged\":true,\"merge_sha\":\"57529534c43ba978cf76ade07b62988b002a8c6d\",\"issue\":88,\"issue_repository\":\"zlpoot/future-ui\",\"issue_closed\":true,\"review\":{\"id\":5456729853,\"login\":\"zlpoot\",\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"url\":\"https://github.com/zlpoot/future-ui/pull/89#pullrequestreview-5456729853\"},\"changes_requested\":false,\"authority_verified\":false},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 37,
+        "run_id": "run-c1445f30-6c87-45f7-9e4f-2589983d666b",
+        "event_id": "event-208de595-5544-4c8f-9040-00af2e8aab35",
+        "sequence": 13,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-208de595-5544-4c8f-9040-00af2e8aab35\",\"run_id\":\"run-c1445f30-6c87-45f7-9e4f-2589983d666b\",\"sequence\":13,\"type\":\"RUN_COMPLETED\",\"occurred_at\":\"2026-10-08T12:51:23.025Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"outcome\":\"pass\"},\"extensions\":{\"provider_observation\":{\"repository\":\"zlpoot/future-ui\",\"pull_request\":89,\"head_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"state\":\"closed\",\"merged\":true,\"merge_sha\":\"57529534c43ba978cf76ade07b62988b002a8c6d\",\"issue\":88,\"issue_repository\":\"zlpoot/future-ui\",\"issue_closed\":true,\"review\":{\"id\":5456729853,\"login\":\"zlpoot\",\"subject_sha\":\"91ec56fdb0c9a10ac6f5bc680d0576846301030e\",\"url\":\"https://github.com/zlpoot/future-ui/pull/89#pullrequestreview-5456729853\"},\"changes_requested\":false,\"authority_verified\":false},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.3.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 38,
+        "run_id": "run-fad6ec5a-1069-429e-a820-790f6e6782cb",
+        "event_id": "event-5c4fa15c-3a66-4832-ac68-46ecd83b818f",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-5c4fa15c-3a66-4832-ac68-46ecd83b818f\",\"run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T14:03:04.268Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"eb00de423e592176566c466f0e4381649dd707c878e6c04662b534b4247a40f7\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 39,
+        "run_id": "run-fad6ec5a-1069-429e-a820-790f6e6782cb",
+        "event_id": "event-03084263-f09a-429e-bb06-0a0d9de3dbcc",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-03084263-f09a-429e-bb06-0a0d9de3dbcc\",\"run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T14:03:04.503Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"name\":\"GitHub App fixed-scope preflight\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"eb00de423e592176566c466f0e4381649dd707c878e6c04662b534b4247a40f7\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 40,
+        "run_id": "run-fad6ec5a-1069-429e-a820-790f6e6782cb",
+        "event_id": "event-0a3c85a6-af66-4349-942b-369e697e543f",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-0a3c85a6-af66-4349-942b-369e697e543f\",\"run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T14:03:04.516Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"exit_code\":0},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"eb00de423e592176566c466f0e4381649dd707c878e6c04662b534b4247a40f7\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 41,
+        "run_id": "run-fad6ec5a-1069-429e-a820-790f6e6782cb",
+        "event_id": "event-010b6b9b-ce75-470d-ae99-5fda7958764c",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-010b6b9b-ce75-470d-ae99-5fda7958764c\",\"run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"sequence\":4,\"type\":\"VERIFICATION_STARTED\",\"occurred_at\":\"2026-10-08T14:03:04.810Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"eb00de423e592176566c466f0e4381649dd707c878e6c04662b534b4247a40f7\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 42,
+        "run_id": "run-fad6ec5a-1069-429e-a820-790f6e6782cb",
+        "event_id": "event-849cf044-c3ce-4c6b-874e-e33c9479e901",
+        "sequence": 5,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-849cf044-c3ce-4c6b-874e-e33c9479e901\",\"run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"sequence\":5,\"type\":\"VERIFICATION_FAILED\",\"occurred_at\":\"2026-10-08T14:03:05.505Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"checks\":[{\"command\":\"git diff --check origin/main...HEAD\",\"exit_code\":2}],\"reason\":\"Fixed Builder verification failed; original logs retained locally\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"eb00de423e592176566c466f0e4381649dd707c878e6c04662b534b4247a40f7\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.0\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 43,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-75aa6008-841a-4e3c-a1df-d01071d95cdd",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-75aa6008-841a-4e3c-a1df-d01071d95cdd\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-09T00:04:54.107Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\"},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 44,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-cf58da7a-4e2d-4de5-8bc6-fc959e3a4ee8",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-cf58da7a-4e2d-4de5-8bc6-fc959e3a4ee8\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-09T00:05:04.381Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"name\":\"GitHub App fixed-scope preflight\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\"},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 45,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-d0ad5da7-1842-4f98-a6c4-b785dff3ddd0",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-d0ad5da7-1842-4f98-a6c4-b785dff3ddd0\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-09T00:05:04.390Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"exit_code\":0},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\"},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 46,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-e674792e-deac-42fc-b44a-86a50edec821",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-e674792e-deac-42fc-b44a-86a50edec821\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":4,\"type\":\"VERIFICATION_STARTED\",\"occurred_at\":\"2026-10-09T00:05:04.822Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\"},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 47,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-9ded4f1d-eb64-4177-b7a2-82965feeb9d7",
+        "sequence": 5,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-9ded4f1d-eb64-4177-b7a2-82965feeb9d7\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":5,\"type\":\"VERIFICATION_PASSED\",\"occurred_at\":\"2026-10-09T00:05:05.912Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"checks\":[{\"command\":\"git diff --check origin/main...HEAD\",\"exit_code\":0}]},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\"},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 48,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-70464eed-9725-484b-8c3c-3083a48fb83c",
+        "sequence": 6,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-70464eed-9725-484b-8c3c-3083a48fb83c\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":6,\"type\":\"GITHUB_PUSH_COMPLETED\",\"occurred_at\":\"2026-10-09T00:05:12.549Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"commit\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"ref\":\"codex/awh-task-90\"}},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\"},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 49,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-1eaf058b-1101-4b26-aebf-2bfe232a6f11",
+        "sequence": 7,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-1eaf058b-1101-4b26-aebf-2bfe232a6f11\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":7,\"type\":\"GITHUB_PR_CREATED\",\"occurred_at\":\"2026-10-09T00:05:16.928Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":92},\"base_sha\":\"1990506f09ef40483b58727b8594c4eac7e97acf\",\"head_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\"},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 50,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-39d5103b-54cf-40b7-8560-eb654f848788",
+        "sequence": 8,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-39d5103b-54cf-40b7-8560-eb654f848788\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":8,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-09T00:05:23.990Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"pending\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":92},\"comment\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6071492293},\"base_sha\":\"1990506f09ef40483b58727b8594c4eac7e97acf\",\"head_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"subject_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\",\"pull_request\":92},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"evidence\":[{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6071491686}],\"work_item\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":90},\"builder_milestone\":\"evidence_published_and_handoff_pending\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 51,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-8f7d18aa-8efa-4cdc-bb08-923cb5f461f4",
+        "sequence": 9,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-8f7d18aa-8efa-4cdc-bb08-923cb5f461f4\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":9,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-09T00:05:30.177Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"confirmed\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":92},\"comment\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6071492293},\"base_sha\":\"1990506f09ef40483b58727b8594c4eac7e97acf\",\"head_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"subject_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\",\"pull_request\":92},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"evidence\":[{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6071491686}],\"work_item\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":90},\"builder_milestone\":\"handoff_confirmed\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 52,
+        "run_id": "run-cb66e501-f177-4e42-ae7b-ca8daca3701c",
+        "event_id": "event-b88d1eee-90a3-4608-a3b4-84f0c8b2e4e1",
+        "sequence": 10,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"event-b88d1eee-90a3-4608-a3b4-84f0c8b2e4e1\",\"run_id\":\"run-cb66e501-f177-4e42-ae7b-ca8daca3701c\",\"sequence\":10,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-09T00:05:30.191Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"confirmed\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"pull_request\",\"number\":92},\"comment\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6071492293},\"base_sha\":\"1990506f09ef40483b58727b8594c4eac7e97acf\",\"head_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"subject_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"extensions\":{\"task_binding\":{\"repository\":\"zlpoot/future-ui\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\",\"profile_ref\":\"future-ui/c1c-acceptance\",\"profile_version\":\"v02-repeatable-v1\",\"executor_id\":\"c1c-future-ui-windows\",\"machine_id\":\"machine-39b94132-203f-499e-aa63-b17bce1349b8\",\"fingerprint\":\"4f36dc46fc99a3bd3e52de2c5bba1361ea702ab65702bba7d8ecb55726d793c5\",\"pull_request\":92},\"verification_recovery\":{\"attempt_id\":\"recovery-13b2831b-f77e-40ec-ba70-da4ff53573fd\",\"predecessor_run_id\":\"run-fad6ec5a-1069-429e-a820-790f6e6782cb\",\"old_sha\":\"d3bdca1955ab46b2d38f20edd02492db5db318c7\",\"new_sha\":\"c61e2245276ae663fefe00e5c165c1ba8e7df149\"},\"evidence\":[{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue_comment\",\"number\":6071491686}],\"work_item\":{\"provider\":\"github\",\"repository\":\"zlpoot/future-ui\",\"kind\":\"issue\",\"number\":90},\"builder_milestone\":\"waiting_for_human_acceptance\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"DESKTOP-5IP6BCN\",\"arch\":\"x64\",\"client_version\":\"0.4.1\"},\"source_dirty\":false}}}"
+      }
+    ]
+  }
+}
