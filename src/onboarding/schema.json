@@ -419,6 +419,278 @@
         }
       }
     },
+    "DoctorDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "checks",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "blocked",
+            "not_checked"
+          ]
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enrollment",
+            "client",
+            "git_identity",
+            "branch_verification",
+            "provider_app_permissions"
+          ],
+          "properties": {
+            "enrollment": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "code",
+                "safe_next_step",
+                "authority_verified",
+                "source"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "passed",
+                    "blocked",
+                    "not_checked"
+                  ]
+                },
+                "code": {
+                  "enum": [
+                    "fixture_approved",
+                    "pending_approval",
+                    "fixture_paired",
+                    "missing_client",
+                    "client_local_claim_only",
+                    "not_run",
+                    "no_live_preflight"
+                  ]
+                },
+                "safe_next_step": {
+                  "enum": [
+                    "none",
+                    "request_operator_enrollment",
+                    "complete_private_pairing",
+                    "confirm_local_git_identity",
+                    "run_authorized_verification",
+                    "perform_app_readonly_preflight"
+                  ]
+                },
+                "authority_verified": {
+                  "const": false
+                },
+                "source": {
+                  "const": "offline_fixture"
+                }
+              }
+            },
+            "client": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "code",
+                "safe_next_step",
+                "authority_verified",
+                "source"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "passed",
+                    "blocked",
+                    "not_checked"
+                  ]
+                },
+                "code": {
+                  "enum": [
+                    "fixture_approved",
+                    "pending_approval",
+                    "fixture_paired",
+                    "missing_client",
+                    "client_local_claim_only",
+                    "not_run",
+                    "no_live_preflight"
+                  ]
+                },
+                "safe_next_step": {
+                  "enum": [
+                    "none",
+                    "request_operator_enrollment",
+                    "complete_private_pairing",
+                    "confirm_local_git_identity",
+                    "run_authorized_verification",
+                    "perform_app_readonly_preflight"
+                  ]
+                },
+                "authority_verified": {
+                  "const": false
+                },
+                "source": {
+                  "const": "offline_fixture"
+                }
+              }
+            },
+            "git_identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "code",
+                "safe_next_step",
+                "authority_verified",
+                "source"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "passed",
+                    "blocked",
+                    "not_checked"
+                  ]
+                },
+                "code": {
+                  "enum": [
+                    "fixture_approved",
+                    "pending_approval",
+                    "fixture_paired",
+                    "missing_client",
+                    "client_local_claim_only",
+                    "not_run",
+                    "no_live_preflight"
+                  ]
+                },
+                "safe_next_step": {
+                  "enum": [
+                    "none",
+                    "request_operator_enrollment",
+                    "complete_private_pairing",
+                    "confirm_local_git_identity",
+                    "run_authorized_verification",
+                    "perform_app_readonly_preflight"
+                  ]
+                },
+                "authority_verified": {
+                  "const": false
+                },
+                "source": {
+                  "const": "offline_fixture"
+                }
+              }
+            },
+            "branch_verification": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "code",
+                "safe_next_step",
+                "authority_verified",
+                "source"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "passed",
+                    "blocked",
+                    "not_checked"
+                  ]
+                },
+                "code": {
+                  "enum": [
+                    "fixture_approved",
+                    "pending_approval",
+                    "fixture_paired",
+                    "missing_client",
+                    "client_local_claim_only",
+                    "not_run",
+                    "no_live_preflight"
+                  ]
+                },
+                "safe_next_step": {
+                  "enum": [
+                    "none",
+                    "request_operator_enrollment",
+                    "complete_private_pairing",
+                    "confirm_local_git_identity",
+                    "run_authorized_verification",
+                    "perform_app_readonly_preflight"
+                  ]
+                },
+                "authority_verified": {
+                  "const": false
+                },
+                "source": {
+                  "const": "offline_fixture"
+                }
+              }
+            },
+            "provider_app_permissions": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "code",
+                "safe_next_step",
+                "authority_verified",
+                "source"
+              ],
+              "properties": {
+                "state": {
+                  "enum": [
+                    "passed",
+                    "blocked",
+                    "not_checked"
+                  ]
+                },
+                "code": {
+                  "enum": [
+                    "fixture_approved",
+                    "pending_approval",
+                    "fixture_paired",
+                    "missing_client",
+                    "client_local_claim_only",
+                    "not_run",
+                    "no_live_preflight"
+                  ]
+                },
+                "safe_next_step": {
+                  "enum": [
+                    "none",
+                    "request_operator_enrollment",
+                    "complete_private_pairing",
+                    "confirm_local_git_identity",
+                    "run_authorized_verification",
+                    "perform_app_readonly_preflight"
+                  ]
+                },
+                "authority_verified": {
+                  "const": false
+                },
+                "source": {
+                  "const": "offline_fixture"
+                }
+              }
+            }
+          }
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    },
     "Diagnostics": {
       "type": "object",
       "additionalProperties": false,
@@ -642,6 +914,350 @@
             "message": {
               "type": "string",
               "maxLength": 160
+            }
+          }
+        },
+        "authority_verified": {
+          "const": false
+        },
+        "source": {
+          "const": "offline_fixture"
+        }
+      }
+    },
+    "SafetyDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "limits",
+        "lanes",
+        "authority_verified",
+        "source"
+      ],
+      "properties": {
+        "state": {
+          "const": "not_checked"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "body_bytes",
+            "body_nodes",
+            "body_depth",
+            "header_bytes",
+            "header_count",
+            "header_values",
+            "window_ms",
+            "operator_requests",
+            "operator_identity_requests",
+            "pairing_requests",
+            "pairing_identity_requests",
+            "anonymous_requests",
+            "inflight",
+            "identities",
+            "aggregate_count",
+            "audit_rows",
+            "storage_bytes",
+            "busy_ms"
+          ],
+          "properties": {
+            "body_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "body_nodes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "body_depth": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "header_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "header_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "header_values": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "window_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "operator_requests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "operator_identity_requests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "pairing_requests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "pairing_identity_requests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "anonymous_requests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "inflight": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "identities": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "aggregate_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "audit_rows": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "storage_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            "busy_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            }
+          }
+        },
+        "lanes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "anonymous",
+            "operator",
+            "pairing"
+          ],
+          "properties": {
+            "anonymous": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requests",
+                "inflight",
+                "identities",
+                "denied"
+              ],
+              "properties": {
+                "requests": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "inflight": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "identities": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "denied": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "access",
+                    "input",
+                    "rate",
+                    "storage",
+                    "internal"
+                  ],
+                  "properties": {
+                    "access": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "input": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "rate": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "storage": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "internal": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    }
+                  }
+                }
+              }
+            },
+            "operator": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requests",
+                "inflight",
+                "identities",
+                "denied"
+              ],
+              "properties": {
+                "requests": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "inflight": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "identities": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "denied": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "access",
+                    "input",
+                    "rate",
+                    "storage",
+                    "internal"
+                  ],
+                  "properties": {
+                    "access": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "input": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "rate": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "storage": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "internal": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    }
+                  }
+                }
+              }
+            },
+            "pairing": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requests",
+                "inflight",
+                "identities",
+                "denied"
+              ],
+              "properties": {
+                "requests": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "inflight": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "identities": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                },
+                "denied": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "access",
+                    "input",
+                    "rate",
+                    "storage",
+                    "internal"
+                  ],
+                  "properties": {
+                    "access": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "input": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "rate": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "storage": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "internal": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    }
+                  }
+                }
+              }
             }
           }
         },

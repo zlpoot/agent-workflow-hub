@@ -7,7 +7,7 @@ import { once } from 'node:events';
 import { Worker } from 'node:worker_threads';
 import { DatabaseSync } from 'node:sqlite';
 import { createAuthenticator, ControlPlaneStore, DashboardReadStore } from '../dist/control-plane/index.js';
-import { OfflineOnboardingApi, OfflineOnboardingStore, MockFixtureTransport, createOfflineFixture, destroyOfflineFixture, fixtureDatabase, mockOperator, canonical } from '../dist/onboarding/index.js';
+import { OfflineOnboardingApi, OfflineOnboardingStore, MockFixtureTransport, createOfflineFixture, destroyOfflineFixture, fixtureDatabase, mockOperator, canonical, doctorDiagnosticContract } from '../dist/onboarding/index.js';
 const example = name => JSON.parse(readFileSync(new URL('../examples/protocol/'+name+'.json',import.meta.url)));
 const future = example('future-ui'), webskill = example('webskill');
 const START = Date.parse('2026-10-08T08:00:00.000Z');
@@ -40,6 +40,32 @@ function setup(t, changes={}) {
   return {fixture,time,config,owner,requester,narrow,store,api,open,transport,operatorChannel,headers,get,post,apply,approve,invite,raw,count,cleanup};
 }
 const blocked=(result,status)=>{assert.equal(result.status,status);assert.equal(result.body.authority_verified,false);assert.equal(result.body.source,'offline_fixture');assert.equal(typeof result.body.error.code,'string');};
+
+test('B0 doctor DTO projects only fixed states, sources and safe steps; never claims live authority',async t=>{
+  const f=setup(t);await f.apply();
+  const pending=await f.get('/onboarding/v1/projects/'+binding.project_id+'/diagnostics');assert.equal(pending.status,200);
+  const dto=doctorDiagnosticContract(pending.body);
+  assert.deepEqual(Object.keys(dto).sort(),['authority_verified','checks','source','state']);
+  assert.equal(dto.state,'blocked');assert.equal(dto.checks.enrollment.safe_next_step,'request_operator_enrollment');
+  for(const check of Object.values(dto.checks)){
+    assert.equal(check.source,'offline_fixture');assert.equal(check.authority_verified,false);
+    assert.deepEqual(Object.keys(check).sort(),['authority_verified','code','safe_next_step','source','state']);
+  }
+  for(const value of [binding.project_id,binding.repository,service.endpoint,f.owner.cookie,future.profile_policy.branch.ref])
+    assert.equal(JSON.stringify(dto).includes(value),false);
+  await f.approve();const {client,result}=await f.invite();assert.equal(result.status,200);assert.equal((await client.claim(f.api)).status,200);
+  const active=doctorDiagnosticContract((await client.diagnostics(f.api)).body);
+  assert.equal(active.state,'not_checked');assert.equal(active.checks.enrollment.state,'passed');
+  assert.equal(active.checks.client.safe_next_step,'none');
+  for(const name of ['git_identity','branch_verification','provider_app_permissions'])assert.equal(active.checks[name].state,'not_checked');
+  const forged=structuredClone(pending.body);forged.checks.provider_app_permissions={state:'passed',code:'no_live_preflight'};
+  assert.throws(()=>doctorDiagnosticContract(forged),e=>e.code==='diagnostic_projection');
+  forged.checks.provider_app_permissions={state:'not_checked',code:'attacker_controlled'};
+  assert.throws(()=>doctorDiagnosticContract(forged),e=>e.code==='diagnostic_projection');
+  assert.throws(()=>doctorDiagnosticContract({...pending.body,source:'live'}));
+  assert.throws(()=>doctorDiagnosticContract({...pending.body,token:'forbidden'}));
+  blocked(await f.get('/onboarding/v1/projects/'+binding.project_id+'/diagnostics',f.narrow),403);
+});
 
 test('offline vertical slice: request → approval → private invitation → one-use claim → persisted trusted scope → safe diagnostics',async t=>{
   const f=setup(t), requested=await f.apply();assert.equal(requested.state,'pending');
@@ -216,9 +242,25 @@ test('two parallel SQLite connections race for one invitation: exactly one Clien
   await Promise.all(workers.map(async w=>{const [ready]=await once(w,'message');assert.equal(ready.ready,true);}));
   const pending=workers.map(async w=>{const [result]=await once(w,'message');return result;});
   Atomics.store(new Int32Array(barrier),0,1);Atomics.notify(new Int32Array(barrier),0,2);
-  const results=await Promise.all(pending);assert.deepEqual(results.map(r=>r.status).sort(),[200,410]);
+  const results=await Promise.all(pending);
+  assert.equal(results.filter(r=>r.status===200).length,1);
+  const rejected=results.find(r=>r.status!==200);
+  // B0 bounds SQLite wait: a loser may time out before observing the committed terminal invite.
+  assert(rejected.status===410 && rejected.code==='invitation_unavailable' ||
+    rejected.status===503 && rejected.code==='busy');
   assert.equal(f.count('clients'),1);assert.equal(f.store.clientRegistry().length,1);
   const db=f.raw();try{assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action='client_activated'").get().n,1);}finally{db.close();}
+});
+
+test('bounded SQLite busy during claim grants no credential; unlocked retry still consumes invitation only once',async t=>{
+  const f=setup(t);await f.approve();const {client}=await f.invite(),db=f.raw();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const denied=await client.claim(f.api);blocked(denied,503);assert.equal(denied.body.error.code,'busy');
+    assert.equal(f.count('clients'),0);assert.equal(f.store.clientRegistry().length,0);
+  }finally{db.exec('ROLLBACK');db.close();}
+  assert.equal((await client.claim(f.api)).status,200);blocked(await client.claim(f.api),410);
+  assert.equal(f.count('clients'),1);assert.equal(f.store.clientRegistry().length,1);
 });
 
 test('Client diagnostics require its own credential and exact scope; requester cannot read other projects',async t=>{
@@ -331,7 +373,7 @@ test('closed routes/headers/schema, complexity bounds and content types fail wit
   }
   blocked(await f.api.handle({method:'DELETE',path:'/onboarding/v1/requests',headers:f.headers()},f.operatorChannel),405);
   const deep={};let cursor=deep;for(let i=0;i<40;i++){cursor.child={};cursor=cursor.child;}blocked(await f.post('/onboarding/v1/requests',deep),400);
-  blocked(await f.post('/onboarding/v1/requests',{...binding,unknown:'x'.repeat(70_000)}),400);
+  blocked(await f.post('/onboarding/v1/requests',{...binding,unknown:'x'.repeat(70_000)}),413);
   assert.equal(f.count('requests'),0);
 });
 

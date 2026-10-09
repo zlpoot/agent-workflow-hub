@@ -5,6 +5,7 @@ import type { RegisteredClient } from '../control-plane/security.js';
 import { fixtureDatabase, type OfflineFixture } from './fixture.js';
 import { canonical, deny, equalHash, hash, scopeAccess, serviceAccess, validateConfig } from './security.js';
 import { OBSERVATION, type Binding, type ClientPeer, type FixtureConfig, type OperatorPrincipal, type PairingScope } from './types.js';
+import { OfflineAdmission, OFFLINE_LIMITS } from './admission.js';
 
 const VERSION = 101, TTL = 300_000, ATTEMPTS = 3;
 type Row = Record<string, string | number | bigint | Uint8Array | null>;
@@ -18,9 +19,13 @@ export class OfflineOnboardingStore {
   readonly #db: DatabaseSync;
   readonly #config: FixtureConfig;
   readonly #clock: () => number;
+  readonly #path: string;
+  #authenticationFloor = 0;
+  readonly admission = new OfflineAdmission();
   constructor(fixture: OfflineFixture, config: FixtureConfig, clock = Date.now) {
     this.#config = validateConfig(config); this.#clock = clock;
     const path = fixtureDatabase(fixture), fresh = statSync(path).size === 0;
+    this.#path = path;
     // Before any writable connection/PRAGMA, refuse ordinary CP v2 and unknown fixture DBs.
     if (!fresh) {
       const probe = new DatabaseSync(path, { readOnly: true, allowExtension: false });
@@ -29,10 +34,15 @@ export class OfflineOnboardingStore {
             probe.prepare('SELECT fixture_id FROM fixture_metadata WHERE id=1').get()?.fixture_id !== fixture.fixture_id) deny(500, 'fixture_boundary');
       } finally { probe.close(); }
     }
-    this.#db = new DatabaseSync(path, { timeout: 5000, allowExtension: false, enableForeignKeyConstraints: true });
+    this.#db = new DatabaseSync(path, { timeout: OFFLINE_LIMITS.busy_ms, allowExtension: false, enableForeignKeyConstraints: true });
     try {
-      this.#db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+      // Only a newly created empty fixture needs journal-mode initialization.
+      if (fresh) this.#db.exec('PRAGMA journal_mode=WAL');
+      this.#db.exec('PRAGMA synchronous=FULL');
       this.#db.exec('BEGIN IMMEDIATE');
+      this.storageCapacity();
+      const pageSize = Number(this.#db.prepare('PRAGMA page_size').get()!.page_size);
+      this.#db.exec(`PRAGMA max_page_count=${Math.floor(OFFLINE_LIMITS.storage_bytes/pageSize)};`);
       const version = Number(this.#db.prepare('PRAGMA user_version').get()!.user_version);
       if (version === 0 && fresh) this.#db.exec(`
         CREATE TABLE fixture_metadata(id INTEGER PRIMARY KEY CHECK(id=1), fixture_id TEXT NOT NULL, config_sha256 TEXT NOT NULL, clock INTEGER NOT NULL) STRICT;
@@ -68,6 +78,7 @@ export class OfflineOnboardingStore {
         PRAGMA user_version=101;
       `);
       else if (version !== VERSION) deny(500, 'fixture_boundary');
+      this.auditCapacity();
       const digest = hash(canonical({ service: this.#config.service, profiles: this.#config.profiles, reserved_projects: this.#config.reserved_projects, reserved_clients: this.#config.reserved_clients }));
       const meta = this.#db.prepare('SELECT * FROM fixture_metadata WHERE id=1').get();
       if (meta && (meta.fixture_id !== fixture.fixture_id || meta.config_sha256 !== digest)) deny(409, 'trusted_config_conflict');
@@ -82,22 +93,42 @@ export class OfflineOnboardingStore {
   }
   close(): void { this.#db.close(); }
   get config(): FixtureConfig { return structuredClone(this.#config); }
+  authenticationTime(): number {
+    const value = this.#clock();
+    if (!Number.isSafeInteger(value) || value < 0 || value > 8_000_000_000_000_000) deny(500,'clock');
+    return this.#authenticationFloor = Math.max(value,this.#authenticationFloor);
+  }
   now(): number {
     const value = this.#clock();
     if (!Number.isSafeInteger(value) || value < 0 || value > 8_000_000_000_000_000) deny(500, 'clock');
-    return Math.max(value, Number(this.#db.prepare('SELECT clock FROM fixture_metadata WHERE id=1').get()!.clock));
+    return this.#authenticationFloor = Math.max(value, this.#authenticationFloor, Number(this.#db.prepare('SELECT clock FROM fixture_metadata WHERE id=1').get()!.clock));
   }
   private tick(): number { const now = this.now(); this.#db.prepare('UPDATE fixture_metadata SET clock=? WHERE id=1').run(now); return now; }
   private transaction<T>(action: (now: number) => T): T {
     this.#db.exec('BEGIN IMMEDIATE');
-    try { const result = action(this.tick()); this.#db.exec('COMMIT'); return result; }
+    try {
+      this.storageCapacity(); this.auditCapacity();
+      const result = action(this.tick()); this.#db.exec('COMMIT'); return result;
+    }
     catch (error) { this.#db.exec('ROLLBACK'); throw error; }
   }
+  // Both initialization and mutations call this while holding SQLite's writer reservation.
+  private storageCapacity(): void {
+    for (const suffix of ['', '-wal', '-journal']) {
+      try { if (statSync(this.#path+suffix).size >= OFFLINE_LIMITS.storage_bytes) deny(503,'storage_limit'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+  }
   private audit(actor: string, action: string, target: string, binding: Binding | null, result = 'accepted', code = 'ok'): void {
+    this.auditCapacity();
     this.#db.prepare('INSERT INTO audit(at,actor,action,target,project_id,repository,result,code) VALUES(?,?,?,?,?,?,?,?)')
       .run(iso(this.now()),actor,action,target,binding?.project_id ?? null,binding?.repository ?? null,result,code);
   }
-  recordDenied(code: string): void { this.transaction(() => this.audit('anonymous','request_denied','api-request',null,'denied',code)); }
+  private auditCapacity(): void {
+    if (Number(this.#db.prepare('SELECT COUNT(*) AS n FROM audit').get()!.n) >= OFFLINE_LIMITS.audit_rows) deny(503,'audit_limit');
+  }
+  // Kept for fixture API compatibility; never persist arbitrary rejection codes.
+  recordDenied(_code: string): void { this.admission.denied('anonymous',400); }
   nonce(operator: OperatorPrincipal) {
     return this.transaction(now => {
       this.#db.prepare('DELETE FROM nonces WHERE expires<=?').run(now);

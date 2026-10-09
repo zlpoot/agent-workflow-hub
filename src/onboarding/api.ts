@@ -1,11 +1,18 @@
 import { validId } from '../control-plane/security.js';
 import { OfflineOnboardingStore } from './store.js';
-import { authenticateOperator, canonical, deny, header, OnboardingError, safeId, serviceAccess, validate } from './security.js';
+import { authenticateOperator, canonical, deny, hash, header, OnboardingError, safeId, serviceAccess, validate } from './security.js';
 import { OBSERVATION, type Binding, type ClientPeer, type FixtureChannel, type FixtureRequest, type FixtureResponse, type PairingScope, type TrustedFixtureTransport } from './types.js';
+import { boundedRequest, type AdmissionLane } from './admission.js';
 
 // In-process OFFLINE dispatcher only. Not imported by CP server, CLI or Dashboard.
 export class OfflineOnboardingApi {
-  constructor(readonly store: OfflineOnboardingStore, readonly transport: TrustedFixtureTransport) {}
+  readonly #operatorIds: ReadonlyMap<string,string>;
+  constructor(readonly store: OfflineOnboardingStore, readonly transport: TrustedFixtureTransport) {
+    this.#operatorIds=new Map(store.config.operators.map(s=>[s.session_sha256,s.id]));
+  }
+  safetyDiagnostics(): Record<string,unknown> {
+    return validate('SafetyDiagnostics',this.store.admission.snapshot());
+  }
   private client(request: FixtureRequest, channel: FixtureChannel): ClientPeer {
     const peer = this.transport.peer(channel);
     if (!peer || peer.kind !== 'client' || !peer.verified) deny(401, 'client_channel');
@@ -14,28 +21,44 @@ export class OfflineOnboardingApi {
     return peer;
   }
   private requestShape(request: FixtureRequest): void {
-    if (!request || Object.getPrototypeOf(request) !== Object.prototype || Object.keys(request).some(k => !['method','path','headers','body'].includes(k)) ||
-        Reflect.ownKeys(request).some(k => typeof k !== 'string' || !('value' in Object.getOwnPropertyDescriptor(request,k)!))) deny(400, 'request');
-    if (typeof request.method !== 'string' || typeof request.path !== 'string' || request.path.length > 1024 || !request.headers || Object.getPrototypeOf(request.headers) !== Object.prototype) deny(400, 'request');
-    let bytes = 0;
-    for (const k of Reflect.ownKeys(request.headers)) {
-      const property = Object.getOwnPropertyDescriptor(request.headers,k)!;
-      if (typeof k !== 'string' || !property.enumerable || !('value' in property) ||
-          typeof property.value !== 'string' && (!Array.isArray(property.value) || !property.value.every((v: unknown) => typeof v === 'string'))) deny(400, 'request');
-      bytes += k.length + String(property.value).length;
-    }
-    if (Object.keys(request.headers).length > 64 || bytes > 16*1024) deny(413, 'request_too_large');
+    // Descriptor/byte/complexity checks already ran in boundedRequest; never coerce header arrays.
     if (request.method !== 'GET' && request.method !== 'POST') deny(405, 'method_not_allowed');
     if (request.method === 'GET' && request.body !== undefined) deny(400, 'request');
   }
+  private preAdmissionLane(request: FixtureRequest, channel: FixtureChannel): {lane: AdmissionLane; identity?: string} {
+    // Fixed descriptor reads + one bounded credential digest lookup; no traversal/full auth/DB.
+    const own=(value: unknown,key: string): unknown => {
+      if (!value || typeof value!=='object') return undefined;
+      const property=Object.getOwnPropertyDescriptor(value,key);
+      return property && 'value' in property ? property.value : undefined;
+    };
+    const path=own(request,'path'), headers=own(request,'headers'), peer=this.transport.peer(channel);
+    if (typeof path!=='string' || path.length>1024 || !peer?.verified) return {lane:'anonymous'};
+    const cookie=own(headers,'cookie') ?? own(headers,'Cookie');
+    if (peer.kind==='operator' && path.startsWith('/onboarding/v1/') && typeof cookie==='string' &&
+        cookie.length===63 && /^awh_operator=awh_op_[A-Za-z0-9_-]{43}$/.test(cookie)) {
+      const identity=this.#operatorIds.get(hash(cookie.slice(13),'operator\0'));
+      if (identity) return {lane:'operator',identity};
+    }
+    if (peer.kind==='client' && path.startsWith('/pairing/v1/') && validId(peer.scope.client_id)) return {lane:'pairing',identity:peer.scope.client_id};
+    return {lane:'anonymous'};
+  }
   async handle(request: FixtureRequest, channel: FixtureChannel): Promise<FixtureResponse> {
+    let lane: AdmissionLane = 'anonymous', release: (() => void) | undefined;
     try {
+      const selection=this.preAdmissionLane(request,channel);lane=selection.lane;
+      release=this.store.admission.enter(lane,selection.identity);
+      boundedRequest(request);
       this.requestShape(request);
       let result: Record<string,unknown>, responseSchema: Parameters<typeof validate>[0];
       if (request.path.startsWith('/onboarding/v1/')) {
         const peer = this.transport.peer(channel);
         if (!peer || peer.kind !== 'operator') deny(401, 'operator_unauthorized');
-        const config = this.store.config, operator = authenticateOperator(request,peer,config.service,config.operators,this.store.now());
+        const config = this.store.config, operator = authenticateOperator(request,peer,config.service,config.operators,this.store.authenticationTime());
+        // Noncanonical fixture header casing may use the conservative anonymous front gate.
+        if (lane!=='operator' || selection.identity!==operator.id) {
+          release();lane='operator';release=this.store.admission.enter(lane,operator.id);
+        }
         if (request.method === 'POST') {
           if (header(request,'content-type') !== 'application/json' || header(request,'content-encoding') !== undefined) deny(400, 'content_type');
           const nonce = header(request,'x-awh-nonce'); if (!nonce || !validId(nonce)) deny(403, 'nonce');
@@ -64,6 +87,9 @@ export class OfflineOnboardingApi {
         } else deny(404,'not_found');
       } else if (request.path.startsWith('/pairing/v1/')) {
         const peer=this.client(request,channel);
+        if (lane!=='pairing' || selection.identity!==peer.scope.client_id) {
+          release();lane='pairing';release=this.store.admission.enter(lane,peer.scope.client_id);
+        }
         if (request.method === 'POST' && request.path === '/pairing/v1/claim') {
           if (header(request,'content-type') !== 'application/json' || header(request,'content-encoding') !== undefined) deny(400,'content_type');
           const match=/^Pairing (awh_pair_[A-Za-z0-9_-]{43})$/.exec(header(request,'authorization') ?? ''); if (!match) deny(401,'pairing_denied');
@@ -80,10 +106,10 @@ export class OfflineOnboardingApi {
       try { validate(responseSchema,result); } catch { deny(500,'projection'); }
       return {status:200,body:result};
     } catch (error) {
-      const status=error instanceof OnboardingError ? error.status : (error as {errcode?:number})?.errcode===5 ? 503 : 500;
-      const code=error instanceof OnboardingError ? error.code : status===503 ? 'busy' : 'internal';
-      try { this.store.recordDenied(code); } catch { /* Database outage never grants trust. */ }
+      let status=error instanceof OnboardingError ? error.status : [5,6,13].includes((error as {errcode?:number})?.errcode ?? 0) ? 503 : 500;
+      let code=error instanceof OnboardingError ? error.code : (error as {errcode?:number})?.errcode===13 ? 'storage_limit' : status===503 ? 'busy' : 'internal';
+      this.store.admission.denied(lane,status);
       return {status,body:{error:{code,message:'受信接入请求未通过安全校验'},...OBSERVATION}};
-    }
+    } finally { release?.(); }
   }
 }

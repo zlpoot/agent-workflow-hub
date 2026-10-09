@@ -1,6 +1,6 @@
 # C1.2 Trusted Onboarding：离线安全设计与 Review Gate
 
-> Onboarding currently runs **offline Fixture only**. Production Operator/Pairing is unavailable. The unauthenticated catch → recordDenied SQLite amplification risk belongs to #31 Phase B0; it remains unresolved here. No production enablement or security-fix PASS is claimed.
+> Onboarding currently runs **offline Fixture only**. Production Operator/Pairing is unavailable. #31 Phase B0 adds admission before request traversal/authentication and replaces catch → recordDenied SQLite writes with bounded memory counters. Limits, recovery design and production gaps are in [B0 security](onboarding-b0-security.md); fixture checks are Builder evidence pending independent Design/Security Review.
 
 
 本规范对应 [#31](https://github.com/zlpoot/agent-workflow-hub/issues/31) 与 [Owner kickoff](https://github.com/zlpoot/agent-workflow-hub/issues/31#issuecomment-6055785767)。本轮仅实现可独立审查的隔离 fixture；没有生产监听入口，不接入原 CP，不使用现有配置、凭据、数据库或产品工作区。#30 的 PHASE_C_ACCEPTED_WITH_EXCEPTION 与原 Verification Exception 永久保留。
@@ -70,7 +70,7 @@ Operator 的 awh_operator cookie（awh_op_ 独立格式）与 awh_viewer、CP Be
 | 原凭据进入浏览器/日志/Event/存储 | 私有 delivery/provisioning sink、严格 safe projection、credential-pattern 拒绝、SQLite/WAL/审计/响应扫描 |
 | 把 fixture 当成现场验证 | 明确 offline source / authority_verified=false / not_checked；没有自动挂接 CP/CLI/Dashboard |
 
-audit 为 append-only 安全元数据：cursor/time/actor/action/target/project/repository/result/code。未经认证失败只记 anonymous 和固定错误，不记录 cookie/header/body/原始错误。fixture SQLite 强制不可更新/删除 audit、不可更新已绑定身份/Policy/Client scope。失败尝试计数与 locked 状态是安全状态，虽返回失败仍需要提交；身份/审批错误没有部分信任写入。
+audit 为 append-only 安全元数据：cursor/time/actor/action/target/project/repository/result/code。准入/输入/鉴权拒绝只记有界内存分类，不写 SQLite、不记录 cookie/header/body/原始错误；已进入受信配对事务的失败尝试与 locked 等业务状态仍需同事务审计。fixture SQLite 强制不可更新/删除 audit、不可更新已绑定身份/Policy/Client scope；8192 条持久审计与 8 MiB 存储门禁耗尽时新增事务 fail-closed，不删旧审计。身份/审批错误没有部分信任写入。
 
 ## 6. 兼容性与本轮停点
 
