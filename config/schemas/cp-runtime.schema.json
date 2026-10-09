@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:awh:config:cp-runtime:1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "database",
+    "trusted_config_file",
+    "port"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "database": {
+      "type": "string",
+      "pattern": "^(?:/[^/]|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\]+\\\\)",
+      "minLength": 2
+    },
+    "trusted_config_file": {
+      "type": "string",
+      "pattern": "^(?:/[^/]|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\]+\\\\)",
+      "minLength": 2
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "https_config_file": {
+      "type": "string",
+      "pattern": "^(?:/[^/]|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\]+\\\\)",
+      "minLength": 2
+    }
+  }
+}

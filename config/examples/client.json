@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "endpoint": "http://127.0.0.1:4310",
+  "credential_file": "/operator/awh/client.credential",
+  "state_directory": "/operator/awh/client-state",
+  "executor_id": "example-executor",
+  "executor_type": "codex",
+  "profile_version": "trusted-v1"
+}

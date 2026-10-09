@@ -1,0 +1,57 @@
+{
+  "clients": [
+    {
+      "id": "example-client",
+      "project_ids": [
+        "webskill"
+      ],
+      "executor_ids": [
+        "example-executor"
+      ],
+      "token_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "profiles": [
+    {
+      "schema_version": "1.0",
+      "kind": "profile_policy",
+      "ref": "webskill/default",
+      "version": "fixture-v1",
+      "repository": "zlpoot/webskill",
+      "base": "main",
+      "branch": {
+        "mode": "fixed",
+        "ref": "codex/awh-c07-webskill-bootstrap"
+      },
+      "verification": {
+        "commands": [
+          "pnpm check:foundations",
+          "pnpm lint",
+          "pnpm typecheck"
+        ]
+      },
+      "github_app": {
+        "identity": "installation",
+        "repository_scope": "single",
+        "selected_set_policy": "exact",
+        "permissions": {
+          "contents": "write",
+          "issues": "write",
+          "metadata": "read",
+          "pull_requests": "write"
+        }
+      },
+      "review": {
+        "mode": "independent_exact_head",
+        "builder_is_reviewer": false
+      },
+      "delivery": {
+        "draft_pr": true,
+        "handoff_version": "0.1",
+        "confirmed_publication_required": true,
+        "exact_head_required": true
+      },
+      "executor_restrictions": null
+    }
+  ]
+}

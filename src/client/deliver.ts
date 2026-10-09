@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BuilderError, connectBuilder } from '../builder.js';
 import { validateHandoff, type BuilderHandoff } from '../validator.js';
-import { safeData } from '../control-plane/security.js';
+import { safeData } from '../shared/security.js';
 import type { Json } from '../protocol/index.js';
 import { AwhClient, type DeliveryObservation } from './client.js';
 import { atomicJson, ClientError, clientFail, ignoredDeliveryLogs, inspectRepository, readManifest, same } from './local.js';

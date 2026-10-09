@@ -1,8 +1,8 @@
 # agent-workflow-hub
 
-Current v0.2 candidate: [Hub #41](https://github.com/zlpoot/agent-workflow-hub/issues/41), Client 0.4.0 and the [Windows repeatable workflow](docs/repeatable.md). Live #90 follows the original CP compatibility and unified Review dependencies.
+Current main includes v0.2 repeatable delivery, v0.2.1 revision linking and v0.2.1-R1 publication recovery, with standalone **Client 0.4.4**. Hub #42/#44/#46 are merged and #41/#43/#45 are closed; the Future UI #90/#92 delivery chain has closed. These completed deliveries do not authorize a new production operation.
 
-当前候选：[#39 v0.1 MVP](https://github.com/zlpoot/agent-workflow-hub/issues/39)。Windows 单机、静态可信 Profile、现有 CP 与安装型 Client；`deliver → timeline → sync` 串联 GitHub 交付和实际审查/合并/关闭观察，见 [v0.1 使用说明](docs/mvp.md)。动态 Onboarding 不再是首版前置条件。
+See [architecture](docs/architecture.md), [deployment configuration](config/README.md), [Client](docs/client.md), [repeatable delivery](docs/repeatable.md) and [publication recovery](docs/publication-recovery.md). Historical v0.1/C0/C1 documents and fixtures remain reproducible. Dynamic Operator/Pairing, arbitrary Workflow Profiles and cross-host CP migration remain unimplemented.
 
 ## C1-G Dashboard read-only MVP
 
@@ -10,24 +10,24 @@ Issue [#30](https://github.com/zlpoot/agent-workflow-hub/issues/30) 新增独立
 
 ## C1-E Dashboard read contract
 
-Issue [#23](https://github.com/zlpoot/agent-workflow-hub/issues/23) 增加版本化只读 [Dashboard API](docs/dashboard-api.md) 与 [OpenAPI 3.1](contracts/dashboard-v1.openapi.json)：Projects/Executors/Runs/Timeline、全局 SSE cursor 和安全 diagnostic 投影。可选 viewer gateway 默认关闭，与 CP Client 凭据独立；本阶段不部署或修改原 CP，不实现 Dashboard 页面。
+Issue [#23](https://github.com/zlpoot/agent-workflow-hub/issues/23) 增加版本化只读 [Dashboard API](docs/dashboard-api.md) 与 [OpenAPI 3.1](contracts/dashboard-v1.openapi.json)：Projects/Executors/Runs/Timeline、全局 SSE cursor 和安全 diagnostic 投影。可选 viewer gateway 默认关闭，与 CP Client 凭据独立；该 API 的原交付不部署或修改原 CP；后续页面见 #30。
 Issue [#22](https://github.com/zlpoot/agent-workflow-hub/issues/22) 的 C1-D 在现有 Builder 上新增观测 Adapter 和安装包内固定范围 `awh deliver`。CP 保存 Run/Event，GitHub 保持开发事实源。交付、event-only retry、Draft/independent Review 边界与真实双端验收见 [delivery](docs/delivery.md)。
 
 ## C1-C Client
 
-Issue [#21](https://github.com/zlpoot/agent-workflow-hub/issues/21) 增加可独立安装的 `@zlpoot/awh-client` CLI：minimal Manifest、真实 Git origin binding、稳定 machine identity、专用 CP 配置，以及 register/start/event/status/finish。`pnpm client:pack` 生成包含运行依赖的 tarball，消费者在仓库外安装，无需 Hub checkout。安装、固定命令、显式重试、原生 verified HTTPS 和真实双端验收边界见 [Client 规范](docs/client.md)。本候选已整合 #22 的 `deliver`；双平台 PASS 必须由同一个 CP 的实际两端证据证明。
+Issue [#21](https://github.com/zlpoot/agent-workflow-hub/issues/21) 增加可独立安装的 `@zlpoot/awh-client` CLI：minimal Manifest、真实 Git origin binding、稳定 machine identity、专用 CP 配置，以及 register/start/event/status/finish。`pnpm client:pack` 生成包含运行依赖的 tarball，消费者在仓库外安装，无需 Hub checkout。安装、固定命令、显式重试、原生 verified HTTPS 和真实双端验收边界见 [Client 规范](docs/client.md)。当前主线已整合 #22 的 `deliver`；双平台 PASS 必须由同一个 CP 的实际两端证据证明。
 
 ## C1-B Control Plane
 
-Issue [#20](https://github.com/zlpoot/agent-workflow-hub/issues/20) 增加本地 HTTP REST/SSE + SQLite runtime service：Project/Profile/Executor Registry、Work Item/Run/Event 持久化、原子 append、重启恢复和独立注册 Client 认证。启动、受信配置、API、cursor/权限边界及限制见 [Control Plane 规范](docs/control-plane.md)。服务显式启动，固定监听 loopback，不连接 GitHub 或执行项目命令；不包含 Dashboard 或远程调度。所有 runtime 结果 `authority_verified=false`，GitHub 仍保存长期开发事实。
+Issue [#20](https://github.com/zlpoot/agent-workflow-hub/issues/20) 增加本地 HTTP REST/SSE + SQLite runtime service：Project/Profile/Executor Registry、Work Item/Run/Event 持久化、原子 append、重启恢复和独立注册 Client 认证。启动、受信配置、API、cursor/权限边界及限制见 [Control Plane 规范](docs/control-plane.md)。服务显式启动，固定监听 loopback，不连接 GitHub 或执行项目命令；支持默认关闭的只读 Dashboard API；不执行远程调度。所有 runtime 结果 `authority_verified=false`，GitHub 仍保存长期开发事实。
 
 ## C1-A Protocol
 
-Issue [#19](https://github.com/zlpoot/agent-workflow-hub/issues/19) 的版本化 Project / Profile Policy / Executor / Work Item / Run / Event 模型位于 `src/protocol/`。独立 JSON Schema、纯函数校验、状态与 sequence/idempotency 规则、v0.1 Handoff 映射及 WebSkill / Future UI fixture 见 [Protocol 规范](docs/protocol.md)。Manifest 只绑定身份，不授予权限；所有结果 `authority_verified=false`。C1-B/C1-C 复用该协议；Dashboard 后续单独交付。
+Issue [#19](https://github.com/zlpoot/agent-workflow-hub/issues/19) 的版本化 Project / Profile Policy / Executor / Work Item / Run / Event 模型位于 `src/protocol/`。独立 JSON Schema、纯函数校验、状态与 sequence/idempotency 规则、v0.1 Handoff 映射及 WebSkill / Future UI fixture 见 [Protocol 规范](docs/protocol.md)。Manifest 只绑定身份，不授予权限；所有结果 `authority_verified=false`。C1-B/C1-C 复用该协议；Dashboard 的当前能力与门禁见上文。
 
-既有基线 Issue [#16](https://github.com/zlpoot/agent-workflow-hub/issues/16)：C0.7-R3 安全兼容 exact GitHub-host scoped credential helper，仅修改 AWH。#19 不改变 WebSkill frozen candidate、live acceptance 或其他 Human Gate；C1 #3 继续暂停，agent-desktop 保持 dormant。
+既有基线 Issue [#16](https://github.com/zlpoot/agent-workflow-hub/issues/16)：C0.7-R3 安全兼容 exact GitHub-host scoped credential helper，仅修改 AWH。#19 不改变 WebSkill frozen candidate、live acceptance 或其他 Human Gate；这些历史任务约束不自动授权新任务；agent-desktop 保持 dormant。
 
-Issue [#4](https://github.com/zlpoot/agent-workflow-hub/issues/4) 已完成 C0.5 身份隔离，引入独立的 GitHub App Builder wrapper。C0 Handoff 校验器保持只读。C1 [#3](https://github.com/zlpoot/agent-workflow-hub/issues/3) 仍按当前路线暂停，不因 C0.5 完成而自动恢复。
+Issue [#4](https://github.com/zlpoot/agent-workflow-hub/issues/4) 已完成 C0.5 身份隔离，引入独立的 GitHub App Builder wrapper。C0 Handoff 校验器保持只读。后续生产或产品工作由当前 Issue 和 Human 明确授权。
 
 Issue [#1](https://github.com/zlpoot/agent-workflow-hub/issues/1) 的最小自举工具保留：读取 `builder_handoff` JSON，校验结构、候选版本与 Ready 声明的一致性。当前仍是 Node.js + TypeScript 单包，Protocol 使用锁定的 Ajv 依赖；Control Plane 使用 Node 内置 HTTP/SQLite。
 

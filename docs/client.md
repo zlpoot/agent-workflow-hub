@@ -1,19 +1,19 @@
 # Client / C1-C and C1-D
 
-Current v0.2.1-R1 code candidate: [Hub #45](https://github.com/zlpoot/agent-workflow-hub/issues/45), Client 0.4.4 and [one-shot publication reconciliation/recovery](publication-recovery.md), stacked on reviewed Client 0.4.2 [controlled document revision linking](link-revision.md). Independent Review and new separate Human authorization are required before production Client installation/registration or any real recovery.
+Current main ships Client **0.4.4**, including v0.2 repeatable delivery, v0.2.1 controlled document revision linking and [v0.2.1-R1 one-shot publication recovery](publication-recovery.md). Hub #42/#44/#46 are merged and #41/#43/#45 are closed. Independent Review of any new head and separate Human production authorization remain required; old recovery decisions are not reusable.
 
-当前 v0.1 MVP 候选按 [MVP 使用说明](mvp.md) 执行：Windows 静态配置、独立 Client 0.3.0、deliver/timeline/sync；下文保留原 C1-C/C1-D 历史范围和恢复约束，Mac 双端与动态 Onboarding 不再是本候选前置条件。
+The standalone package includes Client, Protocol, shared stateless security checks, the fixed App Builder/policies and bundled runtime dependencies. It excludes CP server/Store, Builder CLI, browser/development dependencies and credentials. Consumers need Node 24+, not a Hub checkout. [Configuration sources and closed schemas](../config/README.md) document current deployment parameters.
 
-`@zlpoot/awh-client` 0.2.0 是可独立安装的 Node 24+ CLI/Client。消费者不需要 Hub checkout；包内含 Client、C1-A Protocol 校验器、固定 GitHub App Builder/政策及运行依赖，不含 CP server、Builder CLI、开发依赖或凭据。Hub 保持 pnpm 单包；不向 npm registry 发布、不新增许可证。升级须显式安装新 tarball。`deliver` 的固定执行、Draft、观测与恢复边界见 [delivery](delivery.md)；下述 C1-C runtime 命令仍兼容旧会话。
+Historical / Legacy: the original C1-C/C1-D descriptions and constraints below remain as historical contracts. The [v0.1 guide](mvp.md) describes Client 0.3.0; it is not a current task instruction. Mac production pairing and cross-host endpoint migration are not implied by Windows acceptance.
 
 ## 分发与安装
 
-Builder 在 Hub 执行 `pnpm client:pack`，生成 `.handoff/packages/zlpoot-awh-client-0.2.0.tgz` 和 SHA-256/文件清单 JSON。`--output` 仅指定包输出目录。打包从锁定、已安装的 runtime dependencies 复制依赖闭包，调用本机 npm 的 offline pack，不下载或运行 lifecycle scripts。
+Builder 在 Hub 执行 `pnpm client:pack`，生成 `.handoff/packages/zlpoot-awh-client-0.4.4.tgz` 和 SHA-256/文件清单 JSON。`--output` 仅指定包输出目录。打包从锁定、已安装的 runtime dependencies 复制依赖闭包，调用本机 npm 的 offline pack，不下载或运行 lifecycle scripts。
 
 将 tarball 经已认证的文件传输交给消费者，核对提供的 SHA-256。消费者在仓库外安装：
 
 ```sh
-npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --no-audit --no-fund /absolute/zlpoot-awh-client-0.2.0.tgz
+npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --no-audit --no-fund /absolute/zlpoot-awh-client-0.4.4.tgz
 /absolute/external/awh-client/node_modules/.bin/awh --version
 ```
 

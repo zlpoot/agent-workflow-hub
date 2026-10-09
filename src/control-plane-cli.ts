@@ -1,34 +1,44 @@
-import { readFileSync } from 'node:fs';
+import { closeSync, openSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createAuthenticator, createControlPlaneServer, ControlPlaneStore, ControlPlaneError, safeData } from './control-plane/index.js';
-import type { ProfilePolicy } from './protocol/index.js';
-import type { RegisteredClient } from './control-plane/index.js';
+import { createAuthenticator, createControlPlaneServer, ControlPlaneStore, ControlPlaneError } from './control-plane/index.js';
 import { readHttpsConfig } from './control-plane/tls.js';
+import { readRuntimeConfig, readTrustedConfig } from './control-plane/config.js';
+import { externalPath, externalFilePath } from './shared/external-files.js';
 
 export async function main(args: string[]): Promise<void> {
   if (args.length === 1 && args[0] === '--help') {
-    console.log('Usage: node dist/control-plane-cli.js --database <sqlite-file> --config <trusted-json-file> [--port <1-65535>] [--https-config <external-json-file>]\nHTTP binds only to 127.0.0.1; optional native HTTPS binds one explicitly configured private IPv4 interface. Both listeners share one store.'); return;
+    console.log('Usage: node dist/control-plane-cli.js [init|serve] --runtime-config <external-json-file>\nLegacy arguments: [init|serve] --database <external-sqlite-file> --config <external-trusted-json-file> [--port <1-65535>] [--https-config <external-json-file>]\nNormal startup requires an existing CP v2 database. init exclusively creates a new database and exits. HTTP binds only to 127.0.0.1; optional native HTTPS uses an explicit private IPv4 interface.'); return;
   }
+  const mode = args[0] === 'init' ? 'init' : 'serve';
+  if (args[0] === 'init' || args[0] === 'serve') args = args.slice(1);
   const options = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i]!, value = args[i + 1];
-    if (!['--database', '--config', '--port', '--https-config'].includes(key) || options.has(key) || !value || value.startsWith('--'))
+    if (!['--database', '--config', '--port', '--https-config', '--runtime-config'].includes(key) || options.has(key) || !value || value.startsWith('--'))
       throw new ControlPlaneError(500, 'configuration', 'Invalid Control Plane startup arguments');
     options.set(key, value);
+  }
+  if (options.has('--runtime-config')) {
+    if (options.size !== 1) throw new ControlPlaneError(500, 'configuration', 'Deployment configuration cannot be overridden by legacy arguments');
+    const config = readRuntimeConfig(options.get('--runtime-config')!);
+    options.clear(); options.set('--database', config.database); options.set('--config', config.trusted_config_file); options.set('--port', String(config.port));
+    if (config.https_config_file) options.set('--https-config', config.https_config_file);
   }
   if (!options.has('--database') || !options.has('--config')) throw new ControlPlaneError(500, 'configuration', 'Database and trusted config file are required');
   const portText = options.get('--port') ?? '4310', port = Number(portText);
   if (!/^[1-9][0-9]{0,4}$/.test(portText) || port > 65535) throw new ControlPlaneError(500, 'configuration', 'Invalid port');
-  const raw = readFileSync(resolve(options.get('--config')!));
-  if (raw.length > 64 * 1024) throw new ControlPlaneError(500, 'configuration', 'Trusted config exceeds the byte limit');
-  const config: unknown = JSON.parse(raw.toString('utf8'));
-  safeData(config);
-  if (!config || typeof config !== 'object' || Array.isArray(config) || Object.keys(config).sort().join(',') !== 'clients,profiles')
-    throw new ControlPlaneError(500, 'configuration', 'Config must contain only clients and profiles');
-  const typed = config as { clients: RegisteredClient[]; profiles: ProfilePolicy[] };
+  const typed = readTrustedConfig(options.get('--config')!);
   const https = options.has('--https-config') ? readHttpsConfig(options.get('--https-config')!) : null;
-  const authenticate = createAuthenticator(typed.clients), store = new ControlPlaneStore(resolve(options.get('--database')!), typed.profiles);
+  const authenticate = createAuthenticator(typed.clients);
+  const path = mode === 'init' ? externalPath(options.get('--database')!, true) : externalFilePath(options.get('--database')!);
+  if (mode === 'init') {
+    // Exclusive reservation: never overwrite an existing file. Retain failed initialization for inspection.
+    const fd = openSync(path, 'wx', 0o600); closeSync(fd);
+    const store = new ControlPlaneStore(path, typed.profiles); store.close();
+    console.log('AWH Control Plane database initialized (v2); no listener started'); return;
+  }
+  const store = new ControlPlaneStore(path, typed.profiles, undefined, 'existing');
   const service = createControlPlaneServer({ store, authenticate });
   const secure = https ? createControlPlaneServer({ store, authenticate, tls: https.tls }) : null;
   const services = secure ? [service, secure] : [service];
@@ -46,5 +56,5 @@ export async function main(args: string[]): Promise<void> {
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main(process.argv.slice(2)).catch(() => { console.error('Control Plane startup failed; check arguments, trusted config and database (details suppressed)'); process.exitCode = 1; });
+  main(process.argv.slice(2)).catch(() => { console.error('Control Plane startup failed; check arguments, external configuration and existing database (details suppressed)'); process.exitCode = 1; });
 }

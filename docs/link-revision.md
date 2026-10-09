@@ -1,5 +1,8 @@
 # v0.2.1：已交付 Draft PR 的文档修订关联
 
+> Historical / Legacy. This records the original version and its authorization boundary. Current main ships Client 0.4.4; the old task/candidate/setup text below is historical, not a permanent instruction or new production authorization. See [current Client](client.md).
+
+
 本候选实现 Hub #43，基于 PR #42 的已审恢复候选。Client 为 0.4.2。
 代码交付仅等待 ChatGPT exact-head Independent Review；代码通过不代表生产部署授权。
 原生产 CP、Client、DB、Profile、Future UI PR #92 和真实 Run 均不在本次操作范围。

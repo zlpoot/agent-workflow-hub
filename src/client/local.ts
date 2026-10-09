@@ -4,7 +4,8 @@ import { hostname } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync, unlinkSync, openSync, closeSync } from 'node:fs';
 import { assertEntity, assertClientMetadata, type ProjectManifest } from '../protocol/index.js';
-import { safeData, validId } from '../control-plane/security.js';
+import { safeData, validId } from '../shared/security.js';
+import { absoluteDeploymentPath } from '../shared/external-files.js';
 import { CLIENT_VERSION } from './version.js';
 
 export class ClientError extends Error {
@@ -116,12 +117,15 @@ function outside(root: string, path: string): void {
 }
 export function readConfig(path: string, root: string): ClientConfig {
   if (!isAbsolute(path)) clientFail('configuration', 'Explicit absolute Client config path is required');
+  absoluteDeploymentPath(path);
   outside(root, realpathSync(path));
   const config = readJson(path) as ClientConfig;
   if (!config || Array.isArray(config) || Object.keys(config).some(key => !['schema_version','endpoint','credential_file','state_directory','executor_id','executor_type','profile_version','ca_certificate_file'].includes(key)) ||
       config.schema_version !== '1.0' || !validId(config.executor_id) || typeof config.executor_type !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(config.executor_type) ||
       typeof config.credential_file !== 'string' || !isAbsolute(config.credential_file) || typeof config.state_directory !== 'string' || !isAbsolute(config.state_directory) ||
       config.profile_version !== undefined && !validId(config.profile_version)) clientFail('configuration', 'Invalid Client config');
+  absoluteDeploymentPath(config.credential_file); absoluteDeploymentPath(config.state_directory);
+  if (config.ca_certificate_file !== undefined) absoluteDeploymentPath(config.ca_certificate_file);
   let endpoint: URL;
   try { endpoint = new URL(config.endpoint); } catch { return clientFail('endpoint', 'Invalid explicitly configured Control Plane endpoint'); }
   if (endpoint.username || endpoint.password || endpoint.pathname !== '/' || endpoint.search || endpoint.hash ||

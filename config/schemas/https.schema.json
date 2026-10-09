@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:awh:config:https:1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "host",
+    "port",
+    "certificate_file",
+    "private_key_file"
+  ],
+  "properties": {
+    "host": {
+      "type": "string",
+      "pattern": "^(?:10\\.(?:\\d{1,3}\\.){2}\\d{1,3}|192\\.168\\.\\d{1,3}\\.\\d{1,3}|172\\.(?:1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3})$"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "certificate_file": {
+      "type": "string",
+      "pattern": "^(?:/[^/]|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\]+\\\\)",
+      "minLength": 2
+    },
+    "private_key_file": {
+      "type": "string",
+      "pattern": "^(?:/[^/]|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\]+\\\\)",
+      "minLength": 2
+    }
+  }
+}

@@ -4,7 +4,20 @@ Control Plane 保存 runtime Registry、Executor last-seen、Run 和 Event timel
 
 本阶段只交付 HTTP + SQLite，不含 Dashboard、可安装 Client (#21)、Builder Adapter (#22)、远程调度或部署平台。复用 [C1-A Protocol](protocol.md)，保留 C0 只读 CLI 和现有 App Builder。
 
-## 本地启动
+## 当前启动边界
+
+普通启动（包括旧 flags）只打开受信仓库外的既有 CP v2 文件；缺失/空库、错误 schema、缺少 CP 表/不可变 trigger、Profile 不一致均拒绝。它不初始化、迁移或追加 Profile。首次建库须显式 init，目标文件和父目录不能在仓库或符号链接下，目标必须不存在；失败的 init 文件保留供人工检查，不自动删除或重试。既有 v1 库需另行受控迁移，本整改不提供 CLI 隐式迁移。嵌入式 Store 的 legacy API 保留用于历史 fixture/受控 seed。
+
+推荐使用仓库外版本化部署 JSON，见 [配置说明](../config/README.md)。仅在授权的新 scratch/首次部署环境：
+
+```sh
+node dist/control-plane-cli.js init --runtime-config <absolute-external-runtime.json>
+node dist/control-plane-cli.js serve --runtime-config <absolute-external-runtime.json>
+```
+
+仓库外 trusted config 仍为既有 clients/profiles 闭合结构。新部署配置不能覆盖它或授予政策权限。SQLite v2 尚无稳定逻辑 service UUID：启动校验文件/schema/Profile/Project 身份，不宣称实现 #27 跨主机服务迁移。
+
+## 历史启动参数（仍兼容既有 v2）
 
 要求 Node.js 24+、pnpm 11.25.0。使用内置 `node:sqlite` / `DatabaseSync`，无新增依赖；Node 24 上 SQLite API 仍可能输出 experimental warning。CLI 固定监听 `127.0.0.1`，默认端口 4310。数据库父目录需存在。
 

@@ -17,7 +17,10 @@ export async function main(args: string[]): Promise<unknown> {
     'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>'], event_types: CLIENT_EVENT_TYPES,
     configuration: '--config <absolute-external-json-file> before command or AWH_CLIENT_CONFIG', deliver: 'fixed Builder policy; explicit event-only retry', authority_verified: false };
   let configPath = process.env.AWH_CLIENT_CONFIG;
-  if (args[0] === '--config') { configPath = args[1]; args = args.slice(2); }
+  if (args[0] === '--config') {
+    if (!args[1] || configPath && configPath !== args[1]) clientFail('configuration', 'Conflicting or missing Client configuration source');
+    configPath = args[1]; args = args.slice(2);
+  }
   const [command, ...rest] = args, options = new Map<string, string>();
   const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: ['--run'], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--issue','--title','--body','--hold-draft','--retry','--recover-from-run'], 'link-revision': ['--run','--pr','--head','--evidence-comment','--retry'],
     'reconcile-publication':['--revision'], 'resume-publication':['--revision','--authorization-comment'] };

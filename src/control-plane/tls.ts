@@ -1,20 +1,9 @@
 import { X509Certificate, createPrivateKey } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync, existsSync } from 'node:fs';
-import { isAbsolute, dirname, join } from 'node:path';
+import { readExternalFile } from '../shared/external-files.js';
 import { fail } from './security.js';
 
 // Provisioning belongs to the OS/operator. No certificate minting, key logging or trust bypass.
-function externalFile(path: unknown, max: number, privateKey = false): Buffer {
-  if (typeof path !== 'string' || !isAbsolute(path)) fail(500, 'configuration', 'TLS files require explicit absolute external paths');
-  const canonical = realpathSync(path), st = lstatSync(path);
-  if (!st.isFile() || st.isSymbolicLink() || st.size > max) fail(500, 'configuration', 'TLS file must be a bounded regular file');
-  for (let directory = dirname(canonical); ; directory = dirname(directory)) {
-    if (existsSync(join(directory, '.git'))) fail(500, 'configuration', 'TLS configuration and keys must remain outside repositories');
-    if (dirname(directory) === directory) break;
-  }
-  if (privateKey && process.platform !== 'win32' && (st.mode & 0o077)) fail(500, 'configuration', 'TLS private key must be owner-only');
-  return readFileSync(path);
-}
+const externalFile = readExternalFile;
 export function readHttpsConfig(path: string): { host: string; port: number; tls: { cert: Buffer; key: Buffer } } {
   const config = JSON.parse(externalFile(path, 16 * 1024).toString('utf8')) as Record<string, unknown>;
   if (!config || Array.isArray(config) || Object.keys(config).sort().join(',') !== 'certificate_file,host,port,private_key_file')

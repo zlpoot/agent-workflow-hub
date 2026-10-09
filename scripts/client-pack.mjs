@@ -14,7 +14,7 @@ const stage = mkdtempSync(join(output, '.client-stage-'));
 try {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json')));
   mkdirSync(join(stage, 'dist/control-plane'), { recursive: true });
-  for (const path of ['client','protocol','validator.js','profiles.js','builder.js']) cpSync(join(root, 'dist', path), join(stage, 'dist', path), { recursive: true });
+  for (const path of ['client','protocol','shared','validator.js','profiles.js','builder.js']) cpSync(join(root, 'dist', path), join(stage, 'dist', path), { recursive: true });
   cpSync(join(root, 'dist/control-plane/security.js'), join(stage, 'dist/control-plane/security.js'));
   if (existsSync(join(root, 'docs/client.md'))) cpSync(join(root, 'docs/client.md'), join(stage, 'README.md'));
   const packageJson = { name: CLIENT_PACKAGE, version: CLIENT_VERSION, private: true, type: 'module', engines: { node: '>=24' },

@@ -1,5 +1,8 @@
 # C1.2 Trusted Onboarding：离线安全设计与 Review Gate
 
+> Onboarding currently runs **offline Fixture only**. Production Operator/Pairing is unavailable. The unauthenticated catch → recordDenied SQLite amplification risk belongs to #31 Phase B0; it remains unresolved here. No production enablement or security-fix PASS is claimed.
+
+
 本规范对应 [#31](https://github.com/zlpoot/agent-workflow-hub/issues/31) 与 [Owner kickoff](https://github.com/zlpoot/agent-workflow-hub/issues/31#issuecomment-6055785767)。本轮仅实现可独立审查的隔离 fixture；没有生产监听入口，不接入原 CP，不使用现有配置、凭据、数据库或产品工作区。#30 的 PHASE_C_ACCEPTED_WITH_EXCEPTION 与原 Verification Exception 永久保留。
 
 ## 1. 架构与安全 Gate

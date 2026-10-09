@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "database": "/operator/awh/runtime.sqlite",
+  "trusted_config_file": "/operator/awh/trusted.json",
+  "port": 4310
+}

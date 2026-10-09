@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:awh:config:client:1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "endpoint",
+    "credential_file",
+    "state_directory",
+    "executor_id",
+    "executor_type"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "endpoint": {
+      "type": "string",
+      "format": "uri"
+    },
+    "credential_file": {
+      "type": "string",
+      "pattern": "^(?:/[^/]|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\]+\\\\)",
+      "minLength": 2
+    },
+    "state_directory": {
+      "type": "string",
+      "pattern": "^(?:/[^/]|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\]+\\\\)",
+      "minLength": 2
+    },
+    "executor_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "executor_type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "profile_version": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "ca_certificate_file": {
+      "type": "string",
+      "pattern": "^(?:/[^/]|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\]+\\\\)",
+      "minLength": 2
+    }
+  }
+}
