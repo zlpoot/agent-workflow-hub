@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, lstatSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { loadApprovedWorkItem,declareDevelop,reportDevelop,versionedPreflight } from '../dist/client/versioned-profile.js';
+import { doctor,formatDoctor } from '../dist/client/doctor.js';
+import { machine } from '../dist/client/local.js';
+import { facts,trustedFixture } from '../tests/versioned-profile-fixture.mjs';
+const root=dirname(dirname(fileURLToPath(import.meta.url))),args=process.argv.slice(2);
+assert(args.length===2&&args[0]==='--output','Use --output <scratch-evidence-directory>');
+const output=resolve(args[1]);mkdirSync(output,{recursive:true});
+const base=mkdtempSync(join(tmpdir(),'awh-versioned-smoke-'));
+const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^(?:GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$)/i.test(k)));
+const digest=v=>createHash('sha256').update(v).digest('hex');
+const git=(cwd,args)=>{const r=spawnSync('git',['-c','commit.gpgsign=false','-c','core.hooksPath='+(process.platform==='win32'?'NUL':'/dev/null'),...args],{cwd,env,encoding:'utf8',windowsHide:true,timeout:10000});assert.equal(r.status,0,'Scratch Git failed');return r.stdout.trim();};
+const snapshot=()=>{const files={};const walk=p=>{for(const name of readdirSync(p).sort()){const f=join(p,name),s=lstatSync(f);if(s.isDirectory())walk(f);else files[f.slice(base.length)]=s.isSymbolicLink()?'link':digest(readFileSync(f));}};walk(base);return files;};
+try {
+  const repo=join(base,'consumer'),operator=join(base,'operator'),state=join(base,'state');for(const p of [repo,operator,state])mkdirSync(p);
+  git(repo,['init','-b',facts.branch]);git(repo,['config','user.name','Scratch']);git(repo,['config','user.email','scratch@example.invalid']);git(repo,['remote','add','origin','https://github.com/'+facts.repository+'.git']);
+  mkdirSync(join(repo,'.awh'));writeFileSync(join(repo,'.awh/project.yaml'),`apiVersion: awh/v1\nproject:\n  id: scratch-hub\n  repository: ${facts.repository}\nprofile:\n  ref: ${facts.profile_ref}\n`);writeFileSync(join(repo,'product.txt'),'scratch only');git(repo,['add','.']);git(repo,['commit','-m','offline scratch']);
+  const f=trustedFixture(operator),config={schema_version:'1.0',endpoint:'http://127.0.0.1:1',credential_file:join(base,'fixture.credential'),state_directory:state,executor_id:facts.executor,executor_type:'codex',profile_version:'v1'};
+  writeFileSync(config.credential_file,'deliberately-not-a-valid-credential',{mode:0o600});const configPath=join(base,'client.json');writeFileSync(configPath,JSON.stringify(config));
+  const m=machine(config),manifest={apiVersion:'awh/v1',project:{id:'scratch-hub',repository:facts.repository},profile:{ref:facts.profile_ref}},namespace=join(state,digest(JSON.stringify([manifest.project.id,facts.repository,config.endpoint,config.executor_id])));mkdirSync(namespace);
+  writeFileSync(join(namespace,'session.json'),JSON.stringify({schema_version:'1.0',manifest,endpoint:config.endpoint,executor_id:config.executor_id,machine_id:m.id,initial:null,work_item:null,events:[],pending:null}));
+  const observationPath=join(base,'observations.json');writeFileSync(observationPath,JSON.stringify(facts));const before=snapshot(),head=git(repo,['rev-parse','HEAD']);
+  const a=loadApprovedWorkItem(f.path,f.selection),preflight=versionedPreflight(a,facts);assert.equal(preflight.status,'passed');
+  const options={cwd:repo,configPath,trustPath:f.path,workItem:f.selection,observationPath},report=await doctor(options);assert.equal(report.policy_preflight.status,'passed');assert.equal(report.status,'not_checked');
+  const cli=join(root,'dist/client/cli.js'),common=['--config',configPath,'doctor','--policy-trust',f.path,'--work-item',f.selection.id,'--work-item-version','v1','--observations',observationPath];
+  const invoke=more=>spawnSync(process.execPath,[cli,...common,...more],{cwd:repo,env,encoding:'utf8',windowsHide:true,timeout:10000});
+  const json=invoke(['--json']),text=invoke([]);assert.equal(json.status,0,json.stderr);assert.equal(text.status,0,text.stderr);assert.deepEqual(JSON.parse(json.stdout),report);assert.equal(text.stdout.trim(),formatDoctor(report));
+  let run=declareDevelop(a,facts,{id:'scratch-new-business-901',source_sha:head});run=reportDevelop(a,run,{sequence:1,type:'started',checks:[]});run=reportDevelop(a,run,{sequence:2,type:'checks_reported',checks:facts.checks.map(command=>({command,exit_code:0}))});run=reportDevelop(a,run,{sequence:3,type:'completed',checks:[]});
+  assert.equal(run.deliver,'blocked');assert.equal(run.authority_verified,false);assert.equal(run.provider_scope,'not_checked');assert.deepEqual(snapshot(),before);assert.equal(git(repo,['rev-parse','HEAD']),head);
+  writeFileSync(join(output,'doctor.json'),json.stdout);writeFileSync(join(output,'doctor.txt'),text.stdout);writeFileSync(join(output,'develop.json'),JSON.stringify(run,null,2));
+  const evidence={status:'OFFLINE_VERSIONED_SCRATCH_SMOKE_PASS',consumer_before_sha:head,consumer_after_sha:head,all_scratch_files_unchanged:true,new_fixture_issue:901,fixed_business_mapping_added:false,declared_events:run.events.length,doctor_exit_code:json.status,provider_scope:'not_checked',network_requests:0,command_executions:0,production_operations:0,authority_verified:false};
+  writeFileSync(join(output,'evidence.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence));
+} finally {
+  assert.equal(dirname(base),tmpdir());assert(base.startsWith(join(tmpdir(),'awh-versioned-smoke-')));rmSync(base,{recursive:true,force:true});
+}

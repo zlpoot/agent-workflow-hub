@@ -43,6 +43,9 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
       ['pnpm build', 'node --test tests/onboarding.test.mjs tests/builder.test.mjs'], null),
     workflow('c1i', 'codex/c1i-doctor-prototype', 32,
       ['pnpm build', 'node --test tests/doctor.test.mjs', 'node --test tests/client.test.mjs'], null),
+    // One-time #34 code publication only; dynamic declarations never select Builder authority.
+    workflow('c1k', 'codex/c1k-versioned-profile-prototype', 34,
+      ['pnpm build', 'node --test tests/versioned-profile.test.mjs', 'node --test tests/doctor.test.mjs'], null),
     workflow('c1d', 'codex/c1d-builder-adapter', 22, ['pnpm check'], null),
   ]) }),
   Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([

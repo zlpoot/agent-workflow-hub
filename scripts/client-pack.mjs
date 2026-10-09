@@ -18,8 +18,9 @@ try {
   cpSync(join(root, 'dist/control-plane/security.js'), join(stage, 'dist/control-plane/security.js'));
   if (existsSync(join(root, 'docs/client.md'))) cpSync(join(root, 'docs/client.md'), join(stage, 'README.md'));
   cpSync(join(root, 'docs/doctor.md'), join(stage, 'doctor.md'));
+  cpSync(join(root, 'docs/versioned-profile.md'), join(stage, 'versioned-profile.md'));
   const packageJson = { name: CLIENT_PACKAGE, version: CLIENT_VERSION, private: true, type: 'module', engines: { node: '>=24' },
-    bin: { awh: 'dist/client/cli.js' }, exports: { '.': './dist/client/index.js' }, files: ['dist', 'doctor.md'],
+    bin: { awh: 'dist/client/cli.js' }, exports: { '.': './dist/client/index.js' }, files: ['dist', 'doctor.md', 'versioned-profile.md'],
     dependencies: manifest.dependencies, bundledDependencies: Object.keys(manifest.dependencies) };
   writeFileSync(join(stage, 'package.json'), JSON.stringify(packageJson, null, 2));
   const copied = new Map();
