@@ -5,6 +5,7 @@ import '@radix-ui/themes/styles.css';
 import './style.css';
 import { DashboardReader, safeGitHubUrl, safeSourceUrl } from './adapter.mjs';
 import { text, errorText, searchText } from './zh-CN.mjs';
+import { Wizard } from './wizard.js';
 
 type Ref = { provider: string; repository: string; kind: string; number: number; authority_verified: false };
 type Step = { id: string; name: string | null };
@@ -22,7 +23,7 @@ type State = { snapshot: { cursor: number; projects: Project[]; runs: Run[]; exe
   events: Event[]; phase: string; lastRefresh: number | null; error: string | null };
 type Comparison = { status: string; provenance: string; action_hint: string; observed: unknown; expected: unknown };
 type Diagnostics = Record<string, Comparison | string | number | null>;
-const views = ['Overview', 'Projects', 'Executors', 'Runs', 'Timeline'];
+const views = ['Overview', 'Projects', 'Executors', 'Runs', 'Timeline', 'Wizard'];
 const labels: Record<string, string> = { loading: '加载中', refreshing: '刷新中', connecting: '连接实时更新中', live: '已连接', partial: '部分数据 · 同步中',
   offline: '离线 · 显示上次快照', outdated: '数据已过期 · 显示上次快照', error: '暂不可用' };
 const color = (status: string): 'teal' | 'red' | 'amber' | 'gray' =>
@@ -75,13 +76,15 @@ function App() {
   const fixture = document.querySelector('meta[name="awh-dataset"]')?.getAttribute('content') === 'fixture';
   return <Theme accentColor="teal" grayColor="slate" radius="medium" scaling="100%"><Tabs.Root value={view} onValueChange={value => { setView(value); setSearch(''); setStatus('all'); }} orientation="vertical" className="shell">
     <aside className="sidebar"><div className="brand"><span className="brandmark">A</span><div><strong>AWH</strong><div className="secondary">工作流中心</div></div></div>
-      <Text size="1" color="gray" className="nav-label">工作区</Text><Tabs.List className="nav" aria-label="面板导航">{views.map((name, i) => <Tabs.Trigger key={name} value={name}><span className="nav-symbol" aria-hidden="true">{['◫', '▣', '◇', '▷', '≡'][i]}</span>{text(name)}</Tabs.Trigger>)}</Tabs.List>
+      <Text size="1" color="gray" className="nav-label">工作区</Text><Tabs.List className="nav" aria-label="面板导航">{views.map((name, i) => <Tabs.Trigger key={name} value={name}><span className="nav-symbol" aria-hidden="true">{['◫', '▣', '◇', '▷', '≡', '+'][i]}</span>{text(name)}</Tabs.Trigger>)}</Tabs.List>
       <div className="sidebar-bottom"><Badge variant="outline">只读</Badge><p>运行时记录，保留原始数据来源。</p><Text size="1" color="gray">GitHub 授权未核验</Text></div></aside>
-    <main><header className="topbar"><Text size="2" color="gray">工作区 <span aria-hidden="true">/</span> <strong>{text(view)}</strong></Text><Flex gap="3" align="center"><Status value={state.phase} /><Button variant="soft" size="2" onClick={() => void reader.current?.refresh()} disabled={state.phase === 'loading' || state.phase === 'refreshing'}>刷新</Button></Flex></header>
+    <main><header className="topbar"><Text size="2" color="gray">工作区 <span aria-hidden="true">/</span> <strong>{text(view)}</strong></Text><Flex gap="3" align="center" wrap="wrap"><Status value={state.phase} /><Button variant="soft" size="2" onClick={() => void reader.current?.refresh()} disabled={state.phase === 'loading' || state.phase === 'refreshing'}>刷新</Button><Button size="2" onClick={() => setView('Wizard')}>添加项目向导</Button></Flex></header>
       <div className="content"><div className="page-title"><div><Text className="eyebrow" size="1">智能体工作流中心</Text><Heading size="7">{text(view)}</Heading><Text color="gray">{view === 'Overview' ? '集中查看各项目与机器上已记录的工作。' : view === 'Timeline' ? '按全局游标顺序查看当前范围内已保存的事件。' : '查看当前范围内已记录的身份信息和活动。'}</Text></div>{fixture && <Badge color="amber">示例预览 · 模拟数据</Badge>}</div>
       <div className="freshness"><Text size="2">{labels[state.phase]} · 最近成功刷新：{state.lastRefresh === null ? '暂无' : stamp(state.lastRefresh)}</Text><Text size="1" color="gray">快照游标 {snapshot?.cursor ?? '—'} · 注册信息与事件存储 · GitHub 授权未核验</Text></div>
       {state.error && <div className="notice" role="alert">{errorText(state.error)}。{snapshot ? '显示上次成功读取的快照；在线状态可能已过期。' : '暂无可用快照。'}</div>}
-      {!snapshot ? <Card className="empty"><Heading size="4">{state.phase === 'loading' ? '正在加载活动记录…' : '面板暂不可用'}</Heading><Text color="gray">{state.phase === 'loading' ? '正在读取一致的快照与已保存的时间线。' : '需要受保护的同源查看会话，并启用只读网关。'}</Text></Card> : <>
+      {view === 'Wizard' ? <Tabs.Content value="Wizard"><Wizard state={state} fixture={fixture}
+        onNavigate={(destination, id) => { setProject(id); setSearch(''); setStatus('all'); setView(destination); }}
+        onProject={id => { const item = projects.find(p => p.id === id); if (item) setSelection({ kind: 'Project', item }); }} /></Tabs.Content> : !snapshot ? <Card className="empty"><Heading size="4">{state.phase === 'loading' ? '正在加载活动记录…' : '面板暂不可用'}</Heading><Text color="gray">{state.phase === 'loading' ? '正在读取一致的快照与已保存的时间线。' : '需要受保护的同源查看会话，并启用只读网关。'}</Text></Card> : <>
       {view !== 'Overview' && <Flex gap="3" wrap="wrap" className="filters"><TextField.Root aria-label={`搜索${text(view)}`} placeholder={`搜索${text(view)}…`} value={search} onChange={event => setSearch(event.target.value)} className="search" />
         <Select.Root value={project} onValueChange={setProject}><Select.Trigger aria-label="按项目筛选" /><Select.Content><Select.Item value="all">全部项目</Select.Item>{projects.map(item => <Select.Item key={item.id} value={item.id}>{item.id}</Select.Item>)}</Select.Content></Select.Root>
         {view === 'Runs' && <Select.Root value={status} onValueChange={setStatus}><Select.Trigger aria-label="按运行状态筛选" /><Select.Content><Select.Item value="all">全部状态</Select.Item>{[...new Set(runs.map(run => run.state))].sort().map(value => <Select.Item key={value} value={value}>{text(value)}</Select.Item>)}</Select.Content></Select.Root>}</Flex>}

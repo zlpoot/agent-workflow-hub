@@ -15,7 +15,7 @@ import { requestJson } from './http.js';
 
 export type DoctorStatus = PreflightStatus;
 type DoctorSource = 'client_artifact' | 'local_git' | 'manifest_identity' | 'checked_in_profile' | 'external_config' | 'local_state' | 'control_plane_get' | 'not_observed' | 'operator_policy';
-type Details = Record<string, string | boolean | number | null | readonly string[] | { repository: string; issue: number }>;
+type Details = Record<string, string | boolean | number | null | readonly string[] | { repository: string; issue: number | null }>;
 export interface DoctorCheck { id: string; status: DoctorStatus; code: string; source: DoctorSource; safe_next_step: string; details?: Details }
 export interface DoctorReport {
   schema_version: '1.0'; kind: 'client_doctor'; client: { package: string; version: string };
@@ -40,6 +40,14 @@ const display = (value: string): string => {
 const knownCommands = new Set(PROFILES.flatMap(p => p.workflows.flatMap(w => [...w.verification_commands])));
 const displayCommand = (command: string) => knownCommands.has(command) ? command : '[unregistered command suppressed]';
 const fixedPolicy = observationPolicy;
+// Diagnostic data only: never infer a current Issue from a retained Session.
+const dynamicIssue = (branch: string, prefix: string): number | null => {
+  if (!branch.startsWith(prefix)) return null;
+  const suffix = branch.slice(prefix.length);
+  if (!/^[1-9]\d*$/.test(suffix)) return null;
+  const issue = Number(suffix);
+  return Number.isSafeInteger(issue) ? issue : null;
+};
 
 /** No network unless explicitly requested. Config/Manifest are observations, never authorization. */
 export async function doctor(options: { configPath?: string; probeCp?: boolean; cwd?: string;
@@ -99,9 +107,10 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
       if (fixed.profile.repository !== identity.repository) clientFail('profile', 'Profile and origin disagree');
       add('profile', 'passed', 'static_profile_mapping', 'checked_in_profile', 'This comparison grants no execution or delivery authority.',
         { ref: display(manifest.profile.ref), repository: fixed.profile.repository, base: fixed.profile.base,
-          branch: fixed.workflow.branch, work_item: { repository: fixed.workflow.work_item.repo, issue: fixed.workflow.work_item.issue }, verification_commands: fixed.workflow.verification_commands });
+          branch: fixed.workflow.branch, work_item: { repository: fixed.workflow.work_item.repo,
+            issue: fixed.workflow.id === 'repeatable-docs' ? dynamicIssue(identity.ref, fixed.workflow.branch) : fixed.workflow.work_item.issue }, verification_commands: fixed.workflow.verification_commands });
       const prefix = fixed.workflow.id === 'repeatable-docs';
-      const branchMatches = prefix ? new RegExp('^' + fixed.workflow.branch + '[1-9]\\d*$').test(identity.ref) : identity.ref === fixed.workflow.branch;
+      const branchMatches = prefix ? dynamicIssue(identity.ref, fixed.workflow.branch) !== null : identity.ref === fixed.workflow.branch;
       add('branch', branchMatches ? 'passed' : 'blocked', branchMatches ? 'branch_matches_static_mapping' : 'branch_profile_conflict', 'checked_in_profile', branchMatches ? 'Continue read-only diagnosis.' : REQUEST_PROFILE,
         { expected_branch: fixed.workflow.branch, actual_branch: display(identity.ref), branch_mode: prefix ? 'issue_prefix' : 'fixed' });
       if (manifest.profile.ref === 'future-ui/c1c-acceptance')
@@ -134,11 +143,13 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
   }
   if (fixed && local?.run && local.work_item) {
     const item = local.work_item.reference;
-    const expectedIssue = fixed.workflow.id === 'repeatable-docs' && identity ? Number(identity.ref.slice(fixed.workflow.branch.length)) : fixed.workflow.work_item.issue;
+    const expectedIssue = fixed.workflow.id === 'repeatable-docs' ? dynamicIssue(identity!.ref, fixed.workflow.branch) : fixed.workflow.work_item.issue;
     const matches = item.repository === fixed.workflow.work_item.repo && item.number === expectedIssue && local.run.profile.ref === manifest!.profile.ref &&
       (config?.profile_version === undefined || local.run.profile.version === config.profile_version);
-    add('work_item', matches ? 'passed' : 'blocked', matches ? 'local_work_item_matches_static_mapping' : 'work_item_profile_conflict', 'checked_in_profile', matches ? 'Comparison only; request current approved Work Item authority through #34.' : REQUEST_PROFILE,
-      { expected_work_item: { repository: fixed.workflow.work_item.repo, issue: Number.isSafeInteger(expectedIssue) ? expectedIssue : 0 },
+    add('work_item', expectedIssue === null ? 'not_checked' : matches ? 'passed' : 'blocked',
+      expectedIssue === null ? 'dynamic_issue_unavailable' : matches ? 'local_work_item_matches_static_mapping' : 'work_item_profile_conflict',
+      'checked_in_profile', matches ? 'Comparison only; request current approved Work Item authority through #34.' : REQUEST_PROFILE,
+      { expected_work_item: { repository: fixed.workflow.work_item.repo, issue: expectedIssue },
         actual_work_item: { repository: display(item.repository), issue: item.number }, observed_ref: display(local.run.profile.ref), observed_version: display(local.run.profile.version) });
   } else add('work_item', 'not_checked', 'local_work_item_unavailable', 'local_state', REQUEST_PROFILE);
   if (fixed && local?.verification_commands) {

@@ -1,6 +1,6 @@
 // Presentation only: protocol states, identifiers, URLs and response data stay unchanged.
 const messages = {
-  Overview: '总览', Projects: '项目', Executors: '执行器', Runs: '运行记录', Timeline: '时间线',
+  Overview: '总览', Projects: '项目', Executors: '执行器', Runs: '运行记录', Timeline: '时间线', Wizard: '接入向导',
   Project: '项目', Executor: '执行器', Run: '运行记录',
   loading: '加载中', refreshing: '刷新中', connecting: '连接实时更新中', live: '已连接',
   partial: '部分数据 · 同步中', offline: '离线', outdated: '数据已过期', error: '暂不可用',
