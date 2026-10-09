@@ -4,26 +4,29 @@ import { AwhClient } from './client.js';
 import { CLIENT_PACKAGE, CLIENT_VERSION } from './version.js';
 import { ClientError, clientFail, inspectRepository, machine, readCaCertificate, readConfig, readCredential, readManifest, same,
   readJson, type ClientConfig, type RepositoryIdentity, type Machine } from './local.js';
-import { deliveryPolicy, matchDeliveryPolicy } from './delivery-policy.js';
+import { observationPolicy, compareObservedPolicy } from './observe-policy.js';
+import { loadApprovedWorkItem, versionedPreflight, VersionedProfileError, type ApprovedWorkItem } from './versioned-profile.js';
+import { formatPreflight, type PolicyFacts, type PolicyPreflight, type PreflightStatus } from '../shared/preflight.js';
 import { PROFILES, ProfileError, selectWorkflow } from '../profiles.js';
 import { assertEntity, assertClientMetadata, ProtocolError, type ProjectManifest } from '../protocol/index.js';
 import { ControlPlaneError, safeData } from '../shared/security.js';
 import { externalFilePath, externalPath } from '../shared/external-files.js';
 import { requestJson } from './http.js';
 
-export type DoctorStatus = 'passed' | 'blocked' | 'not_checked';
-type DoctorSource = 'client_artifact' | 'local_git' | 'manifest_identity' | 'checked_in_profile' | 'external_config' | 'local_state' | 'control_plane_get' | 'not_observed';
+export type DoctorStatus = PreflightStatus;
+type DoctorSource = 'client_artifact' | 'local_git' | 'manifest_identity' | 'checked_in_profile' | 'external_config' | 'local_state' | 'control_plane_get' | 'not_observed' | 'operator_policy';
 type Details = Record<string, string | boolean | number | null | readonly string[] | { repository: string; issue: number }>;
 export interface DoctorCheck { id: string; status: DoctorStatus; code: string; source: DoctorSource; safe_next_step: string; details?: Details }
 export interface DoctorReport {
   schema_version: '1.0'; kind: 'client_doctor'; client: { package: string; version: string };
-  mode: 'offline' | 'cp_readonly_probe'; status: DoctorStatus; checks: DoctorCheck[]; authority_verified: false;
+  mode: 'offline' | 'cp_readonly_probe'; status: DoctorStatus; checks: DoctorCheck[]; policy_preflight?: PolicyPreflight; declared_preflight?: PolicyPreflight; authority_verified: false;
 }
 const REQUEST_PROFILE = 'Request an approved Profile/version and Work Item through Hub #34; preserve the current branch and project files.';
 const PRESERVE = 'Preserve existing state and request bounded operator diagnosis; do not reset, delete, retry delivery or replace identities.';
 const CONFIGURE = 'Follow the manual trusted external configuration guide with the owner; do not create, overwrite or rebind an existing configuration.';
 const knownFailure = (error: unknown): string => {
   if (error instanceof ProfileError) return 'profile';
+  if (error instanceof VersionedProfileError) return 'versioned_' + error.code;
   const code = error instanceof ClientError || error instanceof ProtocolError || error instanceof ControlPlaneError ? error.code : '';
   return ['git','origin','origin_mismatch','manifest','configuration','endpoint','certificate','credential','machine','state','file','platform','recovery','state_limit',
     'revision_overlay','revision_receipt','authentication','http','network','timeout','tls','response_schema','response_size','response_binding','delivery_policy','profile',
@@ -36,15 +39,11 @@ const display = (value: string): string => {
 };
 const knownCommands = new Set(PROFILES.flatMap(p => p.workflows.flatMap(w => [...w.verification_commands])));
 const displayCommand = (command: string) => knownCommands.has(command) ? command : '[unregistered command suppressed]';
-function fixedPolicy(ref: string, version?: string) {
-  if (ref === 'future-ui/c1c-acceptance' || ref.endsWith('/default')) return deliveryPolicy(ref, version);
-  const [profile, workflow, extra] = ref.split('/');
-  if (extra || !profile || !workflow) clientFail('profile', 'No static Profile mapping');
-  return selectWorkflow({ profile, workflow });
-}
+const fixedPolicy = observationPolicy;
 
 /** No network unless explicitly requested. Config/Manifest are observations, never authorization. */
-export async function doctor(options: { configPath?: string; probeCp?: boolean; cwd?: string } = {}): Promise<DoctorReport> {
+export async function doctor(options: { configPath?: string; probeCp?: boolean; cwd?: string;
+  trustPath?: string; workItem?: { id: string; version: string }; observationPath?: string } = {}): Promise<DoctorReport> {
   const report: DoctorReport = { schema_version: '1.0', kind: 'client_doctor', client: { package: CLIENT_PACKAGE, version: CLIENT_VERSION },
     mode: options.probeCp ? 'cp_readonly_probe' : 'offline', status: 'not_checked', checks: [], authority_verified: false };
   const add = (id: string, status: DoctorStatus, code: string, source: DoctorSource, safe_next_step: string, details?: Details) => {
@@ -52,6 +51,15 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
   };
   let identity: RepositoryIdentity | undefined, manifest: ProjectManifest | undefined, config: ClientConfig | undefined, m: Machine | undefined;
   let fixed: ReturnType<typeof fixedPolicy> | undefined, local: ReturnType<AwhClient['inspectLocalDiagnostics']> | undefined;
+  let approved: ApprovedWorkItem | undefined;
+  const versionedRequested = options.trustPath !== undefined || options.workItem !== undefined || options.observationPath !== undefined;
+  if (versionedRequested) {
+    try {
+      if (!options.trustPath || !options.workItem || options.probeCp) clientFail('profile', 'Versioned prototype requires explicit operator trust/selection and offline mode');
+      approved = loadApprovedWorkItem(options.trustPath, options.workItem);
+      add('policy_source', 'passed', 'operator_pins_and_approvals_match', 'operator_policy', 'Local operator trust root verified; no Provider or shell grant.');
+    } catch (error) { add('policy_source', 'blocked', knownFailure(error), 'operator_policy', REQUEST_PROFILE); }
+  }
   try {
     const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8'));
     if (pkg.name !== CLIENT_PACKAGE) throw new Error();
@@ -61,7 +69,7 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
   add('artifact_provenance', 'not_checked', 'tarball_digest_not_verified', 'not_observed', 'Compare the installed artifact with the owner-supplied SHA-256; package metadata alone is not provenance.');
   try {
     identity = inspectRepository(options.cwd);
-    const supported = PROFILES.some(p => p.repository === identity!.repository);
+    const supported = PROFILES.some(p => p.repository === identity!.repository) || approved?.work_item.repository === identity.repository;
     add('repository', supported ? 'passed' : 'blocked', supported ? 'canonical_root_origin_verified' : 'repository_not_in_static_profiles', 'local_git', supported ? 'Continue read-only diagnosis.' : REQUEST_PROFILE,
       { root_verified: true, origin_verified: true, repository: supported ? identity.repository : '[unsupported]', head: identity.sha, branch: display(identity.ref), dirty: identity.dirty });
     add('worktree', identity.dirty ? 'blocked' : 'passed', identity.dirty ? 'worktree_dirty' : 'worktree_clean', 'local_git', identity.dirty ? 'Preserve local changes; arrange an explicitly authorized clean candidate separately.' : 'Continue read-only diagnosis.');
@@ -85,7 +93,7 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
       add('configuration', 'passed', 'external_config_valid', 'external_config', 'Keep the original endpoint, CA, dedicated credential and namespace unchanged.');
     } catch (error) { config = undefined; add('configuration', 'blocked', knownFailure(error), 'external_config', CONFIGURE); }
   } else add('configuration', options.configPath ? 'not_checked' : 'blocked', options.configPath ? 'repository_unavailable' : 'explicit_config_missing', 'external_config', CONFIGURE);
-  if (manifest && identity) {
+  if (manifest && identity && !versionedRequested) {
     try {
       fixed = fixedPolicy(manifest.profile.ref, config?.profile_version);
       if (fixed.profile.repository !== identity.repository) clientFail('profile', 'Profile and origin disagree');
@@ -101,7 +109,7 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
           { expected_branch: selectWorkflow({ profile: 'future-ui', workflow: 'bootstrap' }).workflow.branch,
             actual_ref: manifest.profile.ref, bootstrap_commands: selectWorkflow({ profile: 'future-ui', workflow: 'bootstrap' }).workflow.verification_commands });
     } catch (error) { fixed = undefined; add('profile', 'blocked', knownFailure(error), 'checked_in_profile', REQUEST_PROFILE); }
-  } else add('profile', 'not_checked', 'manifest_unavailable', 'checked_in_profile', CONFIGURE);
+  } else add('profile', 'not_checked', versionedRequested ? 'versioned_comparison_below' : 'manifest_unavailable', versionedRequested ? 'operator_policy' : 'checked_in_profile', CONFIGURE);
   add('profile_version', 'not_checked', 'effective_approved_version_not_observed', 'not_observed', REQUEST_PROFILE);
   if (config) {
     try {
@@ -138,7 +146,24 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
     add('verification', matches ? 'passed' : 'blocked', matches ? 'recorded_commands_match' : 'recorded_commands_profile_conflict', 'checked_in_profile', matches ? 'Recorded command comparison only; Doctor does not execute or attest product checks.' : REQUEST_PROFILE,
       { expected_commands: fixed.workflow.verification_commands, actual_commands: local.verification_commands.map(displayCommand) });
   } else add('verification', 'not_checked', 'recorded_checks_unavailable', 'local_state', 'Doctor does not execute checks; compare retained verification records with an approved Profile.');
-  if (options.probeCp && config && manifest) {
+  if (approved && manifest && identity) {
+    try {
+      const declared = options.observationPath ? readJson(options.observationPath) as Partial<PolicyFacts> : {};
+      const declaration = versionedPreflight(approved, declared);
+      if (options.observationPath) {
+        report.declared_preflight = declaration;
+        add('declared_bindings', declaration.status, 'untrusted_declarations_compared', 'operator_policy', 'Declarations cannot replace actual Git/Manifest/config facts or approve rights.');
+      }
+      const observed: Partial<PolicyFacts> = { ...declared, repository: identity.repository, branch: identity.ref, profile_ref: manifest.profile.ref,
+        ...(config ? { executor: config.executor_id, ...(config.profile_version ? { profile_version: config.profile_version } : {}) } : {}),
+        ...(local?.run ? { profile_ref: local.run.profile.ref, profile_version: local.run.profile.version } : {}),
+        ...(local?.work_item ? { issue_repository: local.work_item.reference.repository, issue: local.work_item.reference.number } : {}),
+        ...(local?.verification_commands ? { checks: local.verification_commands } : {}) };
+      report.policy_preflight = versionedPreflight(approved, observed);
+      add('versioned_policy', report.policy_preflight.status, 'approved_effective_vs_observed', 'operator_policy', 'Base/check/Issue declarations are observations; Develop only reports data. Deliver requires a separate gate.');
+    } catch (error) { add('versioned_policy', 'blocked', knownFailure(error), 'operator_policy', REQUEST_PROFILE); }
+  }
+  if (options.probeCp && !versionedRequested && config && manifest) {
     try {
       const secret = readCredential(config), ca = readCaCertificate(config);
       const get = (path: string) => requestJson(config!.endpoint, path, secret, 'GET', undefined, ca, { timeoutMs: 3000, maxBytes: 64 * 1024, tlsDiagnostic: true });
@@ -152,11 +177,16 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
         if (Object.keys(response).sort().join(',') !== 'authority_verified,profiles' || !Array.isArray(response.profiles) || response.profiles.length > 256) clientFail('response_schema', 'Invalid Profile envelope');
         const policies = response.profiles.map(p => assertEntity('profile_policy', p)).filter(p => p.ref === manifest!.profile.ref && (!config!.profile_version || p.version === config!.profile_version));
         if (policies.length !== 1) clientFail('profile', 'One observed Profile version required');
-        const observed = policies[0]!, expected = deliveryPolicy(manifest.profile.ref, observed.version);
+        const observed = policies[0]!, expected = observationPolicy(manifest.profile.ref, observed.version);
         const details = { observed_version: display(observed.version), expected_branch: expected.workflow.branch, actual_branch: display(observed.branch.ref),
           expected_commands: expected.workflow.verification_commands, actual_commands: observed.verification.commands.map(displayCommand) };
         try {
-          matchDeliveryPolicy(observed, manifest.profile.ref);
+          const comparison = compareObservedPolicy(observed, manifest.profile.ref);
+          // Preserve the Doctor rule that unregistered CP command text is suppressed.
+          const checksDiff = comparison.differences.find(d => d.field === 'checks');
+          if (checksDiff) checksDiff.observed = observed.verification.commands.map(displayCommand);
+          report.policy_preflight = comparison;
+          if (comparison.status === 'blocked') clientFail('profile', 'Observed policy conflicts with static observation mapping');
           add('cp_profile', 'passed', 'cp_policy_matches_static_mapping', 'control_plane_get', 'Observed CP Registry version is comparison data; effective Work Item approval through #34 remains unverified.', details);
         } catch (error) { add('cp_profile', 'blocked', knownFailure(error), 'control_plane_get', REQUEST_PROFILE, details); }
       } catch (error) { add('cp_profile', 'blocked', knownFailure(error), 'control_plane_get', REQUEST_PROFILE); }
@@ -192,7 +222,9 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
 
 export function formatDoctor(report: DoctorReport): string {
   return [`AWH Doctor ${report.client.version} (${report.mode}): ${report.status}`, ...report.checks.map(c =>
-    `${c.status} ${c.id}: ${c.code} [${c.source}]${c.details ? '\n  ' + JSON.stringify(c.details) : ''}\n  Next: ${c.safe_next_step}`), 'authority_verified=false'].join('\n');
+    `${c.status} ${c.id}: ${c.code} [${c.source}]${c.details ? '\n  ' + JSON.stringify(c.details) : ''}\n  Next: ${c.safe_next_step}`),
+    ...(report.policy_preflight ? ['Effective observation comparison:', formatPreflight(report.policy_preflight)] : []),
+    ...(report.declared_preflight ? ['Untrusted declaration comparison:', formatPreflight(report.declared_preflight)] : []), 'authority_verified=false'].join('\n');
 }
 export function isDoctorReport(value: unknown): value is DoctorReport {
   return !!value && typeof value === 'object' && (value as DoctorReport).kind === 'client_doctor';

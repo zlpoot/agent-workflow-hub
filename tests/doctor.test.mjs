@@ -12,6 +12,8 @@ import { doctor, formatDoctor, CLIENT_VERSION } from '../dist/client/index.js';
 import { machine, initManifest, inspectRepository } from '../dist/client/local.js';
 import { npmEntry, npmEnv } from '../scripts/npm-tool.mjs';
 import { tlsFixture } from './tls-fixture.mjs';
+import { facts, trustedFixture } from './versioned-profile-fixture.mjs';
+import { deliveryPolicy, matchDeliveryPolicy } from '../dist/client/delivery-policy.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url)), cli = join(root,'dist/client/cli.js');
 export const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$)/i.test(key)));
@@ -115,7 +117,7 @@ test('Manifest cannot approve an unknown/cross-repository Profile, and CP versio
     envelope(res,{executors:[]});
   });h.update({endpoint:'http://127.0.0.1:'+server.address().port});
   let report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});assert.equal(check(report,'cp_profile').code,'profile');assert.equal(check(report,'profile_version').status,'not_checked');
-  mode='commands';report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});assert.equal(check(report,'cp_profile').code,'delivery_policy');assert.deepEqual(check(report,'cp_profile').details.actual_commands,['pnpm check']);assert.equal(check(report,'cp_executor').code,'response_binding');
+  mode='commands';report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});assert.equal(check(report,'cp_profile').code,'profile');assert.deepEqual(check(report,'cp_profile').details.actual_commands,['pnpm check']);assert.equal(check(report,'cp_executor').code,'response_binding');
 });
 test('pending Event, journal/lock and recorded check/Work Item mismatches are observations, never execution',async t=>{
   const h=fixture(t);startSession(h,true);let report=await doctor({configPath:h.configPath,cwd:h.repo});assert.equal(check(report,'pending_events').code,'event_ack_pending');assert.equal(check(report,'work_item').status,'passed');
@@ -163,7 +165,7 @@ test('CLI text/JSON share grounded check statuses; help and strict bounded argum
 });
 test('standalone tarball installs offline, exports Doctor, and actual awh bin runs in consumer without Hub checkout',async t=>{
   const h=fixture(t),output=join(h.base,'packages');const packed=spawnSync(process.execPath,[join(root,'scripts/client-pack.mjs'),'--output',output],{cwd:root,env:cleanEnv(),encoding:'utf8',windowsHide:true,timeout:60000});assert.equal(packed.status,0,packed.stderr);
-  const artifact=JSON.parse(packed.stdout);assert.equal(artifact.version,CLIENT_VERSION);assert(artifact.files.includes('dist/client/doctor.js'));assert(artifact.files.includes('doctor.md'));
+  const artifact=JSON.parse(packed.stdout);assert.equal(artifact.version,CLIENT_VERSION);assert(artifact.files.includes('dist/client/doctor.js'));assert(artifact.files.includes('doctor.md'));assert(artifact.files.includes('dist/client/versioned-profile.js'));assert(artifact.files.includes('dist/shared/preflight.js'));assert(artifact.files.includes('versioned-profile.md'));
   const prefix=join(h.base,'installed');mkdirSync(prefix);writeFileSync(join(prefix,'package.json'),'{"private":true}');
   const installed=spawnSync(process.execPath,[npmEntry(),'install','--prefix',prefix,'--offline','--ignore-scripts','--no-audit','--no-fund',artifact.artifact],{cwd:prefix,env:npmEnv(join(h.base,'cache')),encoding:'utf8',windowsHide:true,timeout:60000});assert.equal(installed.status,0,installed.stderr);
   const packageRoot=join(prefix,'node_modules/@zlpoot/awh-client'),installedCli=join(packageRoot,'dist/client/cli.js'),before=snapshot(h.repo);
@@ -173,4 +175,30 @@ test('standalone tarball installs offline, exports Doctor, and actual awh bin ru
   assert.equal(invoked.status,2);assert.equal(JSON.parse(invoked.stdout).kind,'client_doctor');
   const metadataPath=join(packageRoot,'package.json'),metadata=JSON.parse(readFileSync(metadataPath));metadata.version='0.4.4';writeFileSync(metadataPath,JSON.stringify(metadata));
   const stale=JSON.parse((await runCli(installedCli,['--config',h.configPath,'doctor','--json'],h.repo)).stdout);assert.equal(check(stale,'installation').code,'standalone_metadata_conflict');
+});
+test('CP observation accepts non-Deliver hub/c1i without granting Deliver; mismatches still block',async t=>{
+  const h=fixture(t,{repository:'zlpoot/agent-workflow-hub',ref:'hub/c1i',branch:'codex/c1i-doctor-prototype'});let wrong=false;
+  const example=JSON.parse(readFileSync(join(root,'examples/protocol/webskill.json')));
+  const policy={...example.profile_policy,ref:'hub/c1i',repository:'zlpoot/agent-workflow-hub',base:'main',branch:{mode:'fixed',ref:'codex/c1i-doctor-prototype'},verification:{commands:['pnpm build','node --test tests/doctor.test.mjs','node --test tests/client.test.mjs']}};
+  const calls=[],server=await mock(t,(req,res)=>{calls.push(req.method);if(req.url.startsWith('/v1/projects/'))return envelope(res,{project:{schema_version:'1.0',kind:'project',id:h.manifest.project.id,repository:h.manifest.project.repository,profile_ref:h.manifest.profile.ref}});
+    if(req.url.startsWith('/v1/profiles'))return envelope(res,{profiles:[wrong?{...policy,branch:{mode:'fixed',ref:'codex/wrong'}}:policy]});envelope(res,{executors:[]});});
+  h.update({endpoint:'http://127.0.0.1:'+server.address().port});const before=snapshot(h.base);
+  let report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});assert.equal(check(report,'cp_profile').status,'passed');assert.equal(report.policy_preflight.provider_scope,'not_checked');assert.equal(report.policy_preflight.deliver,'blocked');
+  assert.throws(()=>deliveryPolicy('hub/c1i'));assert.throws(()=>matchDeliveryPolicy(policy,'hub/c1i'));
+  wrong=true;report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});assert.equal(check(report,'cp_profile').status,'blocked');assert(calls.every(x=>x==='GET'));assert.deepEqual(snapshot(h.base),before);
+});
+test('Doctor diagnoses new approved business task without fixed mapping and suppresses untrusted policy fallback',async t=>{
+  const h=fixture(t,{repository:facts.repository,ref:facts.profile_ref,branch:facts.branch});h.update({executor_id:facts.executor,profile_version:'v1'});
+  // Fresh fixture identity has no compatible existing Session after explicit executor change; that remains a separate blocker.
+  const trust=join(h.base,'operator');mkdirSync(trust);const f=trustedFixture(trust),observationPath=join(h.repo,'observations.json');writeFileSync(observationPath,JSON.stringify(facts));
+  const options={configPath:h.configPath,cwd:h.repo,trustPath:f.path,workItem:f.selection,observationPath};const before=snapshot(h.base);
+  let report=await doctor(options);assert.equal(check(report,'policy_source').status,'passed');assert.equal(check(report,'versioned_policy').status,'passed');assert.equal(report.policy_preflight.approved_effective.issue,901);assert.equal(check(report,'app_scope').status,'not_checked');assert.deepEqual(snapshot(h.base),before);
+  writeFileSync(observationPath,JSON.stringify({...facts,issue:902}));report=await doctor(options);assert.equal(report.policy_preflight.differences.find(d=>d.field==='issue').status,'blocked');assert(formatDoctor(report).includes('approved=901 observed=902'));
+  writeFileSync(observationPath,JSON.stringify({...facts,repository:'zlpoot/other'}));report=await doctor(options);assert.equal(check(report,'declared_bindings').status,'blocked');assert.equal(report.declared_preflight.differences.find(d=>d.field==='repository').observed,'zlpoot/other');
+  report=await doctor({...options,trustPath:join(h.repo,'observations.json')});assert.equal(check(report,'policy_source').status,'blocked');assert.equal(check(report,'profile').status,'not_checked');assert.equal(report.policy_preflight,undefined);
+  let cpCalls=0;const cp=await mock(t,(_req,res)=>{cpCalls++;envelope(res,{});});h.update({endpoint:'http://127.0.0.1:'+cp.address().port});
+  report=await doctor({...options,probeCp:true});assert.equal(check(report,'policy_source').status,'blocked');assert.equal(cpCalls,0);
+  const args=['--config',h.configPath,'doctor','--json','--policy-trust',f.path,'--work-item',f.selection.id,'--work-item-version','v1','--observations',observationPath];
+  const json=await runCli(cli,args,h.repo);assert.equal(JSON.parse(json.stdout).kind,'client_doctor');
+  assert.equal((await runCli(cli,['doctor','--policy-trust',f.path,'--work-item',f.selection.id],h.repo)).code,2);
 });

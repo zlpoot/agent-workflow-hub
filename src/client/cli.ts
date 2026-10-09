@@ -12,7 +12,7 @@ import { doctor, formatDoctor, isDoctorReport } from './doctor.js';
 
 export async function main(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
-  if (args.length === 1 && args[0] === '--help') return { commands: ['doctor [--json] [--probe-cp]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
+  if (args.length === 1 && args[0] === '--help') return { commands: ['doctor [--json] [--probe-cp] [--policy-trust <external-file> --work-item <id> --work-item-version <version> --observations <json-file>]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
     'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry',
     'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry',
     'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>'], event_types: CLIENT_EVENT_TYPES,
@@ -24,11 +24,18 @@ export async function main(args: string[]): Promise<unknown> {
   }
   const [command, ...rest] = args, options = new Map<string, string>();
   if (command === 'doctor') {
-    if (rest.length === 1 && rest[0] === '--help') return { usage: 'awh [--config <absolute-external-json-file>] doctor [--json] [--probe-cp]',
+    if (rest.length === 1 && rest[0] === '--help') return { usage: 'awh [--config <absolute-external-json-file>] doctor [--json] [--probe-cp] [--policy-trust <absolute-external-file> --work-item <id> --work-item-version <version> --observations <json-file>]',
       statuses: ['passed','blocked','not_checked'], read_only: true, offline_default: true, authority_verified: false };
-    if (rest.some(arg => !['--json','--probe-cp'].includes(arg)) || new Set(rest).size !== rest.length)
-      clientFail('arguments', 'Doctor accepts only --json and --probe-cp; no arbitrary inputs or execution');
-    return doctor({ configPath, probeCp: rest.includes('--probe-cp') });
+    for (let i = 0; i < rest.length; i++) {
+      const key = rest[i]!;
+      if (!['--json','--probe-cp','--policy-trust','--work-item','--work-item-version','--observations'].includes(key) || options.has(key)) clientFail('arguments','Unknown or duplicate Doctor option');
+      if (key === '--json' || key === '--probe-cp') { options.set(key,'true'); continue; }
+      const value = rest[++i]; if (!value || value.startsWith('--')) clientFail('arguments','Missing Doctor option value'); options.set(key,value);
+    }
+    const selected = options.has('--work-item') || options.has('--work-item-version');
+    if (selected && (!options.has('--work-item') || !options.has('--work-item-version'))) clientFail('arguments','Explicit Work Item ID and version required');
+    return doctor({ configPath, probeCp: options.has('--probe-cp'), trustPath: options.get('--policy-trust'), observationPath: options.get('--observations'),
+      ...(selected ? { workItem: { id: options.get('--work-item')!, version: options.get('--work-item-version')! } } : {}) });
   }
   const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: ['--run'], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--issue','--title','--body','--hold-draft','--retry','--recover-from-run'], 'link-revision': ['--run','--pr','--head','--evidence-comment','--retry'],
     'reconcile-publication':['--revision'], 'resume-publication':['--revision','--authorization-comment'] };
