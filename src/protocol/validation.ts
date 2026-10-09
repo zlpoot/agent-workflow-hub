@@ -52,6 +52,14 @@ export function validateEntity<K extends keyof ProtocolEntities>(kind: K, value:
     errors.push(...(validator.errors ?? []).map(e => ({ path: '$' + e.instancePath, reason: e.message ?? 'Invalid schema' })));
     return result();
   }
+  if (kind === 'profile_policy') {
+    const policy = value as unknown as ProtocolEntities['profile_policy'];
+    if (policy.branch.mode === 'issue_prefix' && (policy.branch.ref !== 'codex/awh-task-' ||
+        policy.repository !== 'zlpoot/future-ui' || policy.ref !== 'future-ui/c1c-acceptance' || policy.version !== 'v02-repeatable-v1' ||
+        policy.base !== 'main' || !policy.executor_restrictions ||
+        JSON.stringify(policy.executor_restrictions.executor_ids) !== JSON.stringify(['c1c-future-ui-windows']) || policy.executor_restrictions.machine_ids.length !== 1))
+      errors.push({ path: '$.branch', reason: 'Only the trusted Windows Future UI Issue template is supported' });
+  }
   if (kind === 'run') {
     const run = value as unknown as ProtocolEntities['run'];
     const require = (condition: boolean, path: string, reason: string) => { if (!condition) errors.push({ path, reason }); };
@@ -98,6 +106,11 @@ export function validateBindings(input: unknown): ProtocolValidation {
   require(workItem.project_id === project.id && run.project_id === project.id && run.work_item_id === workItem.id, 'run.work_item_id');
   require(run.profile.ref === policy.ref && run.profile.version === policy.version, 'run.profile');
   require(run.executor_id === executor.id && run.machine_id === executor.machine.id, 'run.executor_id');
+  if (policy.branch.mode === 'issue_prefix') {
+    require(run.source.ref === policy.branch.ref + workItem.reference.number, 'run.source.ref');
+    require(workItem.reference.repository === policy.repository, 'work_item.reference.repository');
+    require(executor.machine.platform === 'windows', 'executor.machine.platform');
+  }
   if (policy.executor_restrictions) {
     require(policy.executor_restrictions.executor_ids.includes(executor.id), 'profile_policy.executor_restrictions.executor_ids');
     require(policy.executor_restrictions.machine_ids.includes(executor.machine.id), 'profile_policy.executor_restrictions.machine_ids');

@@ -1,5 +1,7 @@
 # agent-workflow-hub
 
+Current v0.2 candidate: [Hub #41](https://github.com/zlpoot/agent-workflow-hub/issues/41), Client 0.4.0 and the [Windows repeatable workflow](docs/repeatable.md). Live #90 follows the original CP compatibility and unified Review dependencies.
+
 当前候选：[#39 v0.1 MVP](https://github.com/zlpoot/agent-workflow-hub/issues/39)。Windows 单机、静态可信 Profile、现有 CP 与安装型 Client；`deliver → timeline → sync` 串联 GitHub 交付和实际审查/合并/关闭观察，见 [v0.1 使用说明](docs/mvp.md)。动态 Onboarding 不再是首版前置条件。
 
 ## C1-G Dashboard read-only MVP

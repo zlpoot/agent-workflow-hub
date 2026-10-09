@@ -76,7 +76,7 @@ function diagnostics(run: Run, view: DashboardReadView) {
     JSON.stringify(observedChecks.map(check => check.command)) === JSON.stringify(expected) && observedChecks.every(check => check.exit_code === 0);
   const comparison = (status: 'passed' | 'blocked' | 'not_checked', observed: unknown, expected: unknown, provenance: string, hint: string) =>
     ({ status, observed, expected, provenance, action_hint: hint, authority_verified: false as const });
-  return { branch: comparison(policy ? run.source.ref === policy.branch.ref ? 'passed' : 'blocked' : 'not_checked', run.source.ref, policy?.branch.ref ?? null,
+  return { branch: comparison(policy ? run.source.ref === (policy.branch.mode === 'issue_prefix' ? policy.branch.ref + item?.reference.number : policy.branch.ref) ? 'passed' : 'blocked' : 'not_checked', run.source.ref, policy?.branch.ref ?? null,
       'client_source_declaration_vs_trusted_policy', 'Confirm the real branch against the approved Policy; do not switch active worktrees automatically.'),
     checks: comparison(observedChecks ? match ? 'passed' : 'blocked' : 'not_checked', observedChecks, expected, 'runtime_verification_declaration', 'Verify exact source SHA and the ordered checks through Builder evidence.'),
     work_item: comparison('not_checked', item?.reference ?? null, null, 'runtime_binding_only', 'Confirm the selected Issue against the approved per-work-item Policy.'),

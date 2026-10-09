@@ -11,12 +11,12 @@ import { readFileSync, lstatSync } from 'node:fs';
 export async function main(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
   if (args.length === 1 && args[0] === '--help') return { commands: ['init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
-    'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry'], event_types: CLIENT_EVENT_TYPES,
+    'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry'], event_types: CLIENT_EVENT_TYPES,
     configuration: '--config <absolute-external-json-file> before command or AWH_CLIENT_CONFIG', deliver: 'fixed Builder policy; explicit event-only retry', authority_verified: false };
   let configPath = process.env.AWH_CLIENT_CONFIG;
   if (args[0] === '--config') { configPath = args[1]; args = args.slice(2); }
   const [command, ...rest] = args, options = new Map<string, string>();
-  const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: [], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--title','--body','--hold-draft','--retry'] };
+  const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: ['--run'], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--issue','--title','--body','--hold-draft','--retry','--recover-from-run'] };
   if (!command || !Object.hasOwn(allowed, command)) clientFail('arguments', 'Unsupported Client command; no arbitrary execution');
   for (let i = 0; i < rest.length; i += 2) {
     const key = rest[i]!; if (!allowed[command]!.includes(key) || options.has(key)) clientFail('arguments', 'Unknown or duplicate Client option');
@@ -37,11 +37,12 @@ export async function main(args: string[]): Promise<unknown> {
   const client = new AwhClient(configPath);
   if (command === 'deliver') {
     if (options.has('--retry')) return client.retryDelivery();
+    if (options.has('--issue') && (!/^[1-9]\d*$/.test(options.get('--issue')!) || !Number.isSafeInteger(Number(options.get('--issue'))))) clientFail('arguments', 'deliver requires a positive safe Issue number');
     let body: string;
     try { const stat = lstatSync(options.get('--body')!); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16000) throw new Error(); body = new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(options.get('--body')!)); } catch { return clientFail('file', 'PR body must be a bounded regular UTF-8 file (contents suppressed)'); }
-    return deliver(client, { title: options.get('--title')!, body, holdDraft: options.has('--hold-draft') });
+    return deliver(client, { title: options.get('--title')!, body, holdDraft: options.has('--hold-draft'), ...(options.has('--issue') ? { issue: Number(options.get('--issue')) } : {}), ...(options.has('--recover-from-run') ? { recoverFromRun: options.get('--recover-from-run')! } : {}) });
   }
-  if (command === 'timeline') return client.timeline(); if (command === 'sync') return client.syncDelivery();
+  if (command === 'timeline') return client.timeline(options.get('--run')); if (command === 'sync') return client.syncDelivery();
   if (command === 'register') return client.register(); if (command === 'status') return client.status();
   if (command === 'start') return client.start(Number(options.get('--issue')));
   if (command === 'event') return client.event(options.get('--retry') ? null : options.get('--type')!, options.has('--data') ? readJson(options.get('--data')!) : undefined);

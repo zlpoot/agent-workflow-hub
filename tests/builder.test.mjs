@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectBuilder, createJwt, BRANCH, REPO } from '../dist/builder.js';
-import { PROFILES, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO } from '../dist/profiles.js';
+import { PROFILES, taskBinding, REPEATABLE_VERSION, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO } from '../dist/profiles.js';
 
 // Ephemeral key generated in memory; no real credential and no saved key fixture.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -1311,7 +1311,7 @@ test('transport CLI secret raw never appears on either stream for all three fixe
 });
 
 test('fixed receive-pack URL/ref and WebSkill-only write token across all existing Profiles', async () => {
-  for (const profile of PROFILES) for (const workflow of profile.workflows) {
+  for (const profile of PROFILES) for (const workflow of profile.workflows.filter(w => w.id !== 'repeatable-docs')) {
     const f = fake({ repository: profile.repository, branch: workflow.branch, installed: selectedSets[3] });
     await (await connectBuilder(f.deps, { profile: profile.id, workflow: workflow.id })).push();
     const [read, dry, push] = transportCalls(f);
@@ -1452,7 +1452,7 @@ test('ref-state gate: token expiry during either ref read, JSON decode or after 
 });
 
 test('ref-state gate: each Profile always uses its fixed repository/feature branch and single write token', async () => {
-  for (const profile of PROFILES) for (const workflow of profile.workflows) {
+  for (const profile of PROFILES) for (const workflow of profile.workflows.filter(w => w.id !== 'repeatable-docs')) {
     const f = refGate([absentRef, absentRef], { repository: profile.repository, branch: workflow.branch, installed: selectedSets[3] });
     const b = await connectBuilder(f.deps, { profile: profile.id, workflow: workflow.id });
     assert.equal(b.readFeatureRefState, undefined); assert.equal(b.refState, undefined);
@@ -1512,4 +1512,65 @@ test('fixed MVP selections preserve separate repositories, work items and docs-o
   assert.deepEqual(hub.workflow.work_item,{repo:HUB_REPO,issue:39});assert.equal(hub.workflow.branch,'codex/v01-mvp');
   assert.deepEqual(future.workflow.work_item,{repo:FUTURE_REPO,issue:88});assert.equal(future.workflow.branch,'codex/awh-v01-acceptance');
   assert.deepEqual(future.workflow.verification_commands,['git diff --check origin/main...HEAD']);assert(!future.workflow.bootstrap_paths.includes('package.json'));
+});
+
+const repeatableBinding = () => taskBinding({ repository:FUTURE_REPO,issue:90,branch:'codex/awh-task-90',source_sha:head,
+  profile_ref:'future-ui/c1c-acceptance',profile_version:REPEATABLE_VERSION,executor_id:'c1c-future-ui-windows',machine_id:'fixture-machine' });
+function repeatableFake({issue={},paths=['docs/management/awh-repeatable-workflow.md'],readPermissions=null,consumed=false}={}) {
+  const f=fake({repository:FUTURE_REPO,branch:'codex/awh-task-90',installed:[REPO,FUTURE_REPO],response:(url,o,data)=>{
+    if(url.endsWith('/access_tokens')){const q=JSON.parse(o.body);return {...data,permissions:{...q.permissions,metadata:'read',...(q.permissions.contents==='read'&&readPermissions?readPermissions:{})}};}
+    if(url.endsWith('/issues/90'))return {number:90,state:'open',html_url:'https://github.com/zlpoot/future-ui/issues/90',...issue};
+    if(url.endsWith('/git/ref/heads/main'))return {object:{sha:base}};
+    if(url.includes('/compare/'))return {total_commits:1,files:paths.map(filename=>({filename,status:'added'}))};
+    return data;
+  }});
+  const spawn=f.deps.spawn,fetch=f.deps.fetch;
+  f.deps.spawn=(command,args,...rest)=>args[0]==='rev-parse'&&args[1]==='HEAD'?{status:0,stdout:head}:args[0]==='rev-parse'&&args[1]==='origin/main'?{status:0,stdout:base}:args[0]==='diff'?{status:0,stdout:paths.join('\0')+'\0'}:spawn(command,args,...rest);
+  f.deps.fetch=async(url,o)=>{if(url.endsWith('/git/ref/heads/codex/awh-task-90')&&!consumed){f.requests.push({url,...o});return new Response('{}',{status:404});}return fetch(url,o);};
+  return f;
+}
+test('v0.2 App Issue inspection uses single-repo read-only token before write mint; canonical branch push once',async()=>{
+  const f=repeatableFake(),b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding());
+  assert.equal(b.preflight().issue_state,'open');const tokens=f.requests.filter(r=>r.url.endsWith('/access_tokens')).map(r=>JSON.parse(r.body));
+  assert.deepEqual(tokens,[{permissions:{metadata:'read'}},{repositories:['future-ui'],permissions:{contents:'read',issues:'read',pull_requests:'read'}},{repositories:['future-ui'],permissions:{contents:'write',issues:'write',pull_requests:'write'}}]);
+  const issue=f.requests.find(r=>r.url.endsWith('/issues/90'));assert.equal(issue.headers.Authorization,'Bearer fake-installation-secret');
+  await b.push();assert(f.git.some(r=>r[1].includes('HEAD:refs/heads/codex/awh-task-90')));
+});
+for(const options of [{issue:{pull_request:{url:'foreign'}}},{issue:{number:91}},{issue:{html_url:'https://github.com/zlpoot/webskill/issues/90'}},{paths:['src/product.ts']},{readPermissions:{administration:'write'}}])
+ test('v0.2 unsafe Issue/path/read permissions fail before write token and Git writes '+JSON.stringify(options),async()=>{
+  const f=repeatableFake(options);await assert.rejects(connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding()));
+  assert(!f.requests.some(r=>r.url.endsWith('/access_tokens')&&JSON.parse(r.body).permissions.contents==='write'));assert(!f.git.some(r=>r[1].includes('push')));
+ });
+test('v0.2 consumed remote Task branch refuses replay before transport; old fixed policy remains push-compatible',async()=>{
+  const f=repeatableFake({consumed:true}),b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding());
+  await assert.rejects(b.push(),/consumed/);assert(!f.git.some(r=>r[1].includes('push')));
+});
+
+test('v0.2 post-merge sync uses read-only token on original Task even after main advances; mutations fail',async()=>{
+ const f=repeatableFake({issue:{state:'closed'},paths:['src/new-main-product.ts'],consumed:true}),fetch=f.deps.fetch;
+ f.deps.fetch=async(u,o)=>{
+  if(u.includes('/reviews?')){f.requests.push({url:u,...o});return new Response(JSON.stringify([{id:91,commit_id:head,user:{login:'native-reviewer',type:'User'},state:'APPROVED'}]));}
+  const response=await fetch(u,o);
+  if(u.endsWith('/pulls/5'))return new Response(JSON.stringify({...await response.json(),state:'closed',merged:true,merge_commit_sha:base}));
+  return response;
+ };
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'observe');
+ assert.equal(b.preflight().permissions.contents,'read');const result=await b.readLifecycle(5,head);assert(result.merged&&result.issue_closed&&result.review.subject_sha===head);
+ assert.equal(f.requests.filter(r=>r.url.endsWith('/access_tokens')).length,2);assert(!f.requests.some(r=>r.url.endsWith('/access_tokens')&&JSON.parse(r.body).permissions.contents==='write'));
+ await assert.rejects(b.push(),/cannot push/);await assert.rejects(b.createComment(5,'Mutation prohibited'),/cannot mutate/);assert(!f.git.some(r=>r[1].includes('diff')||r[1].includes('push')));
+});
+
+test('0.4.1 recovery inspection checks docs, open Issue, absent ref and all-state PRs with read-only scope; refuses mutations',async()=>{
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{if(u.includes('/pulls?state=all&head=')){f.requests.push({url:u,...o});return new Response('[]');}return fetch(u,o);};
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'recover');
+ assert.deepEqual(b.preflight().recovery_inspection,{remote_branch_absent:true,same_branch_pr_absent:true});assert.equal(b.preflight().permissions.contents,'read');
+ const tokens=f.requests.filter(x=>x.url.endsWith('/access_tokens')).map(x=>JSON.parse(x.body));assert.deepEqual(tokens,[{permissions:{metadata:'read'}},{repositories:['future-ui'],permissions:{contents:'read',issues:'read',pull_requests:'read'}}]);
+ assert(f.requests.some(x=>x.url.endsWith('/git/ref/heads/codex/awh-task-90')));assert(f.requests.some(x=>x.url.endsWith('/pulls?state=all&head=zlpoot%3Acodex%2Fawh-task-90&per_page=100&page=1')));
+ await assert.rejects(b.push(),/cannot push/);await assert.rejects(b.createComment(5,'Forbidden'),/cannot mutate/);await assert.rejects(b.createPR('Forbidden','Forbidden'),/cannot mutate/);assert(!f.git.some(x=>x[1].includes('push')));
+});
+for(const drift of ['remote-ref','existing-pr','malformed-pr-list','closed-issue','product-path','broad-read-token','ref-network','pr-network'])test('0.4.1 read-only recovery inspector refuses '+drift,async()=>{
+ const f=repeatableFake({...drift==='remote-ref'?{consumed:true}:{},...drift==='closed-issue'?{issue:{state:'closed'}}:{},...drift==='product-path'?{paths:['src/product.ts']}:{},...drift==='broad-read-token'?{readPermissions:{contents:'write'}}:{}}),fetch=f.deps.fetch;
+ f.deps.fetch=async(u,o)=>{if(drift==='ref-network'&&u.endsWith('/git/ref/heads/codex/awh-task-90'))throw Error('Fixture upstream secret');if(u.includes('/pulls?state=all&head=')){f.requests.push({url:u,...o});if(drift==='pr-network')throw Error('Fixture upstream secret');return new Response(JSON.stringify(drift==='existing-pr'?[{number:99}]:drift==='malformed-pr-list'?{}:[]));}return fetch(u,o);};
+ await assert.rejects(connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'recover'));
+ assert(!f.requests.some(x=>x.url.endsWith('/access_tokens')&&JSON.parse(x.body).permissions.contents==='write'));assert(!f.git.some(x=>x[1].includes('push')));
 });

@@ -3,7 +3,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { relative, isAbsolute, dirname, join } from 'node:path';
 import { validateHandoff } from './validator.js';
-import { allowedInstallation, selectWorkflow, HUB_REPO, type BuilderSelection } from './profiles.js';
+import { allowedInstallation, selectWorkflow, bindWorkflow, HUB_REPO, type TaskBinding, type BuilderSelection } from './profiles.js';
 
 export const REPO = HUB_REPO;
 export const BRANCH = selectWorkflow().workflow.branch;
@@ -62,8 +62,9 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
 }
 
 // Returns only fixed Builder operations. Credentials and generic API requests stay in this closure.
-export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection) {
-  const { profile, workflow } = selectWorkflow(selection);
+export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' = 'deliver') {
+  if (!['deliver','observe','recover'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Task recovery or lifecycle observation supports read-only mode');
+  const { profile, workflow } = bindWorkflow(selection, binding);
   const REPO = profile.repository, BRANCH = workflow.branch, ROOT = `/repos/${REPO}`;
   const d = { ...defaults, ...overrides };
   const appId = d.env.AWH_GITHUB_APP_ID;
@@ -183,7 +184,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       if (e instanceof BuilderError) throw e;
       return fail('GitHub request failed (network, timeout, redirect or invalid JSON; details suppressed)');
     }
-    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length)))) fail('Invalid GitHub response');
+    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && (mode === 'recover' && path === `${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1` || path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length))))) fail('Invalid GitHub response');
     return value as Json;
   };
   const app = await request('/app', jwt);
@@ -218,9 +219,42 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     fail('Installation selected repository set is not allowed');
   const repositoryNames = (repositories.repositories as { full_name: string }[]).map(r => r.full_name);
   if (!repositoryNames.includes(REPO)) fail('Selected Profile repository is not installed; stop at Human Gate');
-  const { token, expiry } = await mint(true);
+  let issueState: string | undefined;
+  let observer: { token: string; expiry: number } | undefined;
+  if (binding) {
+    // Ordinary Issue identity is read with a single-repository read-only token before minting writes.
+    const permissions = { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' };
+    const read = await request('/app/installations/' + inst.id + '/access_tokens', jwt, 'POST',
+      { repositories: [REPO.split('/')[1]], permissions: { contents: 'read', issues: 'read', pull_requests: 'read' } });
+    if (typeof read.token !== 'string' || !read.token || !equalPermissions(read.permissions, permissions) ||
+        !Array.isArray(read.repositories) || read.repositories.length !== 1 || read.repositories[0]?.full_name !== REPO ||
+        !Number.isFinite(Date.parse(read.expires_at)) || Date.parse(read.expires_at) <= d.now() || Date.parse(read.expires_at) > d.now() + 3660000)
+      fail('Task read-only token scope, permissions or expiry mismatch');
+    secrets.push(read.token); observer = { token: read.token, expiry: Date.parse(read.expires_at) };
+    const issue = await request(ROOT + '/issues/' + binding.issue, read.token);
+    if (issue.number !== binding.issue || issue.pull_request || !['open','closed'].includes(issue.state) ||
+        issue.html_url !== 'https://github.com/' + REPO + '/issues/' + binding.issue)
+      fail('Task must bind an ordinary Issue in the selected repository');
+    issueState = issue.state;
+    if (mode !== 'observe') {
+    if (issue.state !== 'open') fail('New Task delivery requires an open ordinary Issue');
+    const main = await request(ROOT + '/git/ref/heads/' + profile.base, read.token);
+    if (!sha(main.object?.sha)) fail('Invalid Task baseline');
+    const baseline = d.spawn('git', ['rev-parse', 'origin/main'], { cwd: root, env: gitEnvironment(d.env, root), encoding: 'utf8', timeout: 10000 });
+    const changed = d.spawn('git', ['diff', '--no-ext-diff', '--name-only', '-z', main.object.sha, 'HEAD', '--'], { cwd: root, env: gitEnvironment(d.env, root), encoding: 'utf8', timeout: 10000 });
+    const paths = changed.stdout.split('\0').filter(Boolean);
+    if (baseline.status !== 0 || baseline.stdout.trim() !== main.object.sha || changed.status !== 0 || !paths.length || paths.some(p => !workflow.bootstrap_paths!.includes(p)))
+      fail('Task docs-only candidate or trusted origin/main baseline mismatch; no verification or write token authorized');
+    }
+    const head = d.spawn('git', ['rev-parse', 'HEAD'], { cwd: root, env: gitEnvironment(d.env, root), encoding: 'utf8', timeout: 10000 });
+    const branch = d.spawn('git', ['branch', '--show-current'], { cwd: root, env: gitEnvironment(d.env, root), encoding: 'utf8', timeout: 10000 });
+    if (head.status !== 0 || branch.status !== 0 || head.stdout.trim() !== binding.source_sha || branch.stdout.trim() !== binding.branch)
+      fail('Task binding differs from the real Git branch or HEAD');
+  }
+  const { token, expiry } = mode !== 'deliver' ? observer! : await mint(true);
   const live = () => { if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
-  const call = (path: string, method = 'GET', body?: unknown) => { live(); return request(path, token, method, body); };
+  const writable = () => { if (mode !== 'deliver') fail('Lifecycle observation cannot mutate GitHub'); };
+  const call = (path: string, method = 'GET', body?: unknown) => { live(); if (mode !== 'deliver' && method !== 'GET') fail('Lifecycle observation cannot mutate GitHub'); return request(path, token, method, body); };
   // No caller ref/path: independently read only this workflow's feature branch.
   // null means controlled ABSENT; PRESENT is a validated commit SHA.
   const readFeatureRefState = async (): Promise<string | null> => {
@@ -277,10 +311,16 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   };
   const readComment = async (number: number, comment: number) =>
     commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`), number);
+  if (mode === 'recover') {
+    if (await readFeatureRefState() !== null) fail('Recovery Task branch already exists remotely');
+    const prs = await call(`${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1`);
+    if (!Array.isArray(prs) || prs.length !== 0) fail('Recovery requires no PR on the canonical Task branch');
+  }
   return Object.freeze({
     preflight: () => ({ repo: REPO, app_id: Number(appId), installation_id: inst.id as number, actor,
-      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: { ...PERMISSIONS } }),
+      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: mode !== 'deliver' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : { ...PERMISSIONS }, ...(binding ? { task_binding: binding, issue_state: issueState } : {}), ...(mode === 'recover' ? { recovery_inspection: { remote_branch_absent: true as const, same_branch_pr_absent: true as const } } : {}) }),
     push: async () => {
+      if (mode !== 'deliver') fail('Lifecycle observation cannot push');
       live();
       const inspectEnv = gitEnvironment(d.env, root);
       const env = { ...inspectEnv };
@@ -360,6 +400,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       };
       const url = `https://github.com/${REPO}.git`;
       const before = await readFeatureRefState();
+      if (binding && before !== null) fail('Task branch is already consumed; provider writes cannot be repeated');
       live();
       transport('authenticated_read_probe', ['ls-remote', '--exit-code', url, `refs/heads/${profile.base}`]);
       live();
@@ -371,6 +412,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return { pushed: BRANCH, actor };
     },
     createPR: async (title: string, body: string) => {
+      writable();
       const safeTitle = safeText(title), safeBody = safeText(body);
       if (workflow.bootstrap_paths) {
         const baseRef = await call(`${ROOT}/git/ref/heads/${profile.base}`);
@@ -384,13 +426,14 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return p;
     },
     updatePR: async (number: number, title: string, body: string) => {
+      writable();
       await readPR(number);
       return prSummary(await call(`${ROOT}/pulls/${id(number)}`, 'PATCH', { title: safeText(title), body: safeText(body) }));
     },
     readPR,
     // Read-only closeout: never submit Review, merge or Issue mutations.
     readLifecycle: async (number: number, expectedHead: string) => {
-      if (!sha(expectedHead)) fail('Invalid expected head');
+      if (!sha(expectedHead) || binding && expectedHead !== binding.source_sha) fail('Invalid expected head');
       const inspect = (p: Json) => {
         if (p.number !== id(number) || p.user?.login !== actor || p.user?.type !== 'Bot' ||
             p.head?.sha !== expectedHead || p.head?.ref !== BRANCH || p.base?.ref !== profile.base ||
@@ -437,10 +480,12 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         changes_requested: blocked, authority_verified: false as const };
     },
     createComment: async (number: number, body: string) => {
+      writable();
       await readPR(number);
       return commentSummary(await call(`${ROOT}/issues/${id(number)}/comments`, 'POST', { body: safeText(body) }), number);
     },
     editComment: async (number: number, comment: number, body: string) => {
+      writable();
       await readPR(number); await readComment(number, comment);
       return commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`, 'PATCH', { body: safeText(body) }), number);
     },
@@ -448,6 +493,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     // Adapter may lose observation connectivity after a real Ready mutation. Restore and read back
     // this same App-owned, fixed-workflow candidate; never announce an uncertain delivery as Ready.
     restoreDraft: async (number: number, expectedHead: string) => {
+      writable();
       const p = await readPR(number);
       if (!sha(expectedHead) || p.head !== expectedHead) fail('Draft restoration exact head mismatch');
       if (!p.draft) {
@@ -462,6 +508,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return final;
     },
     ready: async (number: number, expectedHead: string, record: unknown, comment: number) => {
+      writable();
       const validation = validateHandoff(record, expectedHead);
       if (!validation.ready_claim_valid) fail('Confirmed Handoff validation failed');
       const handoff = record as import('./validator.js').BuilderHandoff;
@@ -470,6 +517,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       if (handoff.verification.checks.length !== workflow.verification_commands.length ||
         handoff.verification.checks.some((c, i) => c.command !== workflow.verification_commands[i]))
         fail('Handoff verification commands do not match selected Profile workflow');
+      if (binding && expectedHead !== binding.source_sha) fail('Task Handoff source mismatch');
       const p = await readPR(number);
       if (p.head !== expectedHead || p.base !== handoff.candidate.base_sha) fail('Remote PR version mismatch');
       const c = await readComment(number, comment);
@@ -478,6 +526,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       try { published = JSON.parse(blocks[0]?.[1] ?? ''); } catch { fail('Published Handoff JSON missing'); }
       if (!c.body.startsWith('AWH-HANDOFF v0.1\n') || JSON.stringify(published) !== JSON.stringify(record) ||
         !c.body.includes(JSON.stringify(validation))) fail('Published Handoff or CLI result mismatch');
+      if (binding && !c.body.includes('AWH Task Binding v0.2\n' + JSON.stringify({ ...binding, pull_request: number }))) fail('Published Task binding mismatch');
       for (const ref of handoff.verification.evidence_refs) {
         const match = ref.match(new RegExp(`^https://github\\.com/${REPO}/pull/${number}#issuecomment-(\\d+)$`));
         if (!match || Number(match[1]) === comment) fail('Evidence must reference a separate Builder comment on this PR');

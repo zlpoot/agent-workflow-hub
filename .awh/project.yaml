@@ -3,4 +3,4 @@ project:
   id: "hub"
   repository: "zlpoot/agent-workflow-hub"
 profile:
-  ref: "hub/v01-mvp"
+  ref: "hub/v02-mvp"

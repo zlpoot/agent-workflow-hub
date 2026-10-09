@@ -57,7 +57,10 @@
       "properties": {
         "schema_version": { "const": "1.0" }, "kind": { "const": "profile_policy" }, "ref": { "$ref": "#/$defs/profile_ref" }, "version": { "$ref": "#/$defs/id" },
         "repository": { "$ref": "#/$defs/repository" }, "base": { "$ref": "#/$defs/ref" },
-        "branch": { "type": "object", "additionalProperties": false, "required": ["mode", "ref"], "properties": { "mode": { "const": "fixed" }, "ref": { "$ref": "#/$defs/ref" } } },
+        "branch": { "oneOf": [
+          { "type": "object", "additionalProperties": false, "required": ["mode", "ref"], "properties": { "mode": { "const": "fixed" }, "ref": { "$ref": "#/$defs/ref" } } },
+          { "type": "object", "additionalProperties": false, "required": ["mode", "ref"], "properties": { "mode": { "const": "issue_prefix" }, "ref": { "const": "codex/awh-task-" } } }
+        ] },
         "verification": { "type": "object", "additionalProperties": false, "required": ["commands"], "properties": { "commands": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/text" } } } },
         "github_app": {
           "type": "object", "additionalProperties": false, "required": ["identity", "repository_scope", "selected_set_policy", "permissions"],

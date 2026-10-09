@@ -19,7 +19,7 @@ export interface ProfilePolicy {
   version: string;
   repository: string;
   base: string;
-  branch: { mode: 'fixed'; ref: string };
+  branch: { mode: 'fixed' | 'issue_prefix'; ref: string };
   verification: { commands: string[] };
   github_app: {
     identity: 'installation'; repository_scope: 'single'; selected_set_policy: 'exact';
