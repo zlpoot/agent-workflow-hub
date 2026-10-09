@@ -7,17 +7,20 @@ import { ClientError, clientFail, inspectRepository, initManifest, readJson } fr
 import { CLIENT_VERSION, CLIENT_PACKAGE } from './version.js';
 import { deliver, DeliveryError, deliveryDiagnostic } from './deliver.js';
 import { readFileSync, lstatSync } from 'node:fs';
+import { publicationDiagnostic } from '../builder.js';
 
 export async function main(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
   if (args.length === 1 && args[0] === '--help') return { commands: ['init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
     'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry',
-    'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry'], event_types: CLIENT_EVENT_TYPES,
+    'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry',
+    'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>'], event_types: CLIENT_EVENT_TYPES,
     configuration: '--config <absolute-external-json-file> before command or AWH_CLIENT_CONFIG', deliver: 'fixed Builder policy; explicit event-only retry', authority_verified: false };
   let configPath = process.env.AWH_CLIENT_CONFIG;
   if (args[0] === '--config') { configPath = args[1]; args = args.slice(2); }
   const [command, ...rest] = args, options = new Map<string, string>();
-  const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: ['--run'], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--issue','--title','--body','--hold-draft','--retry','--recover-from-run'], 'link-revision': ['--run','--pr','--head','--evidence-comment','--retry'] };
+  const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: ['--run'], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--issue','--title','--body','--hold-draft','--retry','--recover-from-run'], 'link-revision': ['--run','--pr','--head','--evidence-comment','--retry'],
+    'reconcile-publication':['--revision'], 'resume-publication':['--revision','--authorization-comment'] };
   if (!command || !Object.hasOwn(allowed, command)) clientFail('arguments', 'Unsupported Client command; no arbitrary execution');
   for (let i = 0; i < rest.length; i += 2) {
     const key = rest[i]!; if (!allowed[command]!.includes(key) || options.has(key)) clientFail('arguments', 'Unknown or duplicate Client option');
@@ -36,6 +39,13 @@ export async function main(args: string[]): Promise<unknown> {
   if (command === 'event' && !options.has('--retry') && (!options.has('--type') || !options.has('--data'))) clientFail('arguments', 'event requires --type and --data, or --retry');
   if (command === 'finish' && options.size && (options.get('--outcome') !== 'failed' || !options.has('--data'))) clientFail('arguments', 'finish accepts only explicit failed outcome with a JSON reason payload');
   const client = new AwhClient(configPath);
+  if (command === 'reconcile-publication' || command === 'resume-publication') {
+    if (!/^revision-[a-f0-9]{64}$/.test(options.get('--revision') ?? '') || options.size !== (command === 'reconcile-publication' ? 1 : 2) ||
+        command === 'resume-publication' && !/^[1-9]\d*$/.test(options.get('--authorization-comment') ?? ''))
+      clientFail('arguments','Publication reconciliation/resume requires explicit receipt and, for resume, Human authorization comment');
+    return command === 'reconcile-publication' ? client.reconcilePublication(options.get('--revision')!) :
+      client.resumePublication({revision:options.get('--revision')!,authorizationComment:Number(options.get('--authorization-comment'))});
+  }
   if (command === 'link-revision') {
     if (options.has('--retry')) return client.retryRevision();
     if (options.size !== 4 || !['--pr','--evidence-comment'].every(k => /^[1-9]\d*$/.test(options.get(k) ?? '')))
@@ -59,7 +69,7 @@ export async function main(args: string[]): Promise<unknown> {
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
   main(process.argv.slice(2)).then(result => console.log(JSON.stringify(result))).catch(error => {
     const known = error instanceof ClientError;
-    console.error(JSON.stringify({ error: error instanceof DeliveryError ? deliveryDiagnostic(error) : { code: known ? error.code : 'client', message: known ? error.message : 'Client operation failed; configuration, input and remote diagnostics suppressed',
+    console.error(JSON.stringify({ error: error instanceof DeliveryError ? deliveryDiagnostic(error) : publicationDiagnostic(error) ?? { code: known ? error.code : 'client', message: known ? error.message : 'Client operation failed; configuration, input and remote diagnostics suppressed',
       ...(known && error.http_status ? { http_status: error.http_status } : {}) }, authority_verified: false })); process.exitCode = 2;
   });
 }

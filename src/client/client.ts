@@ -15,6 +15,7 @@ import { digest, inspectRevision, parseRevisionEvidence, revisionId, revisionRec
   REVISION_COMMAND, type RevisionOverlay } from './revision.js';
 import { validateHandoff, type BuilderHandoff } from '../validator.js';
 import type { Json } from '../protocol/index.js';
+import { publicationBodies, publicationObservation, publicationScope, parsePublicationAuthorization } from './publication.js';
 
 export const CLIENT_EVENT_TYPES = ['STEP_STARTED', 'STEP_COMPLETED', 'VERIFICATION_STARTED', 'VERIFICATION_PASSED', 'VERIFICATION_FAILED', 'RUN_FAILED'] as const;
 interface Session { schema_version: '1.0'; manifest: ProjectManifest; endpoint: string; executor_id: string; machine_id: string;
@@ -34,7 +35,7 @@ const timestamp = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-
 
 export class AwhClient {
   constructor(readonly configPath: string, readonly cwd = process.cwd()) {}
-  private context(create = false): Context {
+  private context(create = false, readOnly = false): Context {
     const identity = inspectRepository(this.cwd), manifest = readManifest(identity), config = readConfig(this.configPath, identity.root);
     const m = machine(config, create), credential = readCredential(config);
     const metadata: ClientMetadata = { schema_version: '1.0', executor_type: config.executor_type, machine_name: m.name, arch: m.arch, client_version: CLIENT_VERSION };
@@ -42,7 +43,11 @@ export class AwhClient {
       machine: { id: m.id, platform: m.platform } };
     checked('executor', executor); assertClientMetadata(metadata);
     const namespace = createHash('sha256').update(JSON.stringify([manifest.project.id, manifest.project.repository, config.endpoint, config.executor_id])).digest('hex');
-    const path = join(config.state_directory, namespace, 'session.json'); mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const path = join(config.state_directory, namespace, 'session.json');
+    if (!existsSync(dirname(path))) {
+      if (readOnly) clientFail('state', 'Read-only reconciliation requires the original existing namespace');
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    }
     if (lstatSync(dirname(path)).isSymbolicLink() || realpathSync(dirname(path)) !== dirname(path)) clientFail('state', 'Client session directory cannot be redirected');
     return { identity, manifest, config, machine: m, metadata, executor, credential, path };
   }
@@ -408,6 +413,126 @@ export class AwhClient {
     return revisionReceipts(dirname(c.path)).filter(r => {
       const phases = r.phases();
       return phases.length < 6 && (!runId || phases[0]?.value.run_id === runId);
+    });
+  }
+  private async publicationContext(revision: string, connect: typeof connectBuilder) {
+    const c = this.context(false, true), s = this.load(c), receipt = new RevisionReceipt(dirname(c.path), revision), phases = receipt.phases();
+    if (!s.initial || !s.task_binding || phases.length !== 2 || !phases[1]!.value || Object.keys(phases[1]!.value).sort().join(',') !== 'body,stage' ||
+        phases[1]!.value.stage !== 'publishing_pending_handoff' ||
+        this.revisionPending(c).length !== 1 || s.pending || s.outbox?.length || c.identity.dirty)
+      clientFail('publication_state', 'Reconciliation requires exactly the original phase 0/1 and unchanged delivery');
+    const p = phases[0]!.value, projection = replayRun(s.initial, s.events), journalPath = join(dirname(c.path), s.initial.id + '.delivery.json');
+    const journal = readJson(journalPath) as Record<string, any>;
+    if (!p || Object.keys(p).sort().join(',') !== 'actor,base_sha,cp_events_sha256,diffs,evidence,evidence_body,journal_sha256,namespace_sha256,new_head,previous_handoff,previous_head,pull_request,revision_id,run_id,session_sha256,source_sha,task,verified' ||
+        p.revision_id !== revision || p.run_id !== s.initial.id || p.namespace_sha256 !== digest(dirname(c.path)) || !same(p.task, s.task_binding) ||
+        p.session_sha256 !== digest(readFileSync(c.path)) || p.journal_sha256 !== digest(readFileSync(journalPath)) || p.cp_events_sha256 !== digest(JSON.stringify(s.events)) ||
+        p.source_sha !== s.initial.source.sha || p.previous_head !== projection.effective_candidate_head || p.new_head !== c.identity.sha || c.identity.ref !== s.initial.source.ref ||
+        revision !== revisionId(s.initial.id, s.task_binding, p.previous_head, p.new_head, p.pull_request?.number) || projection.run.state !== 'awaiting_review' ||
+        projection.publication?.publication !== 'confirmed' || !same(p.previous_handoff, projection.publication.comment) || !same(p.pull_request, projection.candidate?.pull_request) ||
+        p.base_sha !== projection.candidate?.base_sha || p.evidence?.sha256 !== digest(p.evidence_body) ||
+        p.evidence.comment.provider !== 'github' || p.evidence.comment.repository !== c.identity.repository || p.evidence.comment.kind !== 'issue_comment' ||
+        !Number.isSafeInteger(p.evidence.comment.number) || p.evidence.comment.number < 1 || journal.source_sha !== p.source_sha || journal.run_id !== s.initial.id ||
+        !same(journal.task_binding, p.task) || journal.refs?.pull_request !== p.pull_request.number || journal.refs?.head_sha !== p.source_sha ||
+        journal.refs?.base_sha !== p.base_sha || journal.refs?.repository !== c.identity.repository || !['draft_waiting_for_acceptance','waiting_for_independent_review'].includes(journal.disposition))
+      clientFail('publication_receipt', 'Frozen receipt, Run, Session or Journal identity changed');
+    const fixed = deliveryPolicy(c.manifest.profile.ref, s.initial.profile.version);
+    if (fixed.workflow.id !== 'repeatable-docs' || c.config.profile_version !== s.initial.profile.version) clientFail('publication_policy', 'Recovery requires the original docs-only Profile');
+    await this.project(c); await this.executor(c);
+    const policies = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(c.manifest.project.id)); keys(policies, ['profiles']);
+    if (!Array.isArray(policies.profiles)) clientFail('publication_policy', 'Invalid Profile response');
+    const policy = policies.profiles.map(v => checked('profile_policy', v)).filter(v => v.ref === s.initial!.profile.ref && v.version === s.initial!.profile.version);
+    if (policy.length !== 1) clientFail('publication_policy', 'Original immutable Profile is missing');
+    matchDeliveryPolicy(policy[0]!, s.initial.profile.ref);
+    if (!validateBindings({ manifest: c.manifest, project: await this.project(c), profile_policy: policy[0], executor: c.executor, work_item: s.work_item, run: s.initial }).valid)
+      clientFail('publication_binding', 'Original lifecycle binding changed');
+    const capability = await this.request(c, '/v1/capabilities'); keys(capability, ['revision_linking','database_version']);
+    if (capability.revision_linking !== 'v021-docs-v1' || capability.database_version !== 2) clientFail('publication_upgrade', 'Compatible reviewed CP is required');
+    const timeline = await this.timeline(s.initial.id);
+    if (!same(timeline.events.map(e => e.event), s.events) || !same(timeline.run, projection.run)) clientFail('publication_history', 'CP history differs from original receipt');
+    if (!same(inspectRevision(c.identity.root, p.source_sha, p.previous_head, p.new_head, p.base_sha, fixed.workflow.bootstrap_paths!), p.diffs) ||
+        !same(parseRevisionEvidence(p.evidence_body, p.actor, p.new_head, p.base_sha), p.verified)) clientFail('publication_evidence', 'Frozen diff or verification evidence changed');
+    await this.recoveryRecords(c, s);
+    const recoveryPath = s.recovery ? join(dirname(c.path), s.recovery.predecessor_run_id + '.recovery.json') : null;
+    const recovery = recoveryPath ? digest(readFileSync(recoveryPath)) : null;
+    const bodies = publicationBodies(p, phases[1]!.value.body), { fingerprint: _fingerprint, ...task } = s.task_binding;
+    const candidateBinding = taskBinding({ ...task, source_sha: p.new_head });
+    const observer = await connect({ cwd: () => c.identity.root }, fixed.selection, candidateBinding, 'observe');
+    if (observer.preflight().actor !== p.actor || observer.preflight().issue_state !== 'open') clientFail('publication_provider', 'App or Issue identity drift');
+    const exactPR = async (b: Awaited<ReturnType<typeof connectBuilder>>) => {
+      const pr = await b.readPR(p.pull_request.number);
+      if (pr.actor !== p.actor || pr.number !== p.pull_request.number || !pr.draft || pr.head !== p.new_head || pr.base !== p.base_sha ||
+          await b.readRevisionRef() !== p.new_head || !same(inspectRepository(this.cwd), c.identity)) clientFail('publication_provider', 'PR, branch or clean candidate drift');
+      if ((await b.readComment(pr.number, p.evidence.comment.number)).body !== p.evidence_body) clientFail('publication_evidence', 'Original exact-head evidence changed');
+      const old = await b.readComment(pr.number, p.previous_handoff.number);
+      const oldMatch = /```json\n([\s\S]*?)\n```/.exec(old.body);
+      let h: BuilderHandoff | null = null; try { h = oldMatch ? JSON.parse(oldMatch[1]!) : null; } catch { /* rejected below */ }
+      if (!h || !validateHandoff(h, p.previous_head).ready_claim_valid || h.producer.run_id !== s.initial!.id || h.work_item.repo !== c.identity.repository ||
+          h.producer.executor !== s.initial!.executor_id || h.work_item.issue !== p.task.issue || h.candidate.pr !== pr.number || h.candidate.base_sha !== p.base_sha)
+        clientFail('publication_handoff', 'Original real-Run Handoff changed');
+      return old.body;
+    };
+    const oldBody = await exactPR(observer), comments = await observer.listComments(p.pull_request.number);
+    if (!same(comments, await observer.listComments(p.pull_request.number))) clientFail('publication_observation', 'Comment pages changed during reconciliation');
+    const observation = publicationObservation(p, bodies, comments), scope = publicationScope(receipt, p, recovery, oldBody, observation);
+    return { c, s, receipt, p, bodies, observer, candidateBinding, fixed, scope, oldBody, exactPR, recoveryPath };
+  }
+  async reconcilePublication(revision: string, connect: typeof connectBuilder = connectBuilder) {
+    const q = await this.publicationContext(revision, connect);
+    return { scope: q.scope, scope_sha256: digest(JSON.stringify(q.scope)), observation: q.scope.observation,
+      resume_intent_consumed: existsSync(join(dirname(q.c.path),q.receipt.id+'.publication-resume.json')),
+      human_authorization_required: true, first_post_not_submitted_proven: false, provider_writes: 0, authority_verified: false };
+  }
+  async resumePublication(options: { revision: string; authorizationComment: number }, connect: typeof connectBuilder = connectBuilder) {
+    if (Object.keys(options).sort().join(',') !== 'authorizationComment,revision' || !Number.isSafeInteger(options.authorizationComment) || options.authorizationComment < 1)
+      clientFail('publication_arguments', 'Explicit revision and Human authorization comment are required');
+    const q = await this.publicationContext(options.revision, connect), intentPath = join(dirname(q.c.path), q.receipt.id + '.publication-resume.json');
+    if (existsSync(intentPath)) clientFail('publication_consumed', 'Publication resume intent is already consumed; no provider retry');
+    const authorization = await q.observer.readAuthorization(q.p.pull_request.number, options.authorizationComment);
+    const decision = parsePublicationAuthorization(authorization.body, q.scope);
+    return locked(q.c.path + '.lock', async () => {
+      const again = await this.publicationContext(options.revision, connect);
+      if (!same(again.scope, q.scope) || (await again.observer.readAuthorization(q.p.pull_request.number, authorization.id)).body !== authorization.body)
+        clientFail('publication_authorization', 'Authorized observation changed before one-shot intent');
+      exclusiveRecoveryFile(intentPath, JSON.stringify({ schema_version: '1.0', kind: 'revision_publication_resume_intent', revision_id: q.receipt.id,
+        scope: q.scope, authorization_comment: authorization.id, authorization_body_sha256: digest(authorization.body), decision, created_at: new Date().toISOString() }, null, 2));
+      const adoption = decision.action === 'adopt' ? { pr: q.p.pull_request.number, comment: decision.comment_id!, body_sha256: q.scope.observation.kind === 'existing' ? q.scope.observation.body_sha256 : '' } : undefined;
+      const publisher = await connect({ cwd: () => q.c.identity.root }, q.fixed.selection, q.candidateBinding, 'revision', adoption);
+      if (publisher.preflight().actor !== q.p.actor) clientFail('publication_provider', 'Publisher identity changed');
+      if (await q.exactPR(publisher) !== q.oldBody) clientFail('publication_handoff', 'Original Handoff changed before resume');
+      const current = publicationObservation(q.p, q.bodies, await publisher.listComments(q.p.pull_request.number));
+      if (!same(current, q.scope.observation)) clientFail('publication_observation', 'Publication observation changed after intent; stop without POST');
+      const comment = decision.action === 'adopt' ? await publisher.adoptComment() : await publisher.createComment(q.p.pull_request.number, q.bodies.pending);
+      if (comment.actor !== q.p.actor || ![q.bodies.pending,q.bodies.confirmed].includes(comment.body) ||
+          comment.id === q.p.evidence.comment.number || comment.id === q.p.previous_handoff.number) clientFail('publication_comment', 'Publication response identity mismatch');
+      q.receipt.append({ stage: 'pending_handoff_created', comment, body: q.bodies.pending });
+      if ((await publisher.readComment(q.p.pull_request.number, comment.id)).body !== comment.body) clientFail('publication_readback', 'Resumed Handoff readback differs');
+      const observed = publicationObservation(q.p, q.bodies, await publisher.listComments(q.p.pull_request.number));
+      if (observed.kind !== 'existing' || observed.comment_id !== comment.id) clientFail('publication_conflict', 'Resumed Handoff is not the unique observed comment');
+      q.receipt.append({ stage: 'confirming_handoff', comment_id: comment.id, body: q.bodies.confirmed });
+      if (comment.body === q.bodies.pending) await publisher.editComment(q.p.pull_request.number, comment.id, q.bodies.confirmed);
+      if ((await publisher.readComment(q.p.pull_request.number, comment.id)).body !== q.bodies.confirmed) clientFail('publication_readback', 'Confirmed Handoff exact readback failed');
+      if (await q.exactPR(publisher) !== q.oldBody) clientFail('publication_handoff', 'Original Handoff changed during resume');
+      const after = publicationObservation(q.p, q.bodies, await publisher.listComments(q.p.pull_request.number));
+      if (after.kind !== 'existing' || after.comment_id !== comment.id || after.publication !== 'confirmed') clientFail('publication_conflict', 'Confirmed comment is not unique');
+      const timeline = await this.timeline(q.s.initial!.id);
+      if (!same(timeline.events.map(e => e.event), q.s.events) || !same(timeline.run, replayRun(q.s.initial!,q.s.events).run))
+        clientFail('publication_history', 'CP history changed before the fixed Event');
+      if (q.p.session_sha256 !== digest(readFileSync(q.c.path)) || q.p.journal_sha256 !== digest(readFileSync(join(dirname(q.c.path),q.s.initial!.id+'.delivery.json'))))
+        clientFail('publication_receipt', 'Original delivery bytes changed during resume');
+      if (q.scope.phase0_sha256 !== digest(readFileSync(q.receipt.file(0))) || q.scope.phase1_sha256 !== digest(readFileSync(q.receipt.file(1))) ||
+          (q.recoveryPath ? digest(readFileSync(q.recoveryPath)) : null) !== q.scope.recovery_receipt_sha256)
+        clientFail('publication_receipt', 'Original receipt bytes changed during resume');
+      await this.recoveryRecords(q.c, q.s);
+      const event = this.makeEvent(q.c, q.s, 'PR_REVISION_LINKED', { revision_id: q.receipt.id, source_sha: q.p.source_sha, previous_head: q.p.previous_head,
+        new_head: q.p.new_head, base_sha: q.p.base_sha, ref: q.p.task.branch, pull_request: q.p.pull_request, previous_handoff: q.p.previous_handoff,
+        evidence: q.p.evidence, handoff: { comment: { provider: 'github', repository: q.p.task.repository, kind: 'issue_comment', number: comment.id }, sha256: digest(q.bodies.confirmed) },
+        checks: q.bodies.handoff.verification.checks });
+      q.receipt.append({ stage: 'event_ready', event, event_sha256: digest(JSON.stringify(event)), handoff_body: q.bodies.confirmed });
+      const original = this.validateSession(q.c, readJson(q.c.path, 16 * 1024 * 1024, false));
+      this.saveOverlay(q.c, original, { schema_version:'1.0',run_id:q.s.initial!.id,session_sha256:q.p.session_sha256,journal_sha256:q.p.journal_sha256,
+        events:q.s.events.slice(original.events.length),pending:event,completed:false });
+      q.s.pending = event; const ack = await this.flush(q.c,q.s); q.receipt.append({stage:'acknowledged',event_id:event.id,ack});
+      return { ...ack, revision_id:q.receipt.id, effective_candidate_head:q.p.new_head, handoff:comment.url, resumed_publication:true, authority_verified:false };
     });
   }
   async linkRevision(options: { run: string; pr: number; head: string; evidenceComment: number }, connect: typeof connectBuilder = connectBuilder) {
