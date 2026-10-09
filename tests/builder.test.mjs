@@ -293,7 +293,7 @@ test('unsafe local Git transport, wrong branch and Git errors are refused safely
 
 test('Builder exposes only fixed operations, requires App bot for PR/comments, rejects secret text', async () => {
   const f = fake(), b = await connectBuilder(f.deps);
-  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready', 'restoreDraft', 'readLifecycle'].sort());
+  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready', 'restoreDraft', 'readLifecycle', 'readRevisionRef'].sort());
   await b.createPR('Title', 'Implements #4');
   assert.deepEqual(JSON.parse(f.requests.at(-1).body), { title: 'Title', body: 'Implements #4', head: BRANCH, base: 'main', draft: true });
   await b.updatePR(5, 'Final title', 'Final body');
@@ -1521,7 +1521,7 @@ function repeatableFake({issue={},paths=['docs/management/awh-repeatable-workflo
     if(url.endsWith('/access_tokens')){const q=JSON.parse(o.body);return {...data,permissions:{...q.permissions,metadata:'read',...(q.permissions.contents==='read'&&readPermissions?readPermissions:{})}};}
     if(url.endsWith('/issues/90'))return {number:90,state:'open',html_url:'https://github.com/zlpoot/future-ui/issues/90',...issue};
     if(url.endsWith('/git/ref/heads/main'))return {object:{sha:base}};
-    if(url.includes('/compare/'))return {total_commits:1,files:paths.map(filename=>({filename,status:'added'}))};
+    if(url.includes('/compare/'))return {status:'ahead',total_commits:1,files:paths.map(filename=>({filename,status:'added'}))};
     return data;
   }});
   const spawn=f.deps.spawn,fetch=f.deps.fetch;
@@ -1529,6 +1529,18 @@ function repeatableFake({issue={},paths=['docs/management/awh-repeatable-workflo
   f.deps.fetch=async(url,o)=>{if(url.endsWith('/git/ref/heads/codex/awh-task-90')&&!consumed){f.requests.push({url,...o});return new Response('{}',{status:404});}return fetch(url,o);};
   return f;
 }
+
+test('0.4.2 revision mode mints only comment-write scope and refuses push/PR/Ready/old-comment edits',async()=>{
+ const f=repeatableFake({consumed:true});
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
+ assert.deepEqual(b.preflight().permissions,{contents:'read',issues:'write',metadata:'read',pull_requests:'read'});
+ const tokens=f.requests.filter(r=>r.url.endsWith('/access_tokens')).map(r=>JSON.parse(r.body));
+ assert.deepEqual(tokens.at(-1),{repositories:['future-ui'],permissions:{contents:'read',issues:'write',pull_requests:'read'}});
+ await assert.rejects(b.push());await assert.rejects(b.createPR('Forbidden','Forbidden'));await assert.rejects(b.updatePR(5,'Forbidden','Forbidden'));
+ await assert.rejects(b.editComment(5,10,'Do not edit old history'));
+ assert(!f.git.some(r=>r[1].includes('push')));assert(!f.requests.some(r=>r.url.endsWith('/graphql')||r.method==='PATCH'));
+ assert.equal((await b.createComment(5,'new revision handoff')).id,11);
+});
 test('v0.2 App Issue inspection uses single-repo read-only token before write mint; canonical branch push once',async()=>{
   const f=repeatableFake(),b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding());
   assert.equal(b.preflight().issue_state,'open');const tokens=f.requests.filter(r=>r.url.endsWith('/access_tokens')).map(r=>JSON.parse(r.body));

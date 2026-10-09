@@ -132,7 +132,9 @@ export function createControlPlaneServer(options: ServerOptions) {
         }
         if (['created', 'appended'].includes((result as { disposition?: string }).disposition ?? '')) status = 201;
       } else if (method === 'GET') {
-        if (url.pathname === '/v1/profiles') {
+        if (url.pathname === '/v1/capabilities') {
+          query(url, []); result = { revision_linking: 'v021-docs-v1', database_version: 2 };
+        } else if (url.pathname === '/v1/profiles') {
           query(url, ['project_id']); const projectId = url.searchParams.get('project_id');
           if (!validId(projectId)) fail(400, 'invalid_id', 'A project_id is required');
           result = { profiles: store.listProfiles(principal, projectId) };

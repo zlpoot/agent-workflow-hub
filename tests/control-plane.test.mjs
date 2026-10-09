@@ -51,6 +51,14 @@ async function frame(reader) {
   const id = Number(text.split('\n').find(line => line.startsWith('id: ')).slice(4));
   return { id, data };
 }
+test('revision capability is authenticated read-only, bounded and has no DB mutation', async t => {
+  const h = await httpService(t), before = h.store.latestCursor();
+  assert.equal((await h.call('/v1/capabilities','GET',undefined,null)).status,401);
+  assert.deepEqual((await h.call('/v1/capabilities')).body,{revision_linking:'v021-docs-v1',database_version:2,authority_verified:false});
+  assert.equal((await h.call('/v1/capabilities?anything=1')).status,400);
+  assert.equal((await h.call('/v1/capabilities','POST',{})).status,404);
+  assert.equal(h.store.latestCursor(),before);
+});
 
 test('SQLite migration is repeatable, versioned, and preserves every registry and runtime after restart', t => {
   const db = database(t); populate(db.store); const appended = db.store.append(principal, sample.run.id, event());

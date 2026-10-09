@@ -3,6 +3,10 @@ import type { Event, EventData, GitHubNumberRef, Run, RunState } from './types.j
 
 export interface ReplayResult {
   run: Readonly<Run>; events: readonly Event[]; authority_verified: false;
+  effective_candidate_head: string | null;
+  candidate: Readonly<EventData['GITHUB_PR_CREATED']> | null;
+  publication: Readonly<EventData['HANDOFF_PUBLISHED']> | null;
+  revisions: readonly EventData['PR_REVISION_LINKED'][];
 }
 export interface AppendResult extends ReplayResult { disposition: 'appended' | 'idempotent' }
 function require(condition: boolean, code: ConstructorParameters<typeof ProtocolError>[0], message: string): asserts condition {
@@ -34,6 +38,7 @@ export function replayRun(initial: unknown, history: readonly unknown[]): Replay
   let candidate: EventData['GITHUB_PR_CREATED'] | null = null;
   let publication: EventData['HANDOFF_PUBLISHED'] | null = null;
   let reviewer: string | null = null;
+  const revisions: EventData['PR_REVISION_LINKED'][] = [];
   const state = (...states: RunState[]) => require(states.includes(run.state), 'state', 'Event is not allowed in the current Run state');
   for (const input of history) {
     const event = structuredClone(assertEntity('event', input));
@@ -63,6 +68,7 @@ export function replayRun(initial: unknown, history: readonly unknown[]): Replay
         break;
       case 'VERIFICATION_STARTED':
         state('running', 'awaiting_review');
+        require(revisions.length === 0, 'state', 'A linked candidate requires the explicit revision path');
         require([...steps.values()].every(code => code === 0), 'state', 'Verification requires completed successful steps');
         verificationSha = event.payload.data.subject_sha;
         candidate = null; publication = null; reviewer = null; run.state = 'verifying';
@@ -97,6 +103,25 @@ export function replayRun(initial: unknown, history: readonly unknown[]): Replay
         if (publication) require(event.payload.data.comment.number === publication.comment.number, 'binding', 'Publication updates must use the same Handoff comment');
         publication = event.payload.data;
         break;
+      case 'PR_REVISION_LINKED': {
+        state('awaiting_review');
+        const d = event.payload.data;
+        checkPR(d.pull_request, d.previous_head);
+        require(publication?.publication === 'confirmed' && d.previous_handoff.repository === run.source.repository &&
+          d.previous_handoff.number === publication.comment.number && d.source_sha === run.source.sha &&
+          d.base_sha === candidate!.base_sha && d.ref === run.source.ref && d.new_head !== d.previous_head &&
+          d.new_head !== run.source.sha && !revisions.some(r => r.revision_id === d.revision_id || r.new_head === d.new_head) &&
+          d.evidence.comment.repository === run.source.repository && d.handoff.comment.repository === run.source.repository &&
+          d.handoff.comment.number !== publication.comment.number && d.handoff.comment.number !== d.evidence.comment.number &&
+          !revisions.some(r => r.handoff.comment.number === d.handoff.comment.number) &&
+          d.checks.length === 1 && d.checks[0]!.command === 'git diff --check origin/main...HEAD' && d.checks[0]!.exit_code === 0,
+          'binding', 'Revision requires a continuous same-PR verified candidate and a new confirmed Handoff');
+        candidate = { ...candidate!, head_sha: d.new_head }; verificationSha = d.new_head; reviewer = null;
+        publication = { handoff_version: '0.1', publication: 'confirmed', pull_request: d.pull_request,
+          comment: d.handoff.comment, base_sha: d.base_sha, head_sha: d.new_head, subject_sha: d.new_head };
+        revisions.push(d);
+        break;
+      }
       case 'REVIEW_STARTED':
         state('awaiting_review');
         checkPR(event.payload.data.pull_request, event.payload.data.subject_sha);
@@ -122,7 +147,7 @@ export function replayRun(initial: unknown, history: readonly unknown[]): Replay
     run.updated_at = event.occurred_at;
     ids.add(event.id); events.push(event);
   }
-  return immutable({ run, events, authority_verified: false });
+  return immutable({ run, events, effective_candidate_head: candidate?.head_sha ?? null, candidate, publication, revisions, authority_verified: false });
 }
 
 export function appendEvent(initial: unknown, history: readonly unknown[], input: unknown): AppendResult {

@@ -11,12 +11,13 @@ import { readFileSync, lstatSync } from 'node:fs';
 export async function main(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
   if (args.length === 1 && args[0] === '--help') return { commands: ['init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
-    'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry'], event_types: CLIENT_EVENT_TYPES,
+    'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry',
+    'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry'], event_types: CLIENT_EVENT_TYPES,
     configuration: '--config <absolute-external-json-file> before command or AWH_CLIENT_CONFIG', deliver: 'fixed Builder policy; explicit event-only retry', authority_verified: false };
   let configPath = process.env.AWH_CLIENT_CONFIG;
   if (args[0] === '--config') { configPath = args[1]; args = args.slice(2); }
   const [command, ...rest] = args, options = new Map<string, string>();
-  const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: ['--run'], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--issue','--title','--body','--hold-draft','--retry','--recover-from-run'] };
+  const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: ['--run'], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--issue','--title','--body','--hold-draft','--retry','--recover-from-run'], 'link-revision': ['--run','--pr','--head','--evidence-comment','--retry'] };
   if (!command || !Object.hasOwn(allowed, command)) clientFail('arguments', 'Unsupported Client command; no arbitrary execution');
   for (let i = 0; i < rest.length; i += 2) {
     const key = rest[i]!; if (!allowed[command]!.includes(key) || options.has(key)) clientFail('arguments', 'Unknown or duplicate Client option');
@@ -35,6 +36,12 @@ export async function main(args: string[]): Promise<unknown> {
   if (command === 'event' && !options.has('--retry') && (!options.has('--type') || !options.has('--data'))) clientFail('arguments', 'event requires --type and --data, or --retry');
   if (command === 'finish' && options.size && (options.get('--outcome') !== 'failed' || !options.has('--data'))) clientFail('arguments', 'finish accepts only explicit failed outcome with a JSON reason payload');
   const client = new AwhClient(configPath);
+  if (command === 'link-revision') {
+    if (options.has('--retry')) return client.retryRevision();
+    if (options.size !== 4 || !['--pr','--evidence-comment'].every(k => /^[1-9]\d*$/.test(options.get(k) ?? '')))
+      clientFail('arguments', 'link-revision requires explicit Run, PR, exact HEAD and evidence comment ID');
+    return client.linkRevision({ run: options.get('--run')!, pr: Number(options.get('--pr')), head: options.get('--head')!, evidenceComment: Number(options.get('--evidence-comment')) });
+  }
   if (command === 'deliver') {
     if (options.has('--retry')) return client.retryDelivery();
     if (options.has('--issue') && (!/^[1-9]\d*$/.test(options.get('--issue')!) || !Number.isSafeInteger(Number(options.get('--issue'))))) clientFail('arguments', 'deliver requires a positive safe Issue number');
