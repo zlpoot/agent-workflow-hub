@@ -1,4 +1,4 @@
-import { createPrivateKey, sign } from 'node:crypto';
+import { createPrivateKey, sign, createHash } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { relative, isAbsolute, dirname, join } from 'node:path';
@@ -18,9 +18,23 @@ type GitTransportStage = 'authenticated_read_probe' | 'receive_pack_dry_run' | '
 type SuppressionReason = 'known_private_key' | 'known_jwt' | 'known_installation_token' |
   'known_basic_credential' | 'authorization_header' | 'github_token_pattern' | 'jwt_pattern' | 'spawn_exception';
 export class BuilderError extends Error {
+  declare readonly publication?: PublicationDiagnostic;
   constructor(message: string, readonly category?: GitTransportCategory, readonly stage?: GitTransportStage,
-    readonly suppression_reason?: readonly SuppressionReason[]) { super(message); }
+    readonly suppression_reason?: readonly SuppressionReason[], publication?: PublicationDiagnostic) {
+    super(message); if (publication) this.publication = publication;
+  }
 }
+export type PublicationStage = 'revision.pr-read' | 'revision.compare-read' | 'revision.comment-post' | 'revision.comment-parse' |
+  'revision.comment-confirm-patch' | 'revision.readback' | 'revision.comments-list' | 'revision.authorization-read';
+export interface PublicationDiagnostic {
+  stage: PublicationStage; category: 'permission_or_policy' | 'authentication' | 'rate_limit' | 'server' | 'http' | 'network_or_timeout' | 'invalid_response';
+  http_status?: number; github_request_id?: string; accepted_github_permissions?: string;
+}
+export function publicationDiagnostic(error: unknown) {
+  return error instanceof BuilderError && error.publication ?
+    { code: 'github_revision', message: 'Revision GitHub operation failed', diagnostic: { ...error.publication } } : null;
+}
+export interface CommentAdoption { pr: number; comment: number; body_sha256: string }
 type Json = Record<string, any>; // GitHub JSON is checked at each boundary before use.
 export interface Dependencies {
   env: NodeJS.ProcessEnv;
@@ -62,10 +76,12 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
 }
 
 // Returns only fixed Builder operations. Credentials and generic API requests stay in this closure.
-export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' | 'revision' = 'deliver') {
+export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' | 'revision' = 'deliver', adoption?: CommentAdoption) {
   if (!['deliver','observe','recover','revision'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Tasks support restricted Builder modes');
   const { profile, workflow } = bindWorkflow(selection, binding);
   if (mode === 'revision' && workflow.id !== 'repeatable-docs') fail('Revision publication requires the trusted docs-only Task policy');
+  if (adoption && (mode !== 'revision' || !positive(adoption.pr) || !positive(adoption.comment) || !/^[a-f0-9]{64}$/.test(adoption.body_sha256) ||
+      Object.keys(adoption).sort().join(',') !== 'body_sha256,comment,pr')) fail('Invalid receipt-bound comment adoption');
   const REPO = profile.repository, BRANCH = workflow.branch, ROOT = `/repos/${REPO}`;
   const d = { ...defaults, ...overrides };
   const appId = d.env.AWH_GITHUB_APP_ID;
@@ -169,8 +185,19 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     sanitized += text.slice(cursor);
     return { text: safe ? sanitized : null, reasons: [...reasons].sort() };
   };
-  const request = async (path: string, credential: string, method = 'GET', body?: unknown): Promise<Json> => {
-    let r: Response;
+  const responses = new WeakMap<object, Partial<PublicationDiagnostic>>();
+  const hasNextPage = new WeakSet<object>();
+  const responseMetadata = (r: Response): Partial<PublicationDiagnostic> => {
+    const requestId = r.headers.get('x-github-request-id'), permissions = r.headers.get('x-accepted-github-permissions');
+    return { http_status: r.status,
+      ...(requestId && requestId.length <= 128 && /^[A-Za-z0-9:-]+$/.test(requestId) && !secretLike(requestId) ? { github_request_id: requestId } : {}),
+      ...(permissions && permissions.length <= 256 && /^(?:contents|issues|metadata|pull_requests)=(?:read|write)(?:[,;] ?(?:contents|issues|metadata|pull_requests)=(?:read|write))*$/.test(permissions) && !secretLike(permissions) ? { accepted_github_permissions: permissions } : {}) };
+  };
+  const diagnosticFailure = (stage: PublicationStage, category: PublicationDiagnostic['category'], metadata: Partial<PublicationDiagnostic> = {}): never => {
+    throw new BuilderError('Revision GitHub operation failed', undefined, undefined, undefined, { ...metadata, stage, category });
+  };
+  const request = async (path: string, credential: string, method = 'GET', body?: unknown, stage?: PublicationStage): Promise<Json> => {
+    let r: Response | undefined;
     let value: unknown;
     try {
       r = await d.fetch(`${API}${path}`, {
@@ -179,13 +206,23 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
           'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
-      if (!r.ok) fail(`GitHub request failed (HTTP ${r.status})`);
+      if (!r.ok) {
+        if (stage) diagnosticFailure(stage, r.status === 403 ? 'permission_or_policy' : r.status === 401 ? 'authentication' : r.status === 429 ? 'rate_limit' : r.status >= 500 ? 'server' : 'http', responseMetadata(r));
+        fail(`GitHub request failed (HTTP ${r.status})`);
+      }
       value = await r.json();
     } catch (e) {
       if (e instanceof BuilderError) throw e;
+      if (stage) diagnosticFailure(r ? stage === 'revision.comment-post' || stage === 'revision.comment-confirm-patch' ? 'revision.comment-parse' : stage : stage,
+        r ? 'invalid_response' : 'network_or_timeout', r ? responseMetadata(r) : {});
       return fail('GitHub request failed (network, timeout, redirect or invalid JSON; details suppressed)');
     }
-    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && (mode === 'recover' && path === `${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1` || path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length))))) fail('Invalid GitHub response');
+    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && (mode === 'recover' && path === `${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1` || path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length)) || /^\/issues\/[1-9]\d*\/comments\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length))))) {
+      if (stage) diagnosticFailure(stage === 'revision.comment-post' || stage === 'revision.comment-confirm-patch' ? 'revision.comment-parse' : stage, 'invalid_response', responseMetadata(r!));
+      fail('Invalid GitHub response');
+    }
+    if (stage) responses.set(value, responseMetadata(r!));
+    if (stage === 'revision.comments-list' && /rel="next"/.test(r!.headers.get('link') ?? '')) hasNextPage.add(value);
     return value as Json;
   };
   const app = await request('/app', jwt);
@@ -252,10 +289,10 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     if (head.status !== 0 || branch.status !== 0 || head.stdout.trim() !== binding.source_sha || branch.stdout.trim() !== binding.branch)
       fail('Task binding differs from the real Git branch or HEAD');
   }
-  const revisionPermissions = { contents: 'read', issues: 'write', metadata: 'read', pull_requests: 'read' };
+  const revisionPermissions = { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'write' };
   const revisionToken = async () => {
     const v = await request(`/app/installations/${inst.id}/access_tokens`, jwt, 'POST', {
-      repositories: [REPO.split('/')[1]], permissions: { contents: 'read', issues: 'write', pull_requests: 'read' },
+      repositories: [REPO.split('/')[1]], permissions: { contents: 'read', issues: 'read', pull_requests: 'write' },
     });
     if (typeof v.token !== 'string' || !v.token || !equalPermissions(v.permissions, revisionPermissions) ||
       !Array.isArray(v.repositories) || v.repositories.length !== 1 || v.repositories[0]?.full_name !== REPO ||
@@ -266,12 +303,16 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   const { token, expiry } = mode === 'revision' ? await revisionToken() : mode !== 'deliver' ? observer! : await mint(true);
   const live = () => { if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
   const writable = () => { if (mode !== 'deliver' && mode !== 'revision') fail('Lifecycle observation cannot mutate GitHub'); };
-  const call = (path: string, method = 'GET', body?: unknown) => {
+  let fixedRevisionPR: number | undefined = adoption?.pr;
+  const call = (path: string, method = 'GET', body?: unknown, diagnosticStage?: PublicationStage) => {
     live();
     const commentOnly = mode === 'revision' && (method === 'POST' && new RegExp('^' + ROOT + '/issues/[1-9]\\d*/comments$').test(path) ||
       method === 'PATCH' && new RegExp('^' + ROOT + '/issues/comments/[1-9]\\d*$').test(path));
     if (mode !== 'deliver' && method !== 'GET' && !commentOnly) fail('Restricted Builder mode cannot perform this mutation');
-    return request(path, token, method, body);
+    const stage = diagnosticStage ?? (mode === 'revision' ? path.includes('/compare/') ? 'revision.compare-read' :
+      method === 'POST' ? 'revision.comment-post' : method === 'PATCH' ? 'revision.comment-confirm-patch' :
+      /\/pulls\/[1-9]\d*$/.test(path) ? 'revision.pr-read' : 'revision.readback' : undefined);
+    return request(path, token, method, body, stage);
   };
   // No caller ref/path: independently read only this workflow's feature branch.
   // null means controlled ABSENT; PRESENT is a validated commit SHA.
@@ -309,17 +350,25 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     return { number: p.number as number, url: `https://github.com/${REPO}/pull/${p.number}`, actor,
       head: p.head.sha as string, base: p.base.sha as string, draft: p.draft as boolean, node_id: safeText(p.node_id) };
   };
-  const checkBootstrap = async (baseSha: string, headSha: string) => {
+  const checkBootstrap = async (baseSha: string, headSha: string, diagnostic = mode === 'revision') => {
     if (!workflow.bootstrap_paths) return;
-    const comparison = await call(`${ROOT}/compare/${baseSha}...${headSha}`);
+    const comparison = await call(`${ROOT}/compare/${baseSha}...${headSha}`, 'GET', undefined, diagnostic ? 'revision.compare-read' : undefined);
     if (comparison.status !== 'ahead' || !Array.isArray(comparison.files) || !comparison.files.length ||
       comparison.files.length > workflow.bootstrap_paths.length ||
-      comparison.files.some((f: Json) => !workflow.bootstrap_paths!.includes(f.filename) || !['added', 'modified'].includes(f.status)))
-      fail('Remote bootstrap candidate must stay in the fixed docs-only path');
+      comparison.files.some((f: Json) => !f || typeof f !== 'object' || !workflow.bootstrap_paths!.includes(f.filename) || !['added', 'modified'].includes(f.status)))
+      { if (diagnostic) diagnosticFailure('revision.compare-read', 'invalid_response', responses.get(comparison));
+        fail('Remote bootstrap candidate must stay in the fixed docs-only path'); }
   };
-  const readPR = async (number: number) => {
-    const p = prSummary(await call(`${ROOT}/pulls/${id(number)}`));
-    await checkBootstrap(p.base, p.head);
+  const readPR = async (number: number, diagnostic = mode === 'revision') => {
+    if (mode === 'revision') {
+      if (fixedRevisionPR !== undefined && fixedRevisionPR !== number) fail('Revision publication is bound to one PR');
+      fixedRevisionPR = id(number);
+    }
+    const raw = await call(`${ROOT}/pulls/${id(number)}`, 'GET', undefined, diagnostic ? 'revision.pr-read' : undefined);
+    let p;
+    try { p = prSummary(raw); if (p.number !== number) fail('PR response number mismatch'); }
+    catch (e) { if (diagnostic) diagnosticFailure('revision.pr-read', 'invalid_response', responses.get(raw)); throw e; }
+    await checkBootstrap(p.base, p.head, diagnostic);
     return p;
   };
   const commentSummary = (c: Json, number: number) => {
@@ -327,9 +376,18 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       fail('Comment actor or PR mismatch');
     return { id: c.id as number, actor, url: `https://github.com/${REPO}/pull/${number}#issuecomment-${c.id}`, body: safeText(c.body) };
   };
-  const readComment = async (number: number, comment: number) =>
-    commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`), number);
+  const readComment = async (number: number, comment: number) => {
+    const raw = await call(`${ROOT}/issues/comments/${id(comment)}`);
+    try { if (raw.id !== comment) fail('Comment response ID mismatch'); return commentSummary(raw, number); } catch (e) {
+      if (mode === 'revision') diagnosticFailure('revision.readback', 'invalid_response', responses.get(raw)); throw e;
+    }
+  };
   const revisionComments = new Set<number>();
+  const parsedComment = (raw: Json, number: number) => {
+    try { return commentSummary(raw, number); } catch (e) {
+      if (mode === 'revision') diagnosticFailure('revision.comment-parse', 'invalid_response', responses.get(raw)); throw e;
+    }
+  };
   if (mode === 'recover') {
     if (await readFeatureRefState() !== null) fail('Recovery Task branch already exists remotely');
     const prs = await call(`${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1`);
@@ -454,6 +512,43 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return prSummary(await call(`${ROOT}/pulls/${id(number)}`, 'PATCH', { title: safeText(title), body: safeText(body) }));
     },
     readPR,
+    listComments: async (number: number) => {
+      if (!binding || workflow.id !== 'repeatable-docs') fail('Publication reconciliation requires a frozen docs Task');
+      await readPR(number, true);
+      const result: { id: number; actor: string; actor_type: string; body: string; url: string }[] = [];
+      for (let page = 1; page <= 10; page++) {
+        const raw = await call(`${ROOT}/issues/${id(number)}/comments?per_page=100&page=${page}`, 'GET', undefined, 'revision.comments-list');
+        if (!Array.isArray(raw) || raw.length > 100) diagnosticFailure('revision.comments-list', 'invalid_response', responses.get(raw));
+        for (const c of raw as Json[]) {
+          if (!c || typeof c !== 'object' || !positive(c.id) || !['User','Bot'].includes(c.user?.type) || typeof c.user?.login !== 'string' || !/^[A-Za-z0-9-]+(?:\[bot\])?$/.test(c.user.login) ||
+            c.issue_url !== `${API}${ROOT}/issues/${number}` || result.length && c.id <= result.at(-1)!.id)
+            diagnosticFailure('revision.comments-list', 'invalid_response');
+          let body: string;
+          try { body = safeText(c.body); } catch { return diagnosticFailure('revision.comments-list', 'invalid_response', responses.get(raw)); }
+          result.push({ id: c.id, actor: c.user.login, actor_type: c.user.type, body, url: `https://github.com/${REPO}/pull/${number}#issuecomment-${c.id}` });
+        }
+        if (raw.length < 100) {
+          if (hasNextPage.has(raw)) diagnosticFailure('revision.comments-list', 'invalid_response', responses.get(raw));
+          return result;
+        }
+      }
+      fail('Publication comment pagination limit reached; negative observation unavailable');
+    },
+    readAuthorization: async (number: number, comment: number) => {
+      if (!binding || workflow.id !== 'repeatable-docs') fail('Publication authorization requires a frozen docs Task');
+      await readPR(number, true);
+      const c = await call(`${ROOT}/issues/comments/${id(comment)}`, 'GET', undefined, 'revision.authorization-read');
+      if (c.id !== comment || c.user?.login !== 'zlpoot' || c.user?.type !== 'User' || c.user?.id !== 36036483 || c.issue_url !== `${API}${ROOT}/issues/${id(number)}`)
+        diagnosticFailure('revision.authorization-read', 'invalid_response', responses.get(c));
+      return { id: comment, actor: 'zlpoot', body: safeText(c.body), url: `https://github.com/${REPO}/pull/${number}#issuecomment-${comment}` };
+    },
+    adoptComment: async () => {
+      if (!adoption || mode !== 'revision') fail('Comment adoption requires explicit receipt-bound recovery');
+      await readPR(adoption.pr);
+      const c = await readComment(adoption.pr, adoption.comment);
+      if (createHash('sha256').update(c.body).digest('hex') !== adoption.body_sha256) fail('Existing comment differs from frozen adoption body');
+      revisionComments.add(c.id); return c;
+    },
     // Read-only closeout: never submit Review, merge or Issue mutations.
     readLifecycle: async (number: number, expectedHead: string) => {
       if (!sha(expectedHead) || binding && expectedHead !== binding.source_sha) fail('Invalid expected head');
@@ -505,7 +600,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     createComment: async (number: number, body: string) => {
       writable();
       await readPR(number);
-      const comment = commentSummary(await call(`${ROOT}/issues/${id(number)}/comments`, 'POST', { body: safeText(body) }), number);
+      if (adoption) fail('Adoption cannot create another comment');
+      const comment = parsedComment(await call(`${ROOT}/issues/${id(number)}/comments`, 'POST', { body: safeText(body) }), number);
       if (mode === 'revision') revisionComments.add(comment.id);
       return comment;
     },
@@ -513,12 +609,13 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       writable();
       if (mode === 'revision' && !revisionComments.has(comment)) fail('Revision can edit only its newly created Handoff comment');
       await readPR(number); await readComment(number, comment);
-      return commentSummary(await call(`${ROOT}/issues/comments/${id(comment)}`, 'PATCH', { body: safeText(body) }), number);
+      return parsedComment(await call(`${ROOT}/issues/comments/${id(comment)}`, 'PATCH', { body: safeText(body) }), number);
     },
     readComment,
     // Adapter may lose observation connectivity after a real Ready mutation. Restore and read back
     // this same App-owned, fixed-workflow candidate; never announce an uncertain delivery as Ready.
     restoreDraft: async (number: number, expectedHead: string) => {
+      if (mode === 'revision') fail('Revision publication cannot change Draft state');
       writable();
       const p = await readPR(number);
       if (!sha(expectedHead) || p.head !== expectedHead) fail('Draft restoration exact head mismatch');
@@ -534,6 +631,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return final;
     },
     ready: async (number: number, expectedHead: string, record: unknown, comment: number) => {
+      if (mode === 'revision') fail('Revision publication cannot change Draft state');
       writable();
       const validation = validateHandoff(record, expectedHead);
       if (!validation.ready_claim_valid) fail('Confirmed Handoff validation failed');

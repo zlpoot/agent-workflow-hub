@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { connectBuilder, createJwt, BRANCH, REPO } from '../dist/builder.js';
+import { connectBuilder, createJwt, BRANCH, REPO, publicationDiagnostic } from '../dist/builder.js';
 import { PROFILES, taskBinding, REPEATABLE_VERSION, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO } from '../dist/profiles.js';
 
 // Ephemeral key generated in memory; no real credential and no saved key fixture.
@@ -293,7 +293,7 @@ test('unsafe local Git transport, wrong branch and Git errors are refused safely
 
 test('Builder exposes only fixed operations, requires App bot for PR/comments, rejects secret text', async () => {
   const f = fake(), b = await connectBuilder(f.deps);
-  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready', 'restoreDraft', 'readLifecycle', 'readRevisionRef'].sort());
+  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready', 'restoreDraft', 'readLifecycle', 'readRevisionRef', 'listComments', 'readAuthorization', 'adoptComment'].sort());
   await b.createPR('Title', 'Implements #4');
   assert.deepEqual(JSON.parse(f.requests.at(-1).body), { title: 'Title', body: 'Implements #4', head: BRANCH, base: 'main', draft: true });
   await b.updatePR(5, 'Final title', 'Final body');
@@ -1530,16 +1530,62 @@ function repeatableFake({issue={},paths=['docs/management/awh-repeatable-workflo
   return f;
 }
 
-test('0.4.2 revision mode mints only comment-write scope and refuses push/PR/Ready/old-comment edits',async()=>{
+test('0.4.3 revision mode mints only single-repo PR-comment scope and refuses push/PR/Ready/old-comment edits',async()=>{
  const f=repeatableFake({consumed:true});
  const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
- assert.deepEqual(b.preflight().permissions,{contents:'read',issues:'write',metadata:'read',pull_requests:'read'});
+ assert.deepEqual(b.preflight().permissions,{contents:'read',issues:'read',metadata:'read',pull_requests:'write'});
  const tokens=f.requests.filter(r=>r.url.endsWith('/access_tokens')).map(r=>JSON.parse(r.body));
- assert.deepEqual(tokens.at(-1),{repositories:['future-ui'],permissions:{contents:'read',issues:'write',pull_requests:'read'}});
+ assert.deepEqual(tokens.at(-1),{repositories:['future-ui'],permissions:{contents:'read',issues:'read',pull_requests:'write'}});
  await assert.rejects(b.push());await assert.rejects(b.createPR('Forbidden','Forbidden'));await assert.rejects(b.updatePR(5,'Forbidden','Forbidden'));
+ await assert.rejects(b.ready(5,head,record,10));await assert.rejects(b.restoreDraft(5,head));
  await assert.rejects(b.editComment(5,10,'Do not edit old history'));
  assert(!f.git.some(r=>r[1].includes('push')));assert(!f.requests.some(r=>r.url.endsWith('/graphql')||r.method==='PATCH'));
  assert.equal((await b.createComment(5,'new revision handoff')).id,11);
+ await assert.rejects(b.createComment(6,'Wrong PR')); await assert.rejects(b.adoptComment());
+});
+
+for(const [status,category]of [[401,'authentication'],[403,'permission_or_policy'],[429,'rate_limit'],[503,'server']])
+test('revision comment POST HTTP '+status+' exposes only typed safe diagnostics',async()=>{
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>o.method==='POST'&&u.endsWith('/comments')?new Response('secret remote body',{status,headers:{'X-GitHub-Request-Id':'ABC:123:DEF','X-Accepted-GitHub-Permissions':'issues=write,pull_requests=write','Authorization':'Bearer sensitive'}}):fetch(u,o);
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
+ await assert.rejects(b.createComment(5,'private body'),e=>{assert.deepEqual(publicationDiagnostic(e),{code:'github_revision',message:'Revision GitHub operation failed',diagnostic:{stage:'revision.comment-post',category,http_status:status,github_request_id:'ABC:123:DEF',accepted_github_permissions:'issues=write,pull_requests=write'}});assert(!JSON.stringify(e).includes('sensitive'));return true;});
+});
+for(const stage of ['pr-read','compare-read','comment-post','comment-parse','comment-confirm-patch','readback'])
+test('revision diagnostic locates '+stage+' without printing network/raw JSON/identity errors',async()=>{
+ const f=repeatableFake(),fetch=f.deps.fetch;let enabled=false,createdBody;
+ f.deps.fetch=async(u,o)=>{
+  const matched=enabled&&(stage==='pr-read'&&u.endsWith('/pulls/5')||stage==='compare-read'&&u.includes('/compare/')||['comment-post','comment-parse'].includes(stage)&&o.method==='POST'&&u.endsWith('/comments')||stage==='comment-confirm-patch'&&o.method==='PATCH'||stage==='readback'&&u.endsWith('/issues/comments/11'));
+  if(matched){if(stage==='comment-post')throw Error('Bearer fake-installation-secret');if(stage==='comment-parse')return new Response('invalid sensitive JSON');return new Response('private',{status:403,headers:{'X-GitHub-Request-Id':'fake-installation-secret','X-Accepted-GitHub-Permissions':'issues=write; token=fake-installation-secret'}});}
+  if(u.endsWith('/issues/comments/11'))return new Response(JSON.stringify(comment(11,o.method==='PATCH'?JSON.parse(o.body).body:createdBody,FUTURE_REPO)));
+  const r=await fetch(u,o);if(o.method==='POST'&&u.endsWith('/comments'))createdBody=JSON.parse(o.body).body;return r;
+ };
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
+ if(['comment-confirm-patch','readback'].includes(stage))await b.createComment(5,'pending');enabled=true;
+ const operation=stage==='comment-confirm-patch'?()=>b.editComment(5,11,'confirmed'):stage==='readback'?()=>b.readComment(5,11):()=>b.createComment(5,'pending');
+ await assert.rejects(operation(),e=>{const d=publicationDiagnostic(e).diagnostic;assert.equal(d.stage,'revision.'+stage);assert(!('github_request_id'in d));assert(!('accepted_github_permissions'in d));assert(!JSON.stringify(e).includes('fake-installation-secret'));return true;});
+});
+test('revision response identity conflict has semantic parse diagnostic with status and safe request ID',async()=>{
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>o.method==='POST'&&u.endsWith('/comments')?new Response(JSON.stringify(comment(11,'pending',HUB_REPO)),{status:201,headers:{'X-GitHub-Request-Id':'ABC:123'}}):fetch(u,o);
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
+ await assert.rejects(b.createComment(5,'pending'),e=>{assert.deepEqual(publicationDiagnostic(e).diagnostic,{stage:'revision.comment-parse',category:'invalid_response',http_status:201,github_request_id:'ABC:123'});return true;});
+});
+for(const mutation of ['old-permissions','extra-repository','extra-permission'])test('revision mint fails closed '+mutation,async()=>{
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{const r=await fetch(u,o);if(u.endsWith('/access_tokens')&&JSON.parse(o.body).permissions.pull_requests==='write'){const v=await r.json();if(mutation==='old-permissions')v.permissions={contents:'read',issues:'write',metadata:'read',pull_requests:'read'};if(mutation==='extra-repository')v.repositories.push({full_name:HUB_REPO});if(mutation==='extra-permission')v.permissions.administration='write';return new Response(JSON.stringify(v));}return r;};
+ await assert.rejects(connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision'));assert(!f.requests.some(r=>r.url.endsWith('/comments')));
+});
+for(const limit of ['complete','full-ten','duplicate','malformed','page-missing','short-next'])test('read-only reconciliation comment pagination '+limit,async()=>{
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{const m=/comments\?per_page=100&page=(\d+)$/.exec(u);if(!m)return fetch(u,o);const page=Number(m[1]);if(limit==='page-missing'&&page===2)return new Response('{}',{status:403});const n=limit==='malformed'?101:limit==='short-next'||limit==='complete'&&page===2?1:100;return new Response(JSON.stringify(Array.from({length:n},(_,i)=>comment(limit==='duplicate'?1:(page-1)*100+i+1,'unrelated',FUTURE_REPO))),limit==='short-next'?{headers:{Link:'<https://api.github.com/repos/zlpoot/future-ui/issues/5/comments?per_page=100&page=2>; rel="next"'}}:{});};
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'observe');
+ if(limit==='complete')assert.equal((await b.listComments(5)).length,101);else await assert.rejects(b.listComments(5));
+ assert.equal(f.requests.filter(r=>r.url.endsWith('/access_tokens')).length,2);assert(!f.requests.some(r=>r.url.endsWith('/comments')&&r.method==='POST'));
+});
+test('adoption permits only receipt-bound existing comment PATCH, no second POST; Human gate reads fixed owner identity',async()=>{
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>u.endsWith('/issues/comments/12')?new Response(JSON.stringify({...comment(12,'gate',FUTURE_REPO),user:{login:'zlpoot',type:'User',id:36036483}})):fetch(u,o);
+ const {createHash}=await import('node:crypto');const body='existing';const adoption={pr:5,comment:10,body_sha256:createHash('sha256').update(body).digest('hex')};
+ const previous=f.deps.fetch;f.deps.fetch=async(u,o)=>u.endsWith('/issues/comments/10')?new Response(JSON.stringify(comment(10,o.method==='PATCH'?JSON.parse(o.body).body:body,FUTURE_REPO))):previous(u,o);
+ const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision',adoption);
+ assert.equal((await b.adoptComment()).id,10);await b.editComment(5,10,'confirmed');await assert.rejects(b.createComment(5,'never POST'));await assert.rejects(b.editComment(5,11,'foreign'));
+ assert.equal((await b.readAuthorization(5,12)).actor,'zlpoot');await assert.rejects(b.readAuthorization(5,10));assert(!f.requests.some(r=>r.url.endsWith('/comments')&&r.method==='POST'));
 });
 test('v0.2 App Issue inspection uses single-repo read-only token before write mint; canonical branch push once',async()=>{
   const f=repeatableFake(),b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding());
