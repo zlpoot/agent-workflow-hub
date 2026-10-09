@@ -107,6 +107,9 @@ export class AwhClient {
     return latest;
   }
   private projected(c: Context, s: Session, path = c.path): Session {
+    if (s.events.some(e => e.type === 'PR_REVISION_LINKED') || s.pending?.type === 'PR_REVISION_LINKED' ||
+        s.outbox?.some(e => e.type === 'PR_REVISION_LINKED'))
+      clientFail('revision_overlay', 'Original delivery Session cannot contain revision Events; the immutable receipt and sidecar are required');
     const o = this.overlay(c, s, path);
     if (!o) {
       if (s.initial && revisionReceipts(dirname(c.path)).some(r => { const p = r.phases(); return p.length === 6 && p[0]!.value.run_id === s.initial!.id; }))

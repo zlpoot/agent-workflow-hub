@@ -64,6 +64,7 @@ CP 在原 v2 events 表按原 owner、sequence、idempotency 和 Replay 规则�
 Replay 从原 `GITHUB_PR_CREATED` 加连续修订 Event 推导 `effective_candidate_head`。
 原 Session/交付 Journal 字节不修改；后续 Event、pending 和 completed 状态写入独立的
 追加 revision-state sidecar，关联原文件摘要和前一 sidecar 摘要。
+原 Session 内出现修订 Event 一律拒绝，即使 CP 有相同声明也不能绕过缺失的 receipt/sidecar。
 `status` 和 `timeline` 回读 CP 并展示有效候选/修订链；`sync` 的原生 Review
 subject 必须匹配有效 HEAD。原 HEAD 的 APPROVE、dismissed 或有效 CHANGES_REQUESTED
 不能批准新候选。有效新 HEAD 原生批准、真实 merge 和同一 Issue closed 才完成 Run。

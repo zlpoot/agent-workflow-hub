@@ -145,3 +145,12 @@ test('CLI rejects generic revision injection, arbitrary URL/repo and incomplete/
   for(const args of [['link-revision','--repo','zlpoot/future-ui'],['link-revision','--retry','--head',head],['event','--type','PR_REVISION_LINKED','--data','unused'],['link-revision','--head',head]])
     await assert.rejects(main(['--config','unused',...args]));
 });
+test('CP-declared revision copied into original Session cannot bypass missing receipt/sidecar',windows,async t=>{
+  const h=await ready(t);h.revise();const s=JSON.parse(h.original),p=replayRun(s.initial,s.events),e=revision();
+  e.run_id=s.initial.id;e.occurred_at=new Date().toISOString();Object.assign(e.payload.data,{source_sha:s.initial.source.sha,previous_head:p.effective_candidate_head,
+    new_head:h.git(h.repo,['rev-parse','HEAD']),base_sha:p.candidate.base_sha,ref:s.initial.source.ref,pull_request:p.candidate.pull_request,
+    previous_handoff:p.publication.comment,evidence:{comment:{...p.publication.comment,number:90001},sha256:'a'.repeat(64)},handoff:{comment:{...p.publication.comment,number:90002},sha256:'b'.repeat(64)}});
+  h.store.append(h.principal,s.initial.id,e);s.events.push(e);writeFileSync(h.session(),JSON.stringify(s));
+  const connects=h.counts.connect;await assert.rejects(h.client.syncDelivery(h.connect),/receipt and sidecar/);await assert.rejects(h.client.status(),/receipt and sidecar/);
+  assert.equal(h.counts.connect,connects);assert(h.journalBytes.equals(readFileSync(h.journal)));
+});
