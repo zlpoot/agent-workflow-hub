@@ -41,6 +41,8 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
     workflow('c1h', 'codex/c12-trusted-onboarding', 31, ['pnpm check'], null),
     workflow('c1h-b0', 'codex/c1h-b0-security', 31,
       ['pnpm build', 'node --test tests/onboarding.test.mjs tests/builder.test.mjs'], null),
+    workflow('c1i', 'codex/c1i-doctor-prototype', 32,
+      ['pnpm build', 'node --test tests/doctor.test.mjs', 'node --test tests/client.test.mjs'], null),
     workflow('c1d', 'codex/c1d-builder-adapter', 22, ['pnpm check'], null),
   ]) }),
   Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([

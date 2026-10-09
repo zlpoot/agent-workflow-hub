@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, lstatSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { CLIENT_VERSION } from '../dist/client/version.js';
+import { npmEntry, npmEnv } from './npm-tool.mjs';
+const root=dirname(dirname(fileURLToPath(import.meta.url))),args=process.argv.slice(2);
+assert(args.length===2&&args[0]==='--output','Use --output <scratch-evidence-directory>');
+const output=resolve(args[1]);mkdirSync(output,{recursive:true});
+const base=mkdtempSync(join(tmpdir(),'awh-doctor-smoke-'));
+const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^(?:GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$)/i.test(k)));
+const digest=v=>createHash('sha256').update(v).digest('hex');
+const invoke=(command,args,cwd)=>spawnSync(command,args,{cwd,env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:4*1024*1024});
+const git=(cwd,args)=>{const r=invoke('git',['-c','commit.gpgsign=false','-c','core.hooksPath='+(process.platform==='win32'?'NUL':'/dev/null'),...args],cwd);assert.equal(r.status,0,'Scratch Git failed');return r.stdout.trim()};
+const snapshot=()=>{const files={};const walk=p=>{for(const name of readdirSync(p).sort()){const f=join(p,name),s=lstatSync(f);if(s.isDirectory())walk(f);else files[f.slice(base.length)]=s.isSymbolicLink()?'link':digest(readFileSync(f));}};walk(base);return files};
+try {
+ const packed=invoke(process.execPath,[join(root,'scripts/client-pack.mjs'),'--output',output],root);assert.equal(packed.status,0,'Scratch package creation failed');
+ const artifact=JSON.parse(packed.stdout);assert.equal(artifact.version,CLIENT_VERSION);
+ const prefix=join(base,'installation');mkdirSync(prefix);writeFileSync(join(prefix,'package.json'),'{"private":true}');
+ const installed=spawnSync(process.execPath,[npmEntry(),'install','--prefix',prefix,'--offline','--ignore-scripts','--no-audit','--no-fund',artifact.artifact],{cwd:prefix,env:npmEnv(join(base,'npm-cache')),encoding:'utf8',windowsHide:true,timeout:60000});
+ assert.equal(installed.status,0,'Scratch offline install failed');
+ const repo=join(base,'future-ui-scratch');mkdirSync(repo);git(repo,['init','-b','feature/doctor-smoke']);git(repo,['config','user.name','Scratch']);git(repo,['config','user.email','scratch@example.invalid']);git(repo,['remote','add','origin','https://github.com/zlpoot/future-ui.git']);
+ mkdirSync(join(repo,'.awh'));writeFileSync(join(repo,'.awh/project.yaml'),'apiVersion: awh/v1\nproject:\n  id: future-ui\n  repository: zlpoot/future-ui\nprofile:\n  ref: future-ui/c1c-acceptance\n');writeFileSync(join(repo,'product.txt'),'scratch only');git(repo,['add','.']);git(repo,['commit','-m','offline scratch']);
+ const state=join(base,'state');mkdirSync(state);const config={schema_version:'1.0',endpoint:'http://127.0.0.1:1',credential_file:join(base,'fixture.credential'),state_directory:state,executor_id:'doctor-smoke',executor_type:'codex',profile_version:'fixture-v1'};
+ writeFileSync(config.credential_file,'deliberately-not-a-valid-credential',{mode:0o600});writeFileSync(join(base,'config.json'),JSON.stringify(config));
+ const manifest={apiVersion:'awh/v1',project:{id:'future-ui',repository:'zlpoot/future-ui'},profile:{ref:'future-ui/c1c-acceptance'}};
+ writeFileSync(join(state,'machine.json'),JSON.stringify({schema_version:'1.0',id:'machine-doctor-smoke',name:'Scratch',platform:process.platform==='win32'?'windows':process.platform==='darwin'?'macos':'linux',arch:process.arch}));
+ const namespace=join(state,digest(JSON.stringify(['future-ui','zlpoot/future-ui',config.endpoint,config.executor_id])));mkdirSync(namespace);
+ writeFileSync(join(namespace,'session.json'),JSON.stringify({schema_version:'1.0',manifest,endpoint:config.endpoint,executor_id:config.executor_id,machine_id:'machine-doctor-smoke',initial:null,work_item:null,events:[],pending:null}));
+ const cli=join(prefix,'node_modules/@zlpoot/awh-client/dist/client/cli.js'),before=snapshot(),head=git(repo,['rev-parse','HEAD']);
+ const common=['--config',join(base,'config.json'),'doctor'];const json=invoke(process.execPath,[cli,...common,'--json'],repo),text=invoke(process.execPath,[cli,...common],repo);
+ assert.equal(json.status,2);assert.equal(text.status,2);const report=JSON.parse(json.stdout);
+ assert.equal(report.checks.find(c=>c.id==='installation').status,'passed');assert.equal(report.checks.find(c=>c.id==='branch').code,'branch_profile_conflict');assert.equal(report.checks.find(c=>c.id==='client_state').status,'passed');
+ assert.equal(report.checks.find(c=>c.id==='cp_connection').status,'not_checked');assert.equal(report.authority_verified,false);
+ for(const c of report.checks)assert(text.stdout.includes(`${c.status} ${c.id}: ${c.code} [${c.source}]`));
+ assert.deepEqual(snapshot(),before,'Doctor changed scratch bytes');assert.equal(git(repo,['rev-parse','HEAD']),head);
+ writeFileSync(join(output,'doctor.json'),json.stdout);writeFileSync(join(output,'doctor.txt'),text.stdout);
+ const evidence={status:'OFFLINE_SCRATCH_SMOKE_PASS',environment:{platform:process.platform,arch:process.arch,node:process.version},client_version:CLIENT_VERSION,artifact_sha256:artifact.sha256,artifact:artifact.artifact,consumer_before_sha:head,consumer_after_sha:head,consumer_files_unchanged:true,fixture_state_unchanged:true,doctor_exit_code:json.status,expected_blocker:'branch_profile_conflict',network_requests:0,production_operations:0,unexecuted:['real CP','real Future UI/WebSkill','macOS acceptance','App write operations','independent Review']};
+ writeFileSync(join(output,'evidence.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence));
+} finally {
+ assert.equal(dirname(base),tmpdir());assert(base.startsWith(join(tmpdir(),'awh-doctor-smoke-')));rmSync(base,{recursive:true,force:true});
+}

@@ -8,20 +8,28 @@ import { CLIENT_VERSION, CLIENT_PACKAGE } from './version.js';
 import { deliver, DeliveryError, deliveryDiagnostic } from './deliver.js';
 import { readFileSync, lstatSync } from 'node:fs';
 import { publicationDiagnostic } from '../builder.js';
+import { doctor, formatDoctor, isDoctorReport } from './doctor.js';
 
 export async function main(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
-  if (args.length === 1 && args[0] === '--help') return { commands: ['init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
+  if (args.length === 1 && args[0] === '--help') return { commands: ['doctor [--json] [--probe-cp]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
     'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry',
     'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry',
     'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>'], event_types: CLIENT_EVENT_TYPES,
-    configuration: '--config <absolute-external-json-file> before command or AWH_CLIENT_CONFIG', deliver: 'fixed Builder policy; explicit event-only retry', authority_verified: false };
+    configuration: '--config <absolute-external-json-file> before command or AWH_CLIENT_CONFIG', doctor: 'read-only offline by default; explicit CP GET probe uses existing approved config; never grants authority', deliver: 'fixed Builder policy; explicit event-only retry', authority_verified: false };
   let configPath = process.env.AWH_CLIENT_CONFIG;
   if (args[0] === '--config') {
     if (!args[1] || configPath && configPath !== args[1]) clientFail('configuration', 'Conflicting or missing Client configuration source');
     configPath = args[1]; args = args.slice(2);
   }
   const [command, ...rest] = args, options = new Map<string, string>();
+  if (command === 'doctor') {
+    if (rest.length === 1 && rest[0] === '--help') return { usage: 'awh [--config <absolute-external-json-file>] doctor [--json] [--probe-cp]',
+      statuses: ['passed','blocked','not_checked'], read_only: true, offline_default: true, authority_verified: false };
+    if (rest.some(arg => !['--json','--probe-cp'].includes(arg)) || new Set(rest).size !== rest.length)
+      clientFail('arguments', 'Doctor accepts only --json and --probe-cp; no arbitrary inputs or execution');
+    return doctor({ configPath, probeCp: rest.includes('--probe-cp') });
+  }
   const allowed: Record<string, string[]> = { init: ['--profile','--project-id'], register: [], status: [], timeline: ['--run'], sync: [], start: ['--issue'], event: ['--type','--data','--retry'], finish: ['--outcome','--data'], deliver: ['--issue','--title','--body','--hold-draft','--retry','--recover-from-run'], 'link-revision': ['--run','--pr','--head','--evidence-comment','--retry'],
     'reconcile-publication':['--revision'], 'resume-publication':['--revision','--authorization-comment'] };
   if (!command || !Object.hasOwn(allowed, command)) clientFail('arguments', 'Unsupported Client command; no arbitrary execution');
@@ -70,7 +78,10 @@ export async function main(args: string[]): Promise<unknown> {
 }
 // Node resolves ESM URLs, while npm's Unix bin may leave argv[1] as a symlink.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
-  main(process.argv.slice(2)).then(result => console.log(JSON.stringify(result))).catch(error => {
+  main(process.argv.slice(2)).then(result => {
+    console.log(isDoctorReport(result) && !process.argv.slice(2).includes('--json') ? formatDoctor(result) : JSON.stringify(result));
+    if (isDoctorReport(result) && result.status === 'blocked') process.exitCode = 2;
+  }).catch(error => {
     const known = error instanceof ClientError;
     console.error(JSON.stringify({ error: error instanceof DeliveryError ? deliveryDiagnostic(error) : publicationDiagnostic(error) ?? { code: known ? error.code : 'client', message: known ? error.message : 'Client operation failed; configuration, input and remote diagnostics suppressed',
       ...(known && error.http_status ? { http_status: error.http_status } : {}) }, authority_verified: false })); process.exitCode = 2;

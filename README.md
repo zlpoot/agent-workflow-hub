@@ -1,6 +1,8 @@
 # agent-workflow-hub
 
-Current main includes v0.2 repeatable delivery, v0.2.1 revision linking and v0.2.1-R1 publication recovery, with standalone **Client 0.4.4**. Hub #42/#44/#46 are merged and #41/#43/#45 are closed; the Future UI #90/#92 delivery chain has closed. These completed deliveries do not authorize a new production operation.
+The #32 baseline includes v0.2 repeatable delivery, v0.2.1 revision linking and v0.2.1-R1 publication recovery, with standalone **Client 0.4.4**. Hub #42/#44/#46 are merged and #41/#43/#45 are closed; the Future UI #90/#92 delivery chain has closed. These completed deliveries do not authorize a new production operation.
+
+Hub [#32](https://github.com/zlpoot/agent-workflow-hub/issues/32) adds the **Client 0.4.5 candidate** [read-only Doctor](docs/doctor.md): offline diagnosis by default, shared text/JSON statuses, and an explicit original-CP GET probe. Product tests and state remain unchanged; the candidate requires independent Review and separate production authorization.
 
 See [architecture](docs/architecture.md), [deployment configuration](config/README.md), [Client](docs/client.md), [repeatable delivery](docs/repeatable.md) and [publication recovery](docs/publication-recovery.md). Historical v0.1/C0/C1 documents and fixtures remain reproducible. Dynamic Operator/Pairing, arbitrary Workflow Profiles and cross-host CP migration remain unimplemented.
 
