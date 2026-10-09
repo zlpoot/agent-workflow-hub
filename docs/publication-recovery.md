@@ -1,6 +1,6 @@
-# Client 0.4.3 publication reconciliation (Issue #45)
+# Client 0.4.4 publication reconciliation (Issue #45)
 
-This is a Client/Builder candidate for independent code review. The production Client remains 0.4.2; CP PID 35756 and the original 9 Run / 52 Event history remain stopped at the publication failure. Deploying this package or invoking recovery against Future UI PR #92 requires a new, separate Human authorization. No CP, schema, Replay or Profile changes are required.
+This is a Client/Builder candidate for independent code review. Authorized Phase A installed and registered production Client 0.4.3 once; its single read-only reconciliation stopped with `publication_conflict`, without a scope hash or provider write. CP PID 35756 and the original 9 Run / 52 Event history remain preserved. The 0.4.4 patch is CODE_SCOPE_ONLY: no production install/register or second reconciliation is authorized. Deploying this package or invoking recovery against Future UI PR #92 requires a new, separate Human authorization. No CP, schema, Replay or Profile changes are required.
 
 ## Read-only reconciliation
 
@@ -11,6 +11,8 @@ awh --config <original-external-config> reconcile-publication --revision <origin
 This command requires exactly the retained phase 0/1, the original namespace, immutable Run/Issue/task/branch/base/source, clean descendant candidate HEAD, both allowlisted document diffs, unchanged exact-head evidence, original confirmed real-Run Handoff, Session/Journal and CP timeline. Existing verification recovery receipts and predecessor archives are also qualified through the existing recovery validator. It reads with a single-repository read-only App token. It does not create a lock, intent, receipt phase, comment, Event or new revision ID.
 
 Conversation comments are read in pages of 100, up to ten pages, twice. Malformed or missing pages, a full tenth page, contradictory continuation headers, changing snapshots, multiple matching Handoffs, or conflicting actor/body/identity stop reconciliation. Only one exact App-owned frozen pending or confirmed body can be proposed for adoption.
+
+Publication identity is classified from bounded Handoff and Revision JSON sections. Existing PR92 document-review Handoff #6071714260 has a different structured producer and no Revision section; references to the real Run and target HEAD in its prose do not make it a revision candidate. Structured same-Run/target claims, unexpected current revision identifiers, malformed or contradictory Revision metadata, wrong actors and duplicate candidates still stop. A separate, structured Human resume decision is read as an authorization proposal; its presence does not authorize publication. Original comment and receipt bytes are retained.
 
 The output contains an authorization `scope` and `scope_sha256`. The scope binds original phase bytes, pending body, evidence and previous Handoff, Session, Journal, CP Event prefix and recovery receipt hashes to the same revision/Run/PR/HEAD. A `negative_observation` explicitly reports `first_post_not_submitted_proven=false` and `automatic_repost_authorized=false`. Absence in the observed pages cannot prove that an earlier POST was not accepted.
 

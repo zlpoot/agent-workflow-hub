@@ -28,7 +28,11 @@ test('original PR92 phase 0/1 bytes reconcile offline against actual 9/52 histor
  frozen.bytes.forEach((body,i)=>{assert.equal(digest(body),frozen.provenance.sha256[i]);writeFileSync(receipt.file(i),body,{flag:'wx'});});
  const phases=receipt.phases(),p=phases[0].value,bodies=publicationBodies(p,phases[1].value.body),row=fixture.tables.runs.find(r=>r.id===p.run_id),initial=JSON.parse(row.initial),events=fixture.tables.events.filter(e=>e.run_id===p.run_id).map(e=>JSON.parse(e.record)),projection=replayRun(initial,events);
  assert.equal(p.cp_events_sha256,digest(JSON.stringify(events)));assert.equal(p.source_sha,initial.source.sha);assert.equal(p.previous_head,projection.effective_candidate_head);assert.equal(p.new_head,fixture.provenance.head);assert.equal(p.pull_request.number,92);
- const observation=publicationObservation(p,bodies,[]),oldBody=JSON.parse(readFileSync(new URL('./fixtures/revision-pr92-comments.json',import.meta.url),'utf8').replace(/^\uFEFF/,'' )).find(c=>c.id===p.previous_handoff.number).body,scope=publicationScope(receipt,p,'a'.repeat(64),oldBody,observation);
+ const comments=JSON.parse(readFileSync(new URL('./fixtures/revision-pr92-comments.json',import.meta.url),'utf8').replace(/^\uFEFF/,'' )).map(c=>({...c,actor_type:'Bot'}));
+ const docs=comments.find(c=>c.id===6071714260);assert(docs.body.includes(p.run_id)&&docs.body.includes(p.new_head));assert(!docs.body.includes(p.revision_id));
+ const observation=publicationObservation(p,bodies,comments),oldBody=comments.find(c=>c.id===p.previous_handoff.number).body,scope=publicationScope(receipt,p,'a'.repeat(64),oldBody,observation);
+ assert.equal(observation.kind,'negative_observation');assert.equal(observation.first_post_not_submitted_proven,false);
+ assert.throws(()=>parsePublicationAuthorization('',scope));
  assert.equal(observation.automatic_repost_authorized,false);assert.equal(receipt.phases().length,2);
  const a={schema_version:'1.0',kind:'revision_publication_resume',decision:'authorize_once',revision_id:receipt.id,run_id:p.run_id,pr:92,new_head:p.new_head,scope_sha256:digest(JSON.stringify(scope)),action:'post_once',comment_id:null,ambiguity_decision:'accept_bounded_duplicate_risk'};
  assert.equal(parsePublicationAuthorization('AWH-PUBLICATION-RESUME v0.2.1-R1\n```json\n'+JSON.stringify(a)+'\n```',scope).action,'post_once');
@@ -41,6 +45,55 @@ test('original PR92 phase 0/1 bytes reconcile offline against actual 9/52 histor
  const after=snapshot();assert.equal(after.runs.length,9);assert.equal(after.events.length,53);assert.deepEqual(after.events.slice(0,52),before.events);
  for(const [table,rows]of Object.entries(before)){if(table==='events')continue;if(table==='runs'){for(const r of rows){const next=after.runs.find(x=>x.id===r.id);assert.equal(next.initial,r.initial);if(r.id!==p.run_id)assert.deepEqual(next,r);}}else assert.deepEqual(after[table],rows);}
  frozen.bytes.forEach((body,i)=>assert.equal(readFileSync(receipt.file(i),'utf8'),body));assert.equal(posts,1);assert.equal(patches,1);assert.equal(store.append(principal,p.run_id,event).disposition,'idempotent');assert.equal(db.prepare('PRAGMA user_version').get().user_version,2);
+});
+function realPublication() {
+ const frozen=JSON.parse(readFileSync(new URL('./fixtures/publication-pr92-phases.json',import.meta.url),'utf8'));
+ const p=JSON.parse(frozen.bytes[0]).value,bodies=publicationBodies(p,JSON.parse(frozen.bytes[1]).value.body);
+ const comments=JSON.parse(readFileSync(new URL('./fixtures/revision-pr92-comments.json',import.meta.url),'utf8').replace(/^\uFEFF/,'')).map(c=>({...c,actor_type:'Bot'}));
+ const comment=body=>({id:800002,actor:p.actor,actor_type:'Bot',body});
+ const encode=(h,r)=>'AWH-HANDOFF v0.1\n```json\n'+JSON.stringify(h,null,2)+'\n```'+(r?'\nAWH-REVISION v0.2.1\n```json\n'+JSON.stringify(r,null,2)+'\n```':'');
+ const sections=body=>[...body.matchAll(/```json\n([\s\S]*?)\n```/g)].map(m=>JSON.parse(m[1]));
+ return {p,bodies,comments,comment,encode,sections};
+}
+for(const publication of ['pending','confirmed'])test('real PR92 prose-only document Handoff stays separate from exact '+publication+' revision',()=>{
+ const {p,bodies,comments,comment}=realPublication(),before=JSON.stringify(comments);
+ const q=publicationObservation(p,bodies,[...comments,comment(bodies[publication])]);assert.equal(q.kind,'existing');assert.equal(q.publication,publication);assert.equal(q.comment_id,800002);assert.equal(JSON.stringify(comments),before);
+ assert.throws(()=>publicationObservation(p,bodies,[...comments,comment(bodies[publication]),{...comment(bodies[publication]),id:800003}]),e=>e.code==='publication_conflict');
+});
+const corruptions={
+ 'malformed Revision JSON':({bodies})=>bodies.pending.replace('"revision_id":','"revision_id" invalid:'),
+ 'missing Revision fence':({bodies})=>bodies.pending.slice(0,-3),
+ 'unsupported Revision marker':({bodies})=>bodies.pending.replace('AWH-REVISION v0.2.1','AWH-REVISION v9'),
+ 'duplicate Revision section':({bodies})=>bodies.pending+'\nAWH-REVISION v0.2.1\n```json\n{}\n```',
+ 'Revision without Handoff':({bodies})=>bodies.pending.slice(bodies.pending.indexOf('AWH-REVISION')),
+ 'current ID in unexpected ordinary prose':({p})=>'Publication reference '+p.revision_id,
+ 'current ID in unrelated Handoff prose':({p,comments})=>comments.find(c=>c.id===6071714260).body+'\n'+p.revision_id,
+ 'malformed Handoff JSON':({bodies})=>bodies.pending.replace('"schema_version":','"schema_version" invalid:'),
+ 'structured real Run target without Revision':({bodies,sections,encode})=>encode(sections(bodies.pending)[0]),
+ 'different revision ID claims same Run and target':({bodies,sections,encode})=>{const[h,r]=sections(bodies.pending);r.revision_id='revision-'+'f'.repeat(64);return encode(h,r);},
+ 'contradictory Run metadata':({bodies,sections,encode})=>{const[h,r]=sections(bodies.pending);r.run_id='other';return encode(h,r);},
+ 'contradictory HEAD metadata':({bodies,sections,encode})=>{const[h,r]=sections(bodies.pending);r.new_head='f'.repeat(40);return encode(h,r);},
+ 'other revision contradicts original source':({bodies,sections,encode})=>{const[h,r]=sections(bodies.pending);h.candidate.head_sha='a'.repeat(40);h.verification.subject_sha=h.candidate.head_sha;r.new_head=h.candidate.head_sha;r.revision_id='revision-'+'f'.repeat(64);r.original_head='f'.repeat(40);return encode(h,r);},
+ 'other revision contradicts PR identity':({bodies,sections,encode})=>{const[h,r]=sections(bodies.pending);h.candidate.head_sha='a'.repeat(40);h.verification.subject_sha=h.candidate.head_sha;r.new_head=h.candidate.head_sha;r.revision_id='revision-'+'f'.repeat(64);h.candidate.base_sha='f'.repeat(40);return encode(h,r);},
+ 'unknown metadata':({bodies,sections,encode})=>{const[h,r]=sections(bodies.pending);r.extra=true;return encode(h,r);},
+ 'contradictory comment reference':({bodies,sections,encode})=>{const[h,r]=sections(bodies.pending);r.previous_handoff+='#issuecomment-1';return encode(h,r);},
+ 'current ID in prefixed envelope':({bodies})=>'Prose\n'+bodies.pending,
+ 'unbounded protocol body':({bodies})=>bodies.pending+' '.repeat(65536),
+};
+for(const[name,mutate]of Object.entries(corruptions))test('bounded publication classification fails closed: '+name,()=>{
+ const f=realPublication();assert.throws(()=>publicationObservation(f.p,f.bodies,[...f.comments,f.comment(mutate(f))]),e=>e.code==='publication_conflict');
+});
+test('only a complete consistent other revision is separated; malformed metadata and wrong actor remain conflicts',()=>{
+ const f=realPublication(),[h,r]=f.sections(f.bodies.confirmed);h.candidate.head_sha='a'.repeat(40);h.verification.subject_sha=h.candidate.head_sha;r.new_head=h.candidate.head_sha;r.revision_id='revision-'+'f'.repeat(64);
+ const other=f.comment(f.encode(h,r));assert.equal(publicationObservation(f.p,f.bodies,[...f.comments,other]).kind,'negative_observation');
+ assert.throws(()=>publicationObservation(f.p,f.bodies,[{...other,actor:'other[bot]'}]),e=>e.code==='publication_conflict');
+ delete r.evidence_sha256;assert.throws(()=>publicationObservation(f.p,f.bodies,[f.comment(f.encode(h,r))]),e=>e.code==='publication_conflict');
+});
+test('ordinary Run/HEAD prose and structured Human resume proposal confer no publication authority',()=>{
+ const f=realPublication(),a={schema_version:'1.0',kind:'revision_publication_resume',revision_id:f.p.revision_id};
+ const comments=[...f.comments,f.comment('References '+f.p.run_id+' '+f.p.new_head),f.comment('AWH-PUBLICATION-RESUME v0.2.1-R1\n```json\n'+JSON.stringify(a)+'\n```')];
+ const q=publicationObservation(f.p,f.bodies,comments);assert.equal(q.kind,'negative_observation');assert.equal(q.first_post_not_submitted_proven,false);assert.equal(q.automatic_repost_authorized,false);
+ assert.throws(()=>parsePublicationAuthorization(comments.at(-1).body,{revision_id:f.p.revision_id,observation:q}));
 });
 async function failed(t,{existing=null,recovered=false}={}) {
  const h=await harness(t),route=h.client.request;
@@ -78,6 +131,11 @@ test('phase 0/1 reconciliation is read-only: missing comment is not no-submit pr
  assert.equal(q.observation.kind,'negative_observation');assert.equal(q.first_post_not_submitted_proven,false);assert.equal(q.observation.automatic_repost_authorized,false);
  assert.equal(q.provider_writes,0);assert.deepEqual(readdirSync(dirname(h.session())),before);assert.equal(h.posts(),0);h.preserved();
  await assert.rejects(h.client.retryRevision());await assert.rejects(h.resume());assert(!existsSync(h.intent));
+});
+test('complete offline Client excludes public docs-review prose, preserves the comment, and still requires explicit one-shot authorization',windows,async t=>{
+ const h=await failed(t),f=realPublication(),docs=f.comments.find(c=>c.id===6071714260).body.replaceAll(f.p.run_id,h.result.run_id).replaceAll(f.p.new_head,h.head);h.comments.set(30000,docs);
+ const before=readdirSync(dirname(h.session())),q=await h.reconcile();assert.equal(q.observation.kind,'negative_observation');assert.equal(q.provider_writes,0);assert.equal(q.human_authorization_required,true);assert.equal(q.first_post_not_submitted_proven,false);assert.deepEqual(readdirSync(dirname(h.session())),before);assert.equal(h.posts(),0);await assert.rejects(h.resume());assert(!existsSync(h.intent));
+ await h.authorize();await h.resume();assert.equal(h.posts(),1);assert.equal(h.events(h.result.run_id).length,11);assert.equal(h.comments.get(30000),docs);h.preserved();
 });
 test('read-only reconciliation refuses a missing namespace without creating it',windows,async t=>{
  const h=await failed(t),configPath=h.client.configPath,c=JSON.parse(readFileSync(configPath)),before=readdirSync(c.state_directory);writeFileSync(configPath,JSON.stringify({...c,endpoint:'http://127.0.0.1:4311'}));

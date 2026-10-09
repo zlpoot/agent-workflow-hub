@@ -31,9 +31,56 @@ export function publicationBodies(prepared: any, pending: string) {
   if (!validateHandoff(confirmed, prepared.new_head).ready_claim_valid) clientFail('publication_receipt', 'Invalid confirmed Handoff');
   return { pending, confirmed: render(confirmed), handoff: confirmed };
 }
+// Parse protocol sections before comparing identities. Prose references to a Run/HEAD
+// do not turn a different Builder's Handoff into this revision's publication.
+function relatedPublication(prepared: any, c: PublicationComment): boolean {
+  const body = c.body, currentId = body.includes(prepared.revision_id);
+  const hasHandoff = body.includes('AWH-HANDOFF'), hasRevision = body.includes('AWH-REVISION');
+  if (!hasHandoff && !hasRevision && !currentId) return false;
+  const conflict = () => clientFail('publication_conflict', 'Malformed or contradictory publication identity');
+  if (body.length > 65536) return conflict();
+  // A structured Human decision necessarily references the revision. This only
+  // separates its protocol; parsePublicationAuthorization still grants no implicit authority.
+  if (!hasHandoff && !hasRevision) {
+    const authorization = /^AWH-PUBLICATION-RESUME v0\.2\.1-R1\n```json\n([\s\S]*?)\n```$/.exec(body);
+    try {
+      const a = authorization && JSON.parse(authorization[1]!);
+      if (a?.schema_version === '1.0' && a.kind === 'revision_publication_resume') return false;
+    } catch { /* unexpected current ID remains a conflict */ }
+    return conflict();
+  }
+  const envelope = /^AWH-HANDOFF v0\.1\n```json\n([\s\S]*?)\n```([\s\S]*)$/.exec(body);
+  if (!envelope || body.split('AWH-HANDOFF').length !== 2) return conflict();
+  let h: BuilderHandoff;
+  try { h = JSON.parse(envelope[1]!); } catch { return conflict(); }
+  if (!validateHandoff(h, h?.candidate?.head_sha).schema_valid) return conflict();
+  const sameTarget = h.producer.run_id === prepared.run_id && h.candidate.head_sha === prepared.new_head;
+  if (!hasRevision) return currentId || sameTarget;
+  const section = /^\nAWH-REVISION v0\.2\.1\n```json\n([\s\S]*?)\n```$/.exec(envelope[2]!);
+  if (!section || body.split('AWH-REVISION').length !== 2) return conflict();
+  let r: Record<string, any>;
+  try { r = JSON.parse(section[1]!); } catch { return conflict(); }
+  const sha = (v: unknown, n: number) => typeof v === 'string' && new RegExp('^[0-9a-f]{' + n + '}$').test(v);
+  const comment = (v: unknown) => {
+    const prefix = `https://github.com/${h.work_item.repo}/pull/${h.candidate.pr}#issuecomment-`;
+    return typeof v === 'string' && v.startsWith(prefix) && /^[1-9][0-9]*$/.test(v.slice(prefix.length));
+  };
+  if (!r || Array.isArray(r) || Object.keys(r).sort().join(',') !== 'evidence,evidence_sha256,new_head,original_head,previous_handoff,previous_head,revision_id,run_id,schema_version' ||
+      r.schema_version !== '1.0' || typeof r.revision_id !== 'string' || !/^revision-[0-9a-f]{64}$/.test(r.revision_id) ||
+      r.run_id !== h.producer.run_id || r.new_head !== h.candidate.head_sha || !sha(r.original_head,40) || !sha(r.previous_head,40) ||
+      !sha(r.evidence_sha256,64) || !comment(r.previous_handoff) || !comment(r.evidence) ||
+      h.verification.evidence_refs.length !== 1 || h.verification.evidence_refs[0] !== r.evidence ||
+      h.verification.subject_sha !== r.new_head || h.verification.lifecycle !== 'completed' || h.verification.outcome !== 'pass' ||
+      h.work_item.repo !== prepared.task.repository || h.work_item.issue !== prepared.task.issue ||
+      h.candidate.pr !== prepared.pull_request.number || h.candidate.base_sha !== prepared.base_sha || h.producer.executor !== prepared.task.executor_id ||
+      (r.run_id === prepared.run_id && r.original_head !== prepared.source_sha) ||
+      !['pending','confirmed'].includes(h.handoff.publication) || c.actor !== prepared.actor || c.actor_type !== 'Bot') return conflict();
+  // A different ID can only be separated after the complete envelope is consistent.
+  // Structured same-Run/target claims remain suspicious even with a different ID.
+  return currentId || r.revision_id === prepared.revision_id || sameTarget;
+}
 export function publicationObservation(prepared: any, bodies: ReturnType<typeof publicationBodies>, comments: PublicationComment[]) {
-  const related = comments.filter(c => c.body.startsWith('AWH-HANDOFF v0.1') &&
-    (c.body.includes(prepared.revision_id) || c.body.includes(prepared.run_id) && c.body.includes(prepared.new_head)));
+  const related = comments.filter(c => relatedPublication(prepared, c));
   if (related.length > 1) clientFail('publication_conflict', 'Multiple revision Handoffs; stop for independent reconciliation');
   const c = related[0];
   if (c && (c.actor !== prepared.actor || c.actor_type !== 'Bot' || ![bodies.pending, bodies.confirmed].includes(c.body) ||
