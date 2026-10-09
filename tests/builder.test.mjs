@@ -88,6 +88,33 @@ function fake(overrides = {}) {
   return { deps, requests, git, advance: ms => { clock += ms; } };
 }
 
+test('C1-I publication stays fixed to Hub #32/main/current branch with single-repository App credentials', async () => {
+  const selection = { profile: 'hub', workflow: 'c1i' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'c1i', branch: 'codex/c1i-doctor-prototype', work_item: { repo: HUB_REPO, issue: 32 },
+    verification_commands: ['pnpm build', 'node --test tests/doctor.test.mjs', 'node --test tests/client.test.mjs'], bootstrap_paths: null });
+  assert.deepEqual(DEFAULT_SELECTION, { profile: 'hub', workflow: 'c05' });
+  assert.equal(selectWorkflow({ profile: 'hub', workflow: 'c1h' }).workflow.work_item.issue, 31);
+  assert.equal(selectWorkflow({ profile: 'hub', workflow: 'c1h-b0' }).workflow.work_item.issue, 31);
+  for (const extra of [{ repository: WEBSKILL_REPO }, { branch: 'main' }, { issue: 31 }, { base: 'untrusted' }, { command: 'pnpm check' }])
+    assert.throws(() => selectWorkflow({ ...selection, ...extra }));
+  const f = fake({ branch: workflow.branch, installed: [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/agent-desktop'] });
+  const b = await connectBuilder(f.deps, selection); await b.push();
+  const p = await b.createPR('Client Doctor prototype', 'Refs #32; awaiting independent exact-head Review.');
+  assert.equal(p.draft, true); assert.equal(p.head, head);
+  const tokens = f.requests.filter(r => r.url.endsWith('/access_tokens')).map(r => JSON.parse(r.body));
+  assert.deepEqual(tokens, [{ permissions: inspectionPermissions }, { repositories: ['agent-workflow-hub'],
+    permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } }]);
+  const create = f.requests.find(r => r.url.endsWith('/pulls') && r.method === 'POST');
+  assert.equal(JSON.parse(create.body).base, 'main'); assert.equal(JSON.parse(create.body).head, workflow.branch);
+  assert.equal(JSON.parse(create.body).draft, true);
+  assert(!f.requests.some(r => r.url.endsWith('/graphql') || /\/reviews(?:\?|$)|\/merge$/.test(r.url)));
+  const foreignBranch = fake({ branch: 'codex/c1h-b0-security' });
+  await assert.rejects((await connectBuilder(foreignBranch.deps, selection)).push());
+  assert(!foreignBranch.git.some(r => r[1].includes('push')));
+});
+
 test('Adapter Draft restoration is fixed App-owned exact-head and read back', async () => {
   let restored = false;
   const f = fake({ response: (url, options, value) => {
