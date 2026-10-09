@@ -3,7 +3,8 @@ import { request as httpsRequest } from 'node:https';
 import { ClientError } from './local.js';
 
 // Direct HTTP(S), never caller proxy auto-discovery, redirects, cookies or GitHub credentials.
-export async function requestJson(endpoint: string, path: string, credential: string, method: 'GET' | 'POST', data?: unknown, ca?: Buffer): Promise<Record<string, unknown>> {
+export async function requestJson(endpoint: string, path: string, credential: string, method: 'GET' | 'POST', data?: unknown, ca?: Buffer,
+  limits: { timeoutMs?: number; maxBytes?: number; tlsDiagnostic?: boolean } = {}): Promise<Record<string, unknown>> {
   const url = new URL(path, endpoint), encoded = data === undefined ? undefined : JSON.stringify(data);
   return new Promise((resolve, reject) => {
     const fail = (code: string, message: string, status?: number) => reject(new ClientError(code, message, status));
@@ -17,7 +18,7 @@ export async function requestJson(endpoint: string, path: string, credential: st
       const chunks: Buffer[] = []; let size = 0;
       res.on('data', (chunk: Buffer) => {
         size += chunk.length;
-        if (size > 8 * 1024 * 1024) { res.destroy(); fail('response_size', 'Control Plane response exceeds the byte limit'); }
+        if (size > (limits.maxBytes ?? 8 * 1024 * 1024)) { res.destroy(); fail('response_size', 'Control Plane response exceeds the byte limit'); }
         else chunks.push(chunk);
       });
       res.on('error', () => fail('network', 'Control Plane response was interrupted (details suppressed)'));
@@ -30,9 +31,12 @@ export async function requestJson(endpoint: string, path: string, credential: st
         } catch { fail('response_schema', 'Control Plane response is invalid; contents suppressed'); }
       });
     });
-    const timer = setTimeout(() => { req.destroy(); fail('timeout', 'Control Plane request timed out; retry the pending operation explicitly'); }, 15000);
+    const timer = setTimeout(() => { req.destroy(); fail('timeout', 'Control Plane request timed out; retry the pending operation explicitly'); }, limits.timeoutMs ?? 15000);
     timer.unref(); req.on('close', () => clearTimeout(timer));
-    req.on('error', () => fail('network', 'Control Plane connection failed (details suppressed); no credential or endpoint fallback'));
+    req.on('error', (error: NodeJS.ErrnoException) => {
+      const tls = limits.tlsDiagnostic && /^(?:ERR_TLS_|ERR_SSL_|CERT_|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT)/.test(error.code ?? '');
+      fail(tls ? 'tls' : 'network', 'Control Plane connection failed (details suppressed); no credential or endpoint fallback');
+    });
     req.end(encoded);
   });
 }

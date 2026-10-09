@@ -1,6 +1,8 @@
 # Client / C1-C and C1-D
 
-Current main ships Client **0.4.4**, including v0.2 repeatable delivery, v0.2.1 controlled document revision linking and [v0.2.1-R1 one-shot publication recovery](publication-recovery.md). Hub #42/#44/#46 are merged and #41/#43/#45 are closed. Independent Review of any new head and separate Human production authorization remain required; old recovery decisions are not reusable.
+Hub #32 adds the **0.4.5 candidate** read-only `awh doctor` prototype using the existing standalone package structure. See the [Doctor and manual trusted configuration guide](doctor.md), also included in the tarball. This candidate is not production deployment approval.
+
+The #32 baseline main ships Client **0.4.4**, including v0.2 repeatable delivery, v0.2.1 controlled document revision linking and [v0.2.1-R1 one-shot publication recovery](publication-recovery.md). Hub #42/#44/#46 are merged and #41/#43/#45 are closed. Independent Review of any new head and separate Human production authorization remain required; old recovery decisions are not reusable.
 
 The standalone package includes Client, Protocol, shared stateless security checks, the fixed App Builder/policies and bundled runtime dependencies. It excludes CP server/Store, Builder CLI, browser/development dependencies and credentials. Consumers need Node 24+, not a Hub checkout. [Configuration sources and closed schemas](../config/README.md) document current deployment parameters.
 
@@ -8,12 +10,12 @@ Historical / Legacy: the original C1-C/C1-D descriptions and constraints below r
 
 ## 分发与安装
 
-Builder 在 Hub 执行 `pnpm client:pack`，生成 `.handoff/packages/zlpoot-awh-client-0.4.4.tgz` 和 SHA-256/文件清单 JSON。`--output` 仅指定包输出目录。打包从锁定、已安装的 runtime dependencies 复制依赖闭包，调用本机 npm 的 offline pack，不下载或运行 lifecycle scripts。
+Builder 在 Hub 执行 `pnpm client:pack`，生成当前候选版本的 `.handoff/packages/zlpoot-awh-client-0.4.5.tgz` 和 SHA-256/文件清单 JSON。`--output` 仅指定包输出目录。打包从锁定、已安装的 runtime dependencies 复制依赖闭包，调用本机 npm 的 offline pack，不下载或运行 lifecycle scripts。
 
 将 tarball 经已认证的文件传输交给消费者，核对提供的 SHA-256。消费者在仓库外安装：
 
 ```sh
-npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --no-audit --no-fund /absolute/zlpoot-awh-client-0.4.4.tgz
+npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --no-audit --no-fund /absolute/zlpoot-awh-client-0.4.5.tgz
 /absolute/external/awh-client/node_modules/.bin/awh --version
 ```
 

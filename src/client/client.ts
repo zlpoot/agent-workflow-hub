@@ -35,9 +35,9 @@ const timestamp = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-
 
 export class AwhClient {
   constructor(readonly configPath: string, readonly cwd = process.cwd()) {}
-  private context(create = false, readOnly = false): Context {
-    const identity = inspectRepository(this.cwd), manifest = readManifest(identity), config = readConfig(this.configPath, identity.root);
-    const m = machine(config, create), credential = readCredential(config);
+  private context(create = false, readOnly = false, secrets = true): Context {
+    const identity = inspectRepository(this.cwd), manifest = readManifest(identity), config = readConfig(this.configPath, identity.root, readOnly);
+    const m = machine(config, create), credential = secrets ? readCredential(config) : '';
     const metadata: ClientMetadata = { schema_version: '1.0', executor_type: config.executor_type, machine_name: m.name, arch: m.arch, client_version: CLIENT_VERSION };
     const executor: Executor = { schema_version: '1.0', kind: 'executor', id: config.executor_id, display_name: config.executor_type + ' on ' + m.name,
       machine: { id: m.id, platform: m.platform } };
@@ -125,6 +125,23 @@ export class AwhClient {
     return this.validateSession(c, { ...s, events: [...s.events, ...o.events], pending: o.pending });
   }
   private load(c: Context): Session { return existsSync(c.path) ? this.projected(c, this.validateSession(c, readJson(c.path, 16 * 1024 * 1024, false))) : this.empty(c); }
+  // Doctor uses the original binding/replay checks without creating state, locks or reading a secret.
+  inspectLocalDiagnostics() {
+    const c = this.context(false, true, false);
+    if (!existsSync(c.path)) clientFail('state', 'Original Client session file is missing');
+    const names = readdirSync(dirname(c.path));
+    if (names.length > 512) clientFail('state', 'Local diagnostic directory exceeds its bounded file budget');
+    const s = this.load(c);
+    const checks = [...s.events].reverse().find(e => e.type === 'VERIFICATION_PASSED' || e.type === 'VERIFICATION_FAILED');
+    const journals = names.filter(n => n.endsWith('.delivery.json'));
+    // A retained provider journal needs separate reconciliation; no offline success inference.
+    return { run: s.initial, work_item: s.work_item,
+      verification_commands: checks && (checks.type === 'VERIFICATION_PASSED' || checks.type === 'VERIFICATION_FAILED') ? checks.payload.data.checks.map(x => x.command) : null,
+      pending_events: (s.pending ? 1 : 0) + (s.outbox?.length ?? 0),
+      journal_count: journals.length, interrupted_revisions: this.revisionPending(c).length,
+      locked: names.some(n => n.endsWith('.lock')),
+      recovery_records: names.some(n => n.includes('.recovery.')) };
+  }
   private save(c: Context, s: Session): void {
     this.validateSession(c, s);
     const original = existsSync(c.path) ? this.validateSession(c, readJson(c.path, 16 * 1024 * 1024, false)) : null;

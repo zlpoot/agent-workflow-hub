@@ -17,8 +17,9 @@ try {
   for (const path of ['client','protocol','shared','validator.js','profiles.js','builder.js']) cpSync(join(root, 'dist', path), join(stage, 'dist', path), { recursive: true });
   cpSync(join(root, 'dist/control-plane/security.js'), join(stage, 'dist/control-plane/security.js'));
   if (existsSync(join(root, 'docs/client.md'))) cpSync(join(root, 'docs/client.md'), join(stage, 'README.md'));
+  cpSync(join(root, 'docs/doctor.md'), join(stage, 'doctor.md'));
   const packageJson = { name: CLIENT_PACKAGE, version: CLIENT_VERSION, private: true, type: 'module', engines: { node: '>=24' },
-    bin: { awh: 'dist/client/cli.js' }, exports: { '.': './dist/client/index.js' }, files: ['dist'],
+    bin: { awh: 'dist/client/cli.js' }, exports: { '.': './dist/client/index.js' }, files: ['dist', 'doctor.md'],
     dependencies: manifest.dependencies, bundledDependencies: Object.keys(manifest.dependencies) };
   writeFileSync(join(stage, 'package.json'), JSON.stringify(packageJson, null, 2));
   const copied = new Map();
@@ -41,6 +42,7 @@ try {
   assert(!r.error && r.status === 0, 'Local npm pack failed (diagnostics suppressed)');
   const [packed] = JSON.parse(r.stdout); assert.equal(packed.name, CLIENT_PACKAGE); assert.equal(packed.version, CLIENT_VERSION);
   assert(packed.files.every(f => !/^(?:src|tests|\.handoff|credentials)\//.test(f.path) && !/(?:builder-cli|control-plane-cli|control-plane\/store|control-plane\/server)\.js$/.test(f.path)));
+  assert(packed.files.some(f => f.path === 'dist/client/doctor.js') && packed.files.some(f => f.path === 'doctor.md'), 'Doctor runtime and manual guide must ship together');
   const archive = join(output, packed.filename); assert.equal(dirname(archive), output);
   console.log(JSON.stringify({ package: CLIENT_PACKAGE, version: CLIENT_VERSION, artifact: archive,
     sha256: createHash('sha256').update(readFileSync(archive)).digest('hex'), files: packed.files.map(f => f.path), bundled_runtime_dependencies: Object.fromEntries(copied), published_to_registry: false }));

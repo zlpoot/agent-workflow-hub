@@ -25,7 +25,7 @@ export function git(root: string, args: string[], optional = false): string {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(GIT_|GH_|GITHUB_|AWH_|SSH_|NODE_OPTIONS$)/i.test(k)));
   Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
     GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: root.replaceAll('\\', '/'),
-    GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '', GIT_TERMINAL_PROMPT: '0' });
+    GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' });
   const r = spawnSync('git', ['-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, '-c', 'core.fsmonitor=false', ...args], { cwd: root, env, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024, windowsHide: true });
   if (optional && r.status === 1 && !r.error) return '';
   if (r.error || r.status !== 0) return clientFail('git', 'Read-only Git identity inspection failed (details suppressed)');
@@ -115,7 +115,7 @@ function outside(root: string, path: string): void {
   const rel = relative(root, path); if (!rel || !rel.startsWith('..' + (process.platform === 'win32' ? '\\' : '/')) && !isAbsolute(rel))
     clientFail('configuration', 'Client configuration, credential and state must be outside the project');
 }
-export function readConfig(path: string, root: string): ClientConfig {
+export function readConfig(path: string, root: string, readOnly = false): ClientConfig {
   if (!isAbsolute(path)) clientFail('configuration', 'Explicit absolute Client config path is required');
   absoluteDeploymentPath(path);
   outside(root, realpathSync(path));
@@ -148,9 +148,11 @@ export function readConfig(path: string, root: string): ClientConfig {
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; suffix.unshift(basename(parent)); parent = dirname(parent); }
   }
   config.state_directory = resolve(realpathSync(parent), ...suffix); outside(root, config.state_directory);
-  mkdirSync(config.state_directory, { recursive: true, mode: 0o700 });
-  outside(root, realpathSync(config.state_directory));
-  if (lstatSync(config.state_directory).isSymbolicLink()) clientFail('configuration', 'Client state directory cannot be a symbolic link');
+  if (!readOnly) mkdirSync(config.state_directory, { recursive: true, mode: 0o700 });
+  try {
+    outside(root, realpathSync(config.state_directory));
+    if (!lstatSync(config.state_directory).isDirectory() || lstatSync(config.state_directory).isSymbolicLink()) clientFail('configuration', 'Client state must be a real directory');
+  } catch (error) { if (!readOnly || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   return { ...config, endpoint: endpoint.origin };
 }
 export function readCaCertificate(config: ClientConfig): Buffer | undefined {
