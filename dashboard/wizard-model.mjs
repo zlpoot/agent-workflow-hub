@@ -79,7 +79,7 @@ export function wizardModel(state, key, fixture = false) {
     observedVersion, branch, issue, differences, checks, runs, authority_verified: false,
     configuration: 'not_checked', currentDoctor: 'not_checked',
     timeline: { available: !!state.snapshot && !!project && state.snapshot.projects.some(p => p.id === project.id),
-      source: fixture ? 'synthetic_reader' : state.snapshot ? 'reader_snapshot' : 'not_observed',
+      source: !state.snapshot ? 'not_observed' : fixture ? 'synthetic_reader' : 'reader_snapshot',
       phase: state.phase, cursor: state.snapshot?.cursor ?? null, lastRefresh: state.lastRefresh,
       runCount: state.snapshot && project ? state.snapshot.runs.filter(r => r.project_id === project.id).length : 0,
       eventCount: project ? state.events.filter(e => e.project_id === project.id).length : 0 }

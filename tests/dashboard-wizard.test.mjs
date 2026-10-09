@@ -19,6 +19,7 @@ test('all four steps remain navigable without Viewer or config, using a clearly 
   const model=wizardModel(empty,'history:future-ui');assert.equal(model.project.source,'history_35');
   assert.equal(model.configuration,'not_checked');assert.equal(model.currentDoctor,'not_checked');assert.equal(model.timeline.available,false);
   assert.equal(model.timeline.lastRefresh,null);assert.equal(model.timeline.cursor,null);assert.equal(model.authority_verified,false);
+  assert.equal(wizardModel(empty,'history:future-ui',true).timeline.source,'not_observed');
   assert(!projectChoices(empty).some(p=>p.source==='reader_snapshot'));
 });
 
