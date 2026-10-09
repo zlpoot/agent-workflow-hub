@@ -14,6 +14,7 @@ import { npmEntry, npmEnv } from '../scripts/npm-tool.mjs';
 import { tlsFixture } from './tls-fixture.mjs';
 import { facts, trustedFixture } from './versioned-profile-fixture.mjs';
 import { deliveryPolicy, matchDeliveryPolicy } from '../dist/client/delivery-policy.js';
+import { taskBinding, REPEATABLE_VERSION } from '../dist/profiles.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url)), cli = join(root,'dist/client/cli.js');
 export const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$)/i.test(key)));
@@ -28,14 +29,14 @@ function temporary(t) {
   t.after(() => { assert.equal(dirname(base),tmpdir()); assert(base.startsWith(join(tmpdir(),'awh-doctor-'))); rmSync(base,{recursive:true,force:true}); });
   return base;
 }
-function fixture(t, { repository='zlpoot/webskill', ref='webskill/bootstrap', branch='codex/awh-c07-webskill-bootstrap' }={}) {
+function fixture(t, { repository='zlpoot/webskill', ref='webskill/bootstrap', branch='codex/awh-c07-webskill-bootstrap', executor_id='doctor-fixture', profile_version='fixture-v1' }={}) {
   const base=temporary(t),repo=join(base,'consumer');mkdirSync(repo);git(repo,['init','-b',branch]);
   git(repo,['config','user.name','Fixture']);git(repo,['config','user.email','fixture@example.invalid']);
   git(repo,['remote','add','origin','https://github.com/'+repository+'.git']);writeFileSync(join(repo,'product.txt'),'unchanged fixture');
   git(repo,['add','.']);git(repo,['commit','-m','scratch']);initManifest(inspectRepository(repo),repository.split('/')[1],ref);
   git(repo,['add','.awh/project.yaml']);git(repo,['commit','-m','scratch identity']);
   const configPath=join(base,'client.json'),state=join(base,'state'),credential=join(base,'client.credential');mkdirSync(state);
-  const config={schema_version:'1.0',endpoint:'http://127.0.0.1:1',credential_file:credential,state_directory:state,executor_id:'doctor-fixture',executor_type:'codex',profile_version:'fixture-v1'};
+  const config={schema_version:'1.0',endpoint:'http://127.0.0.1:1',credential_file:credential,state_directory:state,executor_id,executor_type:'codex',profile_version};
   writeFileSync(credential,'awh_cp_'+'D'.repeat(43),{mode:0o600});writeFileSync(configPath,JSON.stringify(config));
   const m=machine(config),manifest={apiVersion:'awh/v1',project:{id:repository.split('/')[1],repository},profile:{ref}};
   const namespace=join(state,hash(JSON.stringify([manifest.project.id,repository,config.endpoint,config.executor_id])));mkdirSync(namespace);
@@ -103,6 +104,33 @@ test('future-ui acceptance ref conflicts explain current and legacy bootstrap ex
   const report=await doctor({configPath:h.configPath,cwd:h.repo});assert.equal(check(report,'branch').status,'blocked');assert.equal(check(report,'branch').details.actual_branch,'feature/current-product');
   assert.equal(check(report,'branch').details.expected_branch,'codex/awh-v01-acceptance');assert.equal(check(report,'legacy_bootstrap').details.expected_branch,'codex/awh-c06-bootstrap');
   assert(check(report,'branch').safe_next_step.includes('#34'));assert.deepEqual(snapshot(h.base),before);
+});
+
+test('repeatable Doctor keeps retained Issue 90 but reports unavailable dynamic Issue without inferring authority',async t=>{
+  const h=fixture(t,{repository:'zlpoot/future-ui',ref:'future-ui/c1c-acceptance',branch:'feature/current-product',
+    executor_id:'c1c-future-ui-windows',profile_version:REPEATABLE_VERSION});
+  const example=JSON.parse(readFileSync(join(root,'examples/protocol/future-ui.json')));
+  const binding=taskBinding({repository:'zlpoot/future-ui',issue:90,branch:'codex/awh-task-90',source_sha:git(h.repo,['rev-parse','HEAD']),
+    profile_ref:h.manifest.profile.ref,profile_version:REPEATABLE_VERSION,executor_id:h.config.executor_id,machine_id:h.m.id});
+  h.session.initial={...example.run,project_id:h.manifest.project.id,executor_id:h.config.executor_id,machine_id:h.m.id,
+    source:{...example.run.source,repository:binding.repository,sha:binding.source_sha,ref:binding.branch},profile:{ref:h.manifest.profile.ref,version:REPEATABLE_VERSION}};
+  h.session.work_item={...example.work_item,project_id:h.manifest.project.id,reference:{...example.work_item.reference,repository:binding.repository,number:90}};
+  h.session.task_binding=binding;h.save();
+  const observe=async()=>{
+    const before=snapshot(h.base),report=await doctor({configPath:h.configPath,cwd:h.repo});assert.deepEqual(snapshot(h.base),before);
+    assert.equal(check(report,'client_state').status,'passed');assert.equal(check(report,'work_item').details.actual_work_item.issue,90);
+    assert.equal(report.authority_verified,false);return report;
+  };
+  for(const branch of ['feature/current-product','codex/awh-task-0','codex/awh-task-9007199254740992']){
+    if(branch!=='feature/current-product')git(h.repo,['checkout','-b',branch]);
+    const report=await observe();assert.equal(check(report,'branch').code,'branch_profile_conflict');
+    assert.equal(check(report,'profile').details.work_item.issue,null);assert.equal(check(report,'work_item').details.expected_work_item.issue,null);
+    assert.equal(check(report,'work_item').status,'not_checked');assert.equal(check(report,'work_item').code,'dynamic_issue_unavailable');
+    assert(!formatDoctor(report).includes('"issue":0'));
+  }
+  git(h.repo,['checkout','-b','codex/awh-task-90']);assert.equal(check(await observe(),'work_item').status,'passed');
+  git(h.repo,['checkout','-b','codex/awh-task-91']);const mismatch=await observe();assert.equal(check(mismatch,'work_item').status,'blocked');
+  assert.equal(check(mismatch,'work_item').details.expected_work_item.issue,91);
 });
 test('Manifest cannot approve an unknown/cross-repository Profile, and CP version/check conflicts are explicit',async t=>{
   const h=fixture(t,{ref:'webskill/owner-approved-in-project-json'});

@@ -1,6 +1,6 @@
 # Client Doctor prototype — Hub #32
 
-Client candidate **0.4.5** extends the independently installed 0.4.4 package structure with read-only diagnosis. It needs Node 24+ and Git, and runs inside a real product worktree without a Hub checkout. This prototype has offline fixture coverage on the recorded Builder OS; it does not claim macOS or production acceptance.
+Client candidate **0.4.6** extends the independently installed package structure with read-only diagnosis. It needs Node 24+ and Git, and runs inside a real product worktree without a Hub checkout. This prototype has offline fixture coverage on the recorded Builder OS; it does not claim macOS or production acceptance.
 
 ## Run offline first
 
@@ -28,7 +28,7 @@ App selected-set/permissions, GitHub remote state, independent Review and tarbal
 Ask the owner for the reviewed tarball and its SHA-256 through an authenticated channel. Install into an external tool directory, leaving the product package.json/lockfile unchanged:
 
 ```sh
-npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --no-audit --no-fund /absolute/zlpoot-awh-client-0.4.5.tgz
+npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --no-audit --no-fund /absolute/zlpoot-awh-client-0.4.6.tgz
 /absolute/external/awh-client/node_modules/.bin/awh --version
 ```
 
@@ -60,3 +60,5 @@ The #32 implementation/testing scope is Hub code, temporary fixtures, standalone
 ## Versioned offline comparison
 
 Issue #34 adds optional `--policy-trust`, `--work-item`, `--work-item-version` and `--observations` arguments. These read an operator-owned external pinned snapshot and compare bounded declarations with actual Git/Manifest/config/retained facts. They cannot grant execution or Deliver authority and cannot be combined with `--probe-cp`. See [versioned-profile.md](versioned-profile.md) for exact closed DTOs, trust-root limitations and the library-only Develop declaration/report API.
+
+Hub #33 corrects unavailable dynamic expected Issues to `null` / `dynamic_issue_unavailable` while retaining observed historical Issues separately. Original #35 0.4.5 evidence and 9/4/9 remain unchanged. Dashboard Wizard documentation is available in the Hub repository; this standalone guide requires no Hub checkout.

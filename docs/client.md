@@ -1,6 +1,6 @@
 # Client / C1-C and C1-D
 
-Hub #32 adds the **0.4.5 candidate** read-only `awh doctor` prototype using the existing standalone package structure. See the [Doctor and manual trusted configuration guide](doctor.md), also included in the tarball. This candidate is not production deployment approval.
+Hub #32 introduced the 0.4.5 read-only `awh doctor` prototype. Hub #33 now provides the **0.4.6 candidate** with unavailable dynamic Issue diagnostics, using the existing standalone package structure. See the [Doctor and manual trusted configuration guide](doctor.md), also included in the tarball. This candidate is not production deployment approval.
 
 The #32 baseline main ships Client **0.4.4**, including v0.2 repeatable delivery, v0.2.1 controlled document revision linking and [v0.2.1-R1 one-shot publication recovery](publication-recovery.md). Hub #42/#44/#46 are merged and #41/#43/#45 are closed. Independent Review of any new head and separate Human production authorization remain required; old recovery decisions are not reusable.
 
