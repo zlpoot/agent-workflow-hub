@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { dirname, join } from 'node:path';
 import { appendEvent, assertEntity, assertClientMetadata, replayRun, validateBindings } from '../protocol/index.js';
 import type { ClientMetadata, Event, EventType, Executor, ProjectManifest, ProfilePolicy, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
-import { safeData, MAX_PAYLOAD_BYTES } from '../control-plane/security.js';
+import { safeData, MAX_PAYLOAD_BYTES } from '../shared/security.js';
 import { connectBuilder } from '../builder.js';
 import { taskBinding, bindWorkflow, REPEATABLE_VERSION, type TaskBinding } from '../profiles.js';
 import { qualifyRecovery, assertRecoveryInspection, exclusiveRecoveryFile, type RecoveryRecord, type RecoveryLink, type RecoveryInspection, type RecoveryJournal } from './recovery.js';

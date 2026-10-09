@@ -1,6 +1,8 @@
 # Client 0.4.4 publication reconciliation (Issue #45)
 
-This is a Client/Builder candidate for independent code review. Authorized Phase A installed and registered production Client 0.4.3 once; its single read-only reconciliation stopped with `publication_conflict`, without a scope hash or provider write. CP PID 35756 and the original 9 Run / 52 Event history remain preserved. The 0.4.4 patch is CODE_SCOPE_ONLY: no production install/register or second reconciliation is authorized. Deploying this package or invoking recovery against Future UI PR #92 requires a new, separate Human authorization. No CP, schema, Replay or Profile changes are required.
+Current main includes this Client 0.4.4 / v0.2.1-R1 implementation: #46 is merged and #45 is closed. The Future UI #90/#92 delivery and recovery chain has closed. This describes supported code and a completed historical recovery, not a reusable production authorization. Every new install, registration or one-shot resume requires its own explicit Human authorization and frozen scope; the existing CP/history/receipt bytes remain immutable.
+
+Historical / Legacy: Phase A Client 0.4.3 installation and its publication_conflict were retained as evidence, followed by the separately authorized Client 0.4.4 recovery. The original PR92 9 Run / 52 Event fixture remains unchanged; it is not the current live history count. The offline evidence section below retains its original test conclusions. See [configuration](../config/README.md).
 
 ## Read-only reconciliation
 

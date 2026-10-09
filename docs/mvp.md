@@ -1,5 +1,8 @@
 # v0.1 MVP 使用与验收
 
+> Historical / Legacy. This records the original version and its authorization boundary. Current main ships Client 0.4.4; the old task/candidate/setup text below is historical, not a permanent instruction or new production authorization. See [current Client](client.md).
+
+
 唯一实施任务为 [Hub #39](https://github.com/zlpoot/agent-workflow-hub/issues/39)，真实 Windows 文档验收为 [Future UI #88](https://github.com/zlpoot/future-ui/issues/88)。动态 Onboarding #31 B0/B1/B2 暂停；已合并 fixture 和 #28 原始 Deliver、恢复修复及历史证据保留。本候选复用现有 CP v2、Client、固定 App Builder、Handoff 和 Viewer，没有新 Dashboard、动态 Registry、模型 API、监听器或自动合并。
 
 ## 能力盘点

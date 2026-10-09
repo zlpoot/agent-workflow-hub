@@ -1,6 +1,10 @@
 # Windows repeatable delivery MVP
 
-Hub #41 adds Client 0.4.1 and one immutable `v02-repeatable-v1` version under `future-ui/c1c-acceptance`. The current user-authorized task is #41/#90; old #8/#21/#31/#39 task restrictions are superseded for this request. Old PR #28, #31 candidates, fixed Profiles and Future UI's active product worktrees are preserved. All delivery writes use the existing GitHub App Builder; there is no approve, merge, close, credential fallback or arbitrary shell/repository/URL execution.
+Current main includes the v0.2 repeatable workflow and Client 0.4.4. Hub #42 is merged, #41 is closed, and Future UI #90/#92 has completed its real delivery chain. The immutable template remains `v02-repeatable-v1` under `future-ui/c1c-acceptance`. Later revision/recovery capabilities are described in [publication recovery](publication-recovery.md).
+
+All delivery writes use the fixed App Builder. Existing CP, Client, state, identity and endpoint are preserved. Setup, production installation, seeding and a new delivery require explicit authorization; the historical acceptance is not a standing command. [Deployment configuration](../config/README.md) explains the policy/config boundary.
+
+Historical / Legacy: commands below illustrate the original #41/#90 workflow. Client 0.4.1 references describe that version; for a current separately authorized install use the reviewed 0.4.4 artifact. Do not rerun old seed/delivery/recovery operations merely because they appear here.
 
 ## One-time setup
 

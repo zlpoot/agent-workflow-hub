@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { externalFilePath } from '../shared/external-files.js';
 import { appendEvent, assertEntity, assertClientMetadata, validateBindings, type ClientMetadata } from '../protocol/index.js';
 import type { Event, Executor, ProfilePolicy, Project, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
 import { executorAccess, fail, MAX_PAYLOAD_BYTES, projectAccess, safeData, type Principal } from './security.js';
@@ -27,18 +28,55 @@ function entity<K extends keyof ProtocolEntities>(kind: K, input: unknown): Prot
   return assertEntity(kind, input);
 }
 
+// Startup qualification is read-only; an existing service never initializes, migrates or seeds.
+export function validateExistingDatabase(path: string, policies: readonly ProfilePolicy[]): string {
+  const checked = externalFilePath(path), db = new DatabaseSync(checked, { readOnly: true, allowExtension: false });
+  try {
+    if (Number(db.prepare('PRAGMA user_version').get()!.user_version) !== DATABASE_VERSION)
+      fail(500, 'database_version', 'Normal startup requires an existing CP v2 database');
+    const columns: Record<string, string[]> = {
+      profiles: ['ref','version','record'], projects: ['id','record'],
+      executors: ['id','client_id','last_seen','record'], work_items: ['id','project_id','record'],
+      runs: ['id','project_id','executor_id','work_item_id','client_id','initial','record'],
+      events: ['cursor','run_id','event_id','sequence','record'], executor_clients: ['executor_id','record'],
+    };
+    for (const [table, expected] of Object.entries(columns)) {
+      const actual = db.prepare(`PRAGMA table_info(${table})`).all().map(row => String(row.name));
+      if (actual.join(',') !== expected.join(',')) fail(500, 'database_identity', 'Database does not have the expected CP tables');
+    }
+    for (const name of ['events_no_update','events_no_delete','runs_identity_no_update','profiles_no_update','profiles_no_delete'])
+      if (!db.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name))
+        fail(500, 'database_identity', 'Database is missing CP immutability controls');
+    for (const policy of policies) {
+      const old = db.prepare('SELECT record FROM profiles WHERE ref = ? AND version = ?').get(policy.ref, policy.version);
+      if (!old || canonical(decode(old)) !== canonical(policy))
+        fail(409, 'profile_conflict', 'Normal startup cannot add or replace a trusted Profile version');
+    }
+    for (const row of db.prepare('SELECT record FROM projects').all()) {
+      const project = entity('project', decode(row));
+      const versions = db.prepare('SELECT record FROM profiles WHERE ref = ?').all(project.profile_ref);
+      if (!versions.length || versions.some(version => entity('profile_policy', decode(version)).repository !== project.repository))
+        fail(500, 'database_identity', 'Existing Project identity must agree with its trusted Profiles');
+    }
+    return checked;
+  } finally { db.close(); }
+}
+
 // Synchronous transactions contain no await or network I/O. BEGIN IMMEDIATE serializes all writers.
 export class ControlPlaneStore {
   readonly #db: DatabaseSync;
   #revision = 0;
-  constructor(path: string, policies: readonly ProfilePolicy[], readonly now = () => new Date().toISOString()) {
+  constructor(path: string, policies: readonly ProfilePolicy[], readonly now = () => new Date().toISOString(), mode: 'legacy' | 'existing' = 'legacy') {
     if (!Array.isArray(policies) || policies.length === 0 || policies.length > 256) fail(500, 'configuration', 'Trusted Profile policies are required');
     policies.forEach(policy => entity('profile_policy', policy));
+    if (mode !== 'legacy' && mode !== 'existing') fail(500, 'configuration', 'Invalid store startup mode');
+    if (mode === 'existing') path = validateExistingDatabase(path, policies);
     this.#db = new DatabaseSync(path, { timeout: 5000, enableForeignKeyConstraints: true, allowExtension: false });
     try {
       this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
       this.transaction(() => {
         const version = Number(this.#db.prepare('PRAGMA user_version').get()!.user_version);
+        if (mode === 'existing' && version !== DATABASE_VERSION) fail(500, 'database_version', 'Existing CP version changed during startup');
         if (version > DATABASE_VERSION) fail(500, 'database_version', 'Database schema is newer than this server');
         if (version !== 0 && version !== 1 && version !== DATABASE_VERSION) fail(500, 'database_version', 'Unsupported database schema');
         if (version === 0) this.#db.exec(`
@@ -69,6 +107,7 @@ export class ControlPlaneStore {
             fail(409, 'profile_conflict', 'Trusted Profile identity cannot be rebound to another repository');
           const old = this.#db.prepare('SELECT record FROM profiles WHERE ref = ? AND version = ?').get(policy.ref, policy.version);
           if (old && canonical(decode(old)) !== canonical(policy)) fail(409, 'profile_conflict', 'Trusted Profile version cannot be replaced');
+          if (!old && mode === 'existing') fail(409, 'profile_conflict', 'Normal startup cannot seed Profiles');
           if (!old) this.#db.prepare('INSERT INTO profiles VALUES (?, ?, ?)').run(policy.ref, policy.version, JSON.stringify(policy));
         }
       });

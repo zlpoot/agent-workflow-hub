@@ -1,5 +1,8 @@
 # C1-G read-only Dashboard
 
+> Historical verification disposition remains **PHASE_C_ACCEPTED_WITH_EXCEPTION** (#30), not unconditional PASS. This change grants no live Dashboard/CP/Operator authorization.
+
+
 Issue [#30](https://github.com/zlpoot/agent-workflow-hub/issues/30), [kickoff](https://github.com/zlpoot/agent-workflow-hub/issues/30#issuecomment-6053320500), and [P2 idle gate](https://github.com/zlpoot/agent-workflow-hub/issues/30#issuecomment-6053110396) govern this implementation. Baseline is merged #23 main `04f7b4373de6238e44e2a43c92c5d9726af0090d`. Original Windows CP, SQLite, trusted config, project identities, Mac/Windows clients and product worktrees are preserved.
 
 ## Frontend and semantic boundary

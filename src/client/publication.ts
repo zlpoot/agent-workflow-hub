@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { BuilderHandoff } from '../validator.js';
 import { validateHandoff } from '../validator.js';
-import { safeData } from '../control-plane/security.js';
+import { safeData } from '../shared/security.js';
 import { clientFail, same } from './local.js';
 import { digest, RevisionReceipt, REVISION_COMMAND } from './revision.js';
 
