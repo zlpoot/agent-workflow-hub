@@ -4,7 +4,9 @@
 
 ## 1. P2 admission 与有界审计
 
-分流顺序：低成本前置 lane/identity admission → 有界请求检查 → 完整 Operator/Client 通道认证 → 原业务/nonce/事务。前置选择只读取固定 path/header descriptor 与受信模拟 transport；Operator cookie 仅做固定长度摘要的预置 session index 查找，Pairing ID 仅来自受信 transport，不相信 body。它不授予权限，仍需全部 Host/Origin/TTL/scope/CSRF/服务与凭据验证。匿名、Operator、Pairing 独立额度在输入遍历和完整鉴权前预留；已知身份额度也前置，未知 cookie 进入匿名 lane。fixture 的非规范 header 大小写可能先走更保守的匿名额度，经完整认证后再预留对应身份额度，不放宽原鉴权；B1 adapter 必须规范化 HTTP header。所有拒绝只返回固定错误码，不回显输入，catch 仅更新有界统计，不补扣请求或写 audit。
+分流顺序：低成本前置 lane/identity admission → 有界请求检查 → 完整 Operator/Client 通道认证 → POST schema 校验 → nonce/可信决策事务。前置选择只读取固定 path/header descriptor 与受信模拟 transport；Operator cookie 做固定长度摘要的预置 session index 查找，并以可信配置的 expires_at 和无 SQLite 访问的认证时钟水位排除过期 session。未知/过期 cookie 走匿名 lane，时钟不可验证则关闭且不进入 Operator lane。Pairing ID 仅来自受信 transport，不相信 body。预分流不授予权限，仍需全部 Host/Origin/TTL/scope/CSRF/服务与凭据验证。匿名、Operator、Pairing 独立额度在输入遍历和完整鉴权前预留；已知有效身份额度也前置。fixture 的非规范 header 大小写可能先走更保守的匿名额度，经完整认证后再预留对应身份额度，不放宽原鉴权；B1 adapter 必须规范化 HTTP header。所有拒绝只返回固定错误码，不回显输入，catch 仅更新有界统计，不补扣请求或写 audit。
+
+PR #49 R1 修复边界：匿名、格式/schema 错误及认证失败不写 SQLite；POST 在有效 schema 后才消费一次性 nonce，进入可信决策后的失败仍不能重放该 nonce。对已认证 Operator 的项目申请/approve/reject/创建与撤销邀请，以及已验证私有通道和有效材料后的 claim 决策，固定语义拒绝在原写锁/配额事务内先 rollback 业务 savepoint，再提交不可变 denial audit；包括 actor、固定 action/code、已校验 target 与最小 project/repository 元数据，不保存整个输入、header、秘密、hash 或原错误文本。既有失败材料/终态的 claim attempt 审计仍保留，actor 改为受信 transport peer 的 Client ID。审计写入、busy、行数或存储门禁失败时关闭，不跳过审计授予信任；外层 catch 从不补写拒绝审计。读取操作的普通拒绝统计仍为内存观测，不能冒充写决策审计。
 
 离线固定上限（非可从请求覆盖的 policy）：
 

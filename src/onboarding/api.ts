@@ -6,9 +6,9 @@ import { boundedRequest, type AdmissionLane } from './admission.js';
 
 // In-process OFFLINE dispatcher only. Not imported by CP server, CLI or Dashboard.
 export class OfflineOnboardingApi {
-  readonly #operatorIds: ReadonlyMap<string,string>;
+  readonly #operatorSessions: ReadonlyMap<string,Readonly<{id: string; expires_at: number}>>;
   constructor(readonly store: OfflineOnboardingStore, readonly transport: TrustedFixtureTransport) {
-    this.#operatorIds=new Map(store.config.operators.map(s=>[s.session_sha256,s.id]));
+    this.#operatorSessions=new Map(store.config.operators.map(s=>[s.session_sha256,Object.freeze({id:s.id,expires_at:s.expires_at})]));
   }
   safetyDiagnostics(): Record<string,unknown> {
     return validate('SafetyDiagnostics',this.store.admission.snapshot());
@@ -37,8 +37,8 @@ export class OfflineOnboardingApi {
     const cookie=own(headers,'cookie') ?? own(headers,'Cookie');
     if (peer.kind==='operator' && path.startsWith('/onboarding/v1/') && typeof cookie==='string' &&
         cookie.length===63 && /^awh_operator=awh_op_[A-Za-z0-9_-]{43}$/.test(cookie)) {
-      const identity=this.#operatorIds.get(hash(cookie.slice(13),'operator\0'));
-      if (identity) return {lane:'operator',identity};
+      const session=this.#operatorSessions.get(hash(cookie.slice(13),'operator\0'));
+      if (session && this.store.admissionTime() < session.expires_at) return {lane:'operator',identity:session.id};
     }
     if (peer.kind==='client' && path.startsWith('/pairing/v1/') && validId(peer.scope.client_id)) return {lane:'pairing',identity:peer.scope.client_id};
     return {lane:'anonymous'};
@@ -59,13 +59,19 @@ export class OfflineOnboardingApi {
         if (lane!=='operator' || selection.identity!==operator.id) {
           release();lane='operator';release=this.store.admission.enter(lane,operator.id);
         }
+        const match = /^\/onboarding\/v1\/(requests|projects|invitations)\/([A-Za-z0-9_.:-]+)(?:\/(decision|diagnostics|revoke))?$/.exec(request.path);
+        if (match) safeId(match[2]!);
         if (request.method === 'POST') {
           if (header(request,'content-type') !== 'application/json' || header(request,'content-encoding') !== undefined) deny(400, 'content_type');
           const nonce = header(request,'x-awh-nonce'); if (!nonce || !validId(nonce)) deny(403, 'nonce');
+          const schema = request.path === '/onboarding/v1/requests' ? 'ProjectRequest' :
+            match?.[1] === 'requests' && match[3] === 'decision' ? 'Decision' :
+            request.path === '/onboarding/v1/invitations' ? 'InvitationRequest' :
+            match?.[1] === 'invitations' && match[3] === 'revoke' ? 'Empty' : null;
+          if (!schema) deny(404,'not_found');
+          validate(schema,request.body); // Malformed data never consumes nonce or enters persistent decisions.
           this.store.consumeNonce(operator,nonce);
         }
-        const match = /^\/onboarding\/v1\/(requests|projects|invitations)\/([A-Za-z0-9_.:-]+)(?:\/(decision|diagnostics|revoke))?$/.exec(request.path);
-        if (match) safeId(match[2]!);
         if (request.method === 'GET' && request.path === '/onboarding/v1/nonce') { result=this.store.nonce(operator); responseSchema='Nonce'; }
         else if (request.method === 'POST' && request.path === '/onboarding/v1/requests') {
           result=this.store.request(operator,validate<Binding>('ProjectRequest',request.body)); responseSchema='RequestView';
@@ -75,7 +81,7 @@ export class OfflineOnboardingApi {
         } else if (request.method === 'GET' && match?.[1] === 'requests' && !match[3]) { result=this.store.readRequest(operator,match[2]!); responseSchema='RequestView'; }
         else if (request.method === 'POST' && request.path === '/onboarding/v1/invitations') {
           const {delivery_id,...scope}=validate<PairingScope & {delivery_id:string}>('InvitationRequest',request.body);
-          const delivery=this.transport.delivery(delivery_id); if (!delivery) deny(403,'delivery_binding');
+          const delivery=this.transport.delivery(delivery_id);
           result=this.store.createInvitation(operator,scope,delivery); responseSchema='InvitationView';
         } else if (request.method === 'POST' && match?.[1] === 'invitations' && match[3] === 'revoke') {
           validate('Empty',request.body); result=this.store.revoke(operator,match[2]!); responseSchema='InvitationView';

@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import type { RegisteredClient } from '../control-plane/security.js';
 import { fixtureDatabase, type OfflineFixture } from './fixture.js';
-import { canonical, deny, equalHash, hash, scopeAccess, serviceAccess, validateConfig } from './security.js';
+import { canonical, deny, equalHash, hash, OnboardingError, scopeAccess, serviceAccess, validateConfig } from './security.js';
 import { OBSERVATION, type Binding, type ClientPeer, type FixtureConfig, type OperatorPrincipal, type PairingScope } from './types.js';
 import { OfflineAdmission, OFFLINE_LIMITS } from './admission.js';
 
@@ -94,6 +94,10 @@ export class OfflineOnboardingStore {
   close(): void { this.#db.close(); }
   get config(): FixtureConfig { return structuredClone(this.#config); }
   authenticationTime(): number {
+    return this.admissionTime();
+  }
+  // Constant-cost trusted clock lookup for session pre-admission; no SQLite read/write.
+  admissionTime(): number {
     const value = this.#clock();
     if (!Number.isSafeInteger(value) || value < 0 || value > 8_000_000_000_000_000) deny(500,'clock');
     return this.#authenticationFloor = Math.max(value,this.#authenticationFloor);
@@ -111,6 +115,27 @@ export class OfflineOnboardingStore {
       const result = action(this.tick()); this.#db.exec('COMMIT'); return result;
     }
     catch (error) { this.#db.exec('ROLLBACK'); throw error; }
+  }
+  // Called only inside an authenticated, schema-checked business decision boundary.
+  // Roll back business changes first, then commit the fixed denial under the same quota/write lock.
+  private decision<T>(actor: string, action: string, target: string, binding: () => Binding | null, operation: (now: number) => T): T {
+    const result = this.transaction(now => {
+      this.#db.exec('SAVEPOINT trusted_decision');
+      try {
+        const value = operation(now); this.#db.exec('RELEASE trusted_decision');
+        return { accepted: true as const, value };
+      } catch (error) {
+        if (!(error instanceof OnboardingError) || ![
+          'operator_scope','profile_binding','identity_conflict','terminal_request','terminal_invitation',
+          'project_not_approved','executor_scope','delivery_binding','service_binding','claim_race','not_found',
+        ].includes(error.code)) throw error;
+        this.#db.exec('ROLLBACK TO trusted_decision; RELEASE trusted_decision');
+        this.audit(actor,action,target,binding(),'denied',error.code);
+        return { accepted: false as const, status: error.status, code: error.code };
+      }
+    });
+    if (!result.accepted) deny(result.status,result.code);
+    return result.value;
   }
   // Both initialization and mutations call this while holding SQLite's writer reservation.
   private storageCapacity(): void {
@@ -153,7 +178,7 @@ export class OfflineOnboardingStore {
   }
   private requestView(row: RequestRow) { return { id: row.id, ...row.binding, state: row.state, created_at: iso(row.created), ...OBSERVATION }; }
   request(operator: OperatorPrincipal, binding: Binding) {
-    return this.transaction(now => {
+    return this.decision(operator.id,'project_request_denied',binding.project_id,() => binding,now => {
       for (const table of ['reserved_projects','project_bindings']) {
         const bound = this.#db.prepare(`SELECT record FROM ${table} WHERE id=?`).get(binding.project_id);
         if (bound && canonical(json(bound.record)) !== canonical(binding)) deny(409, 'identity_conflict');
@@ -171,8 +196,9 @@ export class OfflineOnboardingStore {
     return this.requestView(row);
   }
   decide(operator: OperatorPrincipal, id: string, decision: 'approve' | 'reject') {
-    return this.transaction(() => {
-      const row = this.requestRow(id), binding = row.binding; scopeAccess(operator,binding.repository);
+    let binding: Binding | null = null;
+    return this.decision(operator.id,decision === 'approve' ? 'project_approve_denied' : 'project_reject_denied',id,() => binding,() => {
+      const row = this.requestRow(id); binding = row.binding; scopeAccess(operator,binding.repository);
       const state = decision === 'approve' ? 'approved' : 'rejected';
       if (row.state !== 'pending' && row.state !== state) deny(409, 'terminal_request');
       if (state === 'approved') {
@@ -204,11 +230,11 @@ export class OfflineOnboardingStore {
       if (this.#db.prepare(`SELECT id FROM ${table} WHERE id=? OR executor_id=? OR machine_id=?`).get(scope.client_id,scope.executor_id,scope.machine_id)) deny(409, 'identity_conflict');
     }
   }
-  createInvitation(operator: OperatorPrincipal, scope: PairingScope, delivery: ClientPeer) {
+  createInvitation(operator: OperatorPrincipal, scope: PairingScope, delivery: ClientPeer | null) {
     let material = '';
-    const result = this.transaction(now => {
+    const result = this.decision(operator.id,'invitation_create_denied',scope.project_id,() => bindingOf(scope),now => {
       scopeAccess(operator,scope.repository); serviceAccess(scope,this.#config.service);
-      if (!delivery.verified || canonical(delivery.scope) !== canonical(scope)) deny(403, 'delivery_binding');
+      if (!delivery || !delivery.verified || canonical(delivery.scope) !== canonical(scope)) deny(403, 'delivery_binding');
       if (canonical(this.project(scope.project_id)) !== canonical(bindingOf(scope))) deny(409, 'identity_conflict');
       const restrictions = this.policy(scope).executor_restrictions;
       if (restrictions && (!restrictions.executor_ids.includes(scope.executor_id) || !restrictions.machine_ids.includes(scope.machine_id))) deny(403, 'executor_scope');
@@ -222,7 +248,7 @@ export class OfflineOnboardingStore {
       this.audit(operator.id,'invitation_created',id,scope); return this.invitationView(this.#db.prepare('SELECT * FROM invitations WHERE id=?').get(id)!);
     });
     try {
-      delivery.deliverInvitation(result.id,material);
+      delivery!.deliverInvitation(result.id,material);
       this.transaction(() => { if (this.#db.prepare('UPDATE invitations SET state=\'active\' WHERE id=? AND state=\'pending_delivery\'').run(result.id).changes !== 1) deny(409,'delivery_interrupted'); this.audit(operator.id,'invitation_delivered',result.id,scope); });
     }
     catch { this.transaction(() => { this.#db.prepare('UPDATE invitations SET state=\'revoked\' WHERE id=? AND state=\'pending_delivery\'').run(result.id); this.audit(operator.id,'delivery_failed',result.id,scope,'denied','delivery_failed'); }); deny(500, 'delivery_failed'); }
@@ -230,9 +256,10 @@ export class OfflineOnboardingStore {
     return this.invitationView(this.#db.prepare('SELECT * FROM invitations WHERE id=?').get(result.id)!);
   }
   revoke(operator: OperatorPrincipal, id: string) {
-    return this.transaction(() => {
+    let binding: Binding | null = null;
+    return this.decision(operator.id,'invitation_revoke_denied',id,() => binding,() => {
       const row = this.#db.prepare('SELECT * FROM invitations WHERE id=?').get(id); if (!row) deny(404, 'not_found');
-      const scope = json<PairingScope>(row.record); scopeAccess(operator,scope.repository);
+      const scope = json<PairingScope>(row.record); binding = bindingOf(scope); scopeAccess(operator,scope.repository);
       if (row.state === 'claimed') deny(409, 'terminal_invitation');
       if (row.state === 'active' || row.state === 'pending_delivery') this.#db.prepare('UPDATE invitations SET state=\'revoked\' WHERE id=?').run(id);
       this.audit(operator.id,'invitation_revoked',id,scope); return this.invitationView(this.#db.prepare('SELECT * FROM invitations WHERE id=?').get(id)!);
@@ -241,21 +268,23 @@ export class OfflineOnboardingStore {
   claim(id: string, material: string, scope: PairingScope, peer: ClientPeer) {
     if (!peer.verified) deny(401, 'client_channel');
     let credential = '';
-    const result = this.transaction(now => {
+    let binding: Binding | null = null;
+    const result = this.decision(peer.scope.client_id,'claim_refused',id,() => binding,now => {
       const row = this.#db.prepare('SELECT * FROM invitations WHERE id=?').get(id);
       if (!row) return { denied: true as const, status: 401, code: 'pairing_denied' };
       const expected = json<PairingScope>(row.record);
       if (row.state !== 'active' || now >= Number(row.expires)) {
         if (row.state === 'active') this.#db.prepare('UPDATE invitations SET state=\'expired\' WHERE id=?').run(id);
-        this.audit('pairing-client','claim_denied',id,expected,'denied','invitation_unavailable');
+        this.audit(peer.scope.client_id,'claim_denied',id,expected,'denied','invitation_unavailable');
         return { denied: true as const, status: 410, code: 'invitation_unavailable' };
       }
       if (!equalHash(String(row.secret_sha256),hash(material,'pairing\0')) || canonical(expected) !== canonical(scope) || canonical(peer.scope) !== canonical(expected)) {
         const attempts = Number(row.attempts) + 1;
         this.#db.prepare('UPDATE invitations SET attempts=?,state=? WHERE id=?').run(attempts,attempts >= ATTEMPTS ? 'locked' : 'active',id);
-        this.audit('pairing-client','claim_denied',id,expected,'denied','pairing_denied');
+        this.audit(peer.scope.client_id,'claim_denied',id,expected,'denied','pairing_denied');
         return { denied: true as const, status: 403, code: 'pairing_denied' };
       }
+      binding = bindingOf(expected);
       this.identityAvailable(scope);
       if (canonical(this.project(scope.project_id)) !== canonical(bindingOf(scope))) deny(409, 'identity_conflict');
       serviceAccess(scope,this.#config.service);
