@@ -13,7 +13,7 @@ export interface PolicyPreflight {
 export function comparePolicy(approved: Partial<PolicyFacts>, observed: Partial<PolicyFacts>, stage: 'observe' | 'develop' = 'observe'): PolicyPreflight {
   const fields: (keyof PolicyFacts)[] = ['repository','issue_repository','issue','base','branch','executor','checks','profile_ref','profile_version','work_item_version'];
   const differences = fields.map(field => ({ field,
-    expected: approved[field] ?? null, observed: observed[field] ?? null,
+    expected: structuredClone(approved[field] ?? null), observed: structuredClone(observed[field] ?? null),
     status: approved[field] === undefined || observed[field] === undefined ? 'not_checked' as const : JSON.stringify(approved[field]) === JSON.stringify(observed[field]) ? 'passed' as const : 'blocked' as const }));
   return { schema_version: '1.0', kind: 'policy_preflight', stage,
     status: differences.some(d => d.status === 'blocked') ? 'blocked' : differences.some(d => d.status === 'not_checked') ? 'not_checked' : 'passed',
