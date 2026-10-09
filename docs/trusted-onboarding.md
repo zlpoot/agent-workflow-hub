@@ -1,6 +1,6 @@
 # C1.2 Trusted Onboarding：离线安全设计与 Review Gate
 
-> Onboarding currently runs **offline Fixture only**. Production Operator/Pairing is unavailable. The unauthenticated catch → recordDenied SQLite amplification risk belongs to #31 Phase B0; it remains unresolved here. No production enablement or security-fix PASS is claimed.
+> Onboarding currently runs **offline Fixture only**. Production Operator/Pairing is unavailable. #31 Phase B0 adds admission before request traversal/authentication and replaces catch → recordDenied SQLite writes with bounded memory counters. Limits, recovery design and production gaps are in [B0 security](onboarding-b0-security.md); fixture checks are Builder evidence pending independent Design/Security Review.
 
 
 本规范对应 [#31](https://github.com/zlpoot/agent-workflow-hub/issues/31) 与 [Owner kickoff](https://github.com/zlpoot/agent-workflow-hub/issues/31#issuecomment-6055785767)。本轮仅实现可独立审查的隔离 fixture；没有生产监听入口，不接入原 CP，不使用现有配置、凭据、数据库或产品工作区。#30 的 PHASE_C_ACCEPTED_WITH_EXCEPTION 与原 Verification Exception 永久保留。
@@ -53,7 +53,7 @@ Operator 的 awh_operator cookie（awh_op_ 独立格式）与 awh_viewer、CP Be
 | /pairing/v1/claim | POST | 专用非浏览器 Client 通道与 Pairing header，一次性认领 |
 | /pairing/v1/diagnostics/{project_id} | GET | 专用 Client bearer 与受信非浏览器通道 |
 
-所有 Operator POST 必须 exact Host + Origin、可信 numeric loopback peer、单一 session cookie、application/json、one-use x-awh-nonce；拒绝跨站/重复头/forwarded header/Authorization fallback。nonce 与 session hash 绑定、最多 60 秒、消费持久化；失败后也不可重放。body 为严格字段集合，有限 JSON/大小/深度，没有自由文本 reason、Policy、命令、URL 或任意权限字段。Client claim 拒绝 Cookie/Origin/Sec-Fetch-*，通道由服务端测试 adapter 验证，不从 body 中接受 verified:true 作为授权。URL 不包含配对材料，401/403/409 等错误固定且不回显输入或 SQLite 文本。
+所有 Operator POST 必须 exact Host + Origin、可信 numeric loopback peer、单一 session cookie、application/json、one-use x-awh-nonce；拒绝跨站/重复头/forwarded header/Authorization fallback。nonce 与 session hash 绑定、最多 60 秒；格式/schema 错误在消费前拒绝，进入可信决策时持久消费，之后的语义失败也不可重放。body 为严格字段集合，有限 JSON/大小/深度，没有自由文本 reason、Policy、命令、URL 或任意权限字段。Client claim 拒绝 Cookie/Origin/Sec-Fetch-*，通道由服务端测试 adapter 验证，不从 body 中接受 verified:true 作为授权。URL 不包含配对材料，401/403/409 等错误固定且不回显输入或 SQLite 文本。
 
 诊断保留 authority_verified=false/source=offline_fixture；fixed branch/check 仅声明数据，不执行。provider_app_permissions、真实 branch/check、真实 Git root 仍为 not_checked。未完成审批/配对、已撤销和绑定冲突为 blocked；即使模拟认证成功，也不将整体真实产品 preflight 标为 passed。
 
@@ -70,7 +70,7 @@ Operator 的 awh_operator cookie（awh_op_ 独立格式）与 awh_viewer、CP Be
 | 原凭据进入浏览器/日志/Event/存储 | 私有 delivery/provisioning sink、严格 safe projection、credential-pattern 拒绝、SQLite/WAL/审计/响应扫描 |
 | 把 fixture 当成现场验证 | 明确 offline source / authority_verified=false / not_checked；没有自动挂接 CP/CLI/Dashboard |
 
-audit 为 append-only 安全元数据：cursor/time/actor/action/target/project/repository/result/code。未经认证失败只记 anonymous 和固定错误，不记录 cookie/header/body/原始错误。fixture SQLite 强制不可更新/删除 audit、不可更新已绑定身份/Policy/Client scope。失败尝试计数与 locked 状态是安全状态，虽返回失败仍需要提交；身份/审批错误没有部分信任写入。
+audit 为 append-only 安全元数据：cursor/time/actor/action/target/project/repository/result/code。准入/输入/鉴权拒绝只记有界内存分类，不写 SQLite、不记录 cookie/header/body/原始错误。已认证的 Operator 写决策与有效配对 claim 的固定语义拒绝，先回滚业务 savepoint 再提交有身份来源的不可变 denial audit，复用原写锁/配额；有效通道的失败材料/终态 attempt 与 locked 等业务状态仍需同事务审计，来源为受信 peer Client ID。fixture SQLite 强制不可更新/删除 audit、不可更新已绑定身份/Policy/Client scope；8192 条持久审计与 8 MiB 存储门禁耗尽或审计不可写时关闭，不删旧审计、不跳过审计授信。身份/审批错误没有部分信任写入。
 
 ## 6. 兼容性与本轮停点
 

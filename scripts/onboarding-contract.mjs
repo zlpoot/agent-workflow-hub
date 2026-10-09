@@ -13,6 +13,12 @@ const scope = { ...binding, client_id: id, executor_id: id, executor_type: { typ
  machine_id: id, platform: { enum: ['windows', 'macos', 'linux'] }, service_id: id,
  endpoint: { type: 'string', minLength: 1, maxLength: 200 }, ca_sha256: { anyOf: [hash, { type: 'null' }] } };
 const common = { authority_verified: { const: false }, source: { const: 'offline_fixture' } };
+const counter = { type: 'integer', minimum: 0, maximum: 1000000 };
+const lane = object({ requests: counter, inflight: counter, identities: counter,
+ denied: object(Object.fromEntries(['access','input','rate','storage','internal'].map(key=>[key,counter]))) });
+const doctorCheck = object({ state: { enum: ['passed', 'blocked', 'not_checked'] },
+ code: { enum: ['fixture_approved','pending_approval','fixture_paired','missing_client','client_local_claim_only','not_run','no_live_preflight'] },
+ safe_next_step: { enum: ['none','request_operator_enrollment','complete_private_pairing','confirm_local_git_identity','run_authorized_verification','perform_app_readonly_preflight'] }, ...common });
 const schemas = {
  ProjectRequest: object(binding), Decision: object({ decision: { enum: ['approve', 'reject'] } }), Empty: object({}),
  InvitationRequest: object({ ...scope, delivery_id: id }),
@@ -22,13 +28,20 @@ const schemas = {
  ClaimView: object({ client_id: id, project_id: id, state: { enum: ['active'] }, git_identity: { const: 'client_local_claim' }, ...common }),
  Nonce: object({ nonce: id, expires_at: timestamp, ...common }),
  Check: object({ state: { enum: ['passed', 'blocked', 'not_checked'] }, code: { type: 'string', pattern: '^[a-z_]+$' } }),
+ DoctorDiagnostics: object({ state: { enum: ['blocked', 'not_checked'] },
+  checks: object(Object.fromEntries(['enrollment','client','git_identity','branch_verification','provider_app_permissions'].map(key=>[key,doctorCheck]))), ...common }),
  Diagnostics: object({ project_id: id, state: { enum: ['blocked', 'not_checked'] }, binding: { anyOf: [link('ProjectRequest'), { type: 'null' }] },
   policy: { anyOf: [object({ branch: text, verification_commands: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 200 }, maxItems: 16 } }), { type: 'null' }] },
   checks: object({ enrollment: link('Check'), client: link('Check'), git_identity: link('Check'), branch_verification: link('Check'), provider_app_permissions: link('Check') }), ...common }),
  AuditEntry: object({ cursor: { type: 'integer', minimum: 1 }, at: timestamp, actor: id, action: { type: 'string', pattern: '^[a-z_]+$' }, target: id,
   project_id: { anyOf: [id, { type: 'null' }] }, repository: { anyOf: [repository, { type: 'null' }] }, result: { enum: ['accepted', 'denied'] }, code: { type: 'string', pattern: '^[a-z_]+$' } }),
  Audit: object({ entries: { type: 'array', maxItems: 100, items: link('AuditEntry') }, next_cursor: { type: 'integer', minimum: 0 }, ...common }),
- Error: object({ error: object({ code: { type: 'string', pattern: '^[a-z_]+$' }, message: { type: 'string', maxLength: 160 } }), ...common })
+ Error: object({ error: object({ code: { type: 'string', pattern: '^[a-z_]+$' }, message: { type: 'string', maxLength: 160 } }), ...common }),
+ SafetyDiagnostics: object({ state: { const: 'not_checked' },
+  limits: object(Object.fromEntries(['body_bytes','body_nodes','body_depth','header_bytes','header_count','header_values','window_ms',
+   'operator_requests','operator_identity_requests','pairing_requests','pairing_identity_requests','anonymous_requests','inflight','identities',
+   'aggregate_count','audit_rows','storage_bytes','busy_ms'].map(key=>[key,{type:'integer',minimum:1,maximum:16777216}]))),
+  lanes: object({ anonymous: lane, operator: lane, pairing: lane }), ...common })
 };
 const schema = { $schema: 'https://json-schema.org/draft/2020-12/schema', $id: 'https://agent-workflow-hub.invalid/onboarding/v1', $defs: schemas };
 mkdirSync(new URL('../src/onboarding/', import.meta.url), { recursive: true });

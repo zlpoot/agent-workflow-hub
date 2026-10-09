@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectBuilder, createJwt, BRANCH, REPO, publicationDiagnostic } from '../dist/builder.js';
-import { PROFILES, taskBinding, REPEATABLE_VERSION, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO } from '../dist/profiles.js';
+import { PROFILES, DEFAULT_SELECTION, taskBinding, REPEATABLE_VERSION, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO } from '../dist/profiles.js';
 
 // Ephemeral key generated in memory; no real credential and no saved key fixture.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -1055,8 +1055,9 @@ test('C1-H fixed workflow binds offline Hub #31 and refuses work-item, head, che
   }
 });
 
-test('C1-H refuses malformed installation scope and broader write tokens before delivery', async () => {
-  const selection = { profile: 'hub', workflow: 'c1h' };
+test('C1-H and B0 refuse malformed installation scope and broader write tokens before delivery', async () => {
+ for(const workflowId of ['c1h','c1h-b0']) {
+  const selection = { profile: 'hub', workflow: workflowId };
   for (const response of [
     (url, _, v) => url.endsWith('/installation') ? { ...v, repository_selection: 'all' } : v,
     (url, _, v) => url.includes('/installation/repositories') ? { ...v, total_count: v.total_count + 1 } : v,
@@ -1067,11 +1068,50 @@ test('C1-H refuses malformed installation scope and broader write tokens before 
     (url, options, v) => url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
       ? { ...v, permissions: { ...v.permissions, administration: 'write' } } : v,
   ]) {
-    const f = fake({ branch: 'codex/c12-trusted-onboarding', installed: selectedSets[3], response });
+    const f = fake({ branch: selectWorkflow(selection).workflow.branch, installed: selectedSets[3], response });
     await assert.rejects(connectBuilder(f.deps, selection), /mismatch|not allowed|only the selected/);
     assert.equal(f.git.some(g => g[1][0] === 'push'), false);
     assert.equal(f.requests.some(r => r.url.endsWith('/pulls')), false);
   }
+ }
+});
+
+test('B0 fixed workflow binds only the authorized branch and ordered checks; defaults and Phase A stay frozen', async () => {
+  const selection={profile:'hub',workflow:'c1h-b0'}, {profile,workflow}=selectWorkflow(selection);
+  assert.equal(profile.repository,HUB_REPO);assert.equal(profile.base,'main');
+  assert.deepEqual(workflow,{id:'c1h-b0',branch:'codex/c1h-b0-security',work_item:{repo:HUB_REPO,issue:31},
+    verification_commands:['pnpm build','node --test tests/onboarding.test.mjs tests/builder.test.mjs'],bootstrap_paths:null});
+  assert.deepEqual(DEFAULT_SELECTION,{profile:'hub',workflow:'c05'});
+  assert.equal(selectWorkflow().workflow.branch,'codex/c05-github-app-builder');
+  assert.deepEqual(selectWorkflow({profile:'hub',workflow:'c1h'}).workflow.verification_commands,['pnpm check']);
+  assert.equal(selectWorkflow({profile:'hub',workflow:'c1h'}).workflow.branch,'codex/c12-trusted-onboarding');
+  const f=fake({branch:workflow.branch,installed:selectedSets[3]}), builder=await connectBuilder(f.deps,selection);
+  const handoff=structuredClone(record);handoff.work_item.issue=31;
+  handoff.verification.checks=workflow.verification_commands.map(command=>({command,exit_code:0}));
+  await assert.rejects(builder.ready(5,head,record,10),/work item/);
+  for(const commands of [['pnpm check'],[...workflow.verification_commands].reverse(),[...workflow.verification_commands,'arbitrary command']]){
+    const wrong=structuredClone(handoff);wrong.verification.checks=commands.map(command=>({command,exit_code:0}));
+    await assert.rejects(builder.ready(5,head,wrong,10),/verification commands/);
+  }
+  await assert.rejects(builder.ready(5,'c'.repeat(40),handoff,10),/Confirmed Handoff validation failed/);
+  assert.equal(f.requests.some(r=>r.url.endsWith('/graphql')),false);
+  assert.equal(f.git.some(g=>g[1][0]==='push'),false);
+  for(const key of ['approve','review','merge','request','fetch','token'])assert.equal(builder[key],undefined);
+  for(const key of ['repo','repository','base','branch','work_item','verification_commands','bootstrap_paths','api','url','git','gh'])
+    assert.throws(()=>selectWorkflow({...selection,[key]:'untrusted'}));
+  assert.throws(()=>{workflow.verification_commands.push('pnpm check');});
+  assert.throws(()=>{workflow.work_item.issue=32;});
+  assert.throws(()=>selectWorkflow({profile:'future-ui',workflow:'c1h-b0'}));
+  assert(PROFILES.every(p=>p.id!=='agent-desktop'));
+  for(const option of ['--repo','--base','--branch','--url','--ref','--git-args','--force']){
+    const child=spawnSync(process.execPath,[fileURLToPath(new URL('../dist/builder-cli.js',import.meta.url)),
+      '--profile','hub','--workflow','c1h-b0','push',option,'untrusted'],{encoding:'utf8',env:{PATH:process.env.PATH},timeout:10000});
+    assert.equal(child.status,2);assert.match(child.stderr,/Unsupported Builder operation/);
+  }
+  const created=await builder.createPR('B0 offline candidate','Refs #31; CODE_SCOPE_ONLY');assert.equal(created.draft,true);
+  const request=f.requests.find(r=>r.url.endsWith('/pulls')&&r.method==='POST');
+  assert.deepEqual(JSON.parse(request.body),{title:'B0 offline candidate',body:'Refs #31; CODE_SCOPE_ONLY',
+    head:'codex/c1h-b0-security',base:'main',draft:true});
 });
 
 test('scoped-helper repair workflow binds Hub #16 and exact-head Ready; arbitrary transport options refused', async () => {

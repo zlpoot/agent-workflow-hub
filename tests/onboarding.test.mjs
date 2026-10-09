@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { readFileSync, readdirSync, linkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { Worker } from 'node:worker_threads';
 import { DatabaseSync } from 'node:sqlite';
 import { createAuthenticator, ControlPlaneStore, DashboardReadStore } from '../dist/control-plane/index.js';
-import { OfflineOnboardingApi, OfflineOnboardingStore, MockFixtureTransport, createOfflineFixture, destroyOfflineFixture, fixtureDatabase, mockOperator, canonical } from '../dist/onboarding/index.js';
+import { OfflineOnboardingApi, OfflineOnboardingStore, MockFixtureTransport, createOfflineFixture, destroyOfflineFixture, fixtureDatabase, mockOperator, canonical, doctorDiagnosticContract } from '../dist/onboarding/index.js';
 const example = name => JSON.parse(readFileSync(new URL('../examples/protocol/'+name+'.json',import.meta.url)));
 const future = example('future-ui'), webskill = example('webskill');
 const START = Date.parse('2026-10-08T08:00:00.000Z');
@@ -40,6 +40,32 @@ function setup(t, changes={}) {
   return {fixture,time,config,owner,requester,narrow,store,api,open,transport,operatorChannel,headers,get,post,apply,approve,invite,raw,count,cleanup};
 }
 const blocked=(result,status)=>{assert.equal(result.status,status);assert.equal(result.body.authority_verified,false);assert.equal(result.body.source,'offline_fixture');assert.equal(typeof result.body.error.code,'string');};
+
+test('B0 doctor DTO projects only fixed states, sources and safe steps; never claims live authority',async t=>{
+  const f=setup(t);await f.apply();
+  const pending=await f.get('/onboarding/v1/projects/'+binding.project_id+'/diagnostics');assert.equal(pending.status,200);
+  const dto=doctorDiagnosticContract(pending.body);
+  assert.deepEqual(Object.keys(dto).sort(),['authority_verified','checks','source','state']);
+  assert.equal(dto.state,'blocked');assert.equal(dto.checks.enrollment.safe_next_step,'request_operator_enrollment');
+  for(const check of Object.values(dto.checks)){
+    assert.equal(check.source,'offline_fixture');assert.equal(check.authority_verified,false);
+    assert.deepEqual(Object.keys(check).sort(),['authority_verified','code','safe_next_step','source','state']);
+  }
+  for(const value of [binding.project_id,binding.repository,service.endpoint,f.owner.cookie,future.profile_policy.branch.ref])
+    assert.equal(JSON.stringify(dto).includes(value),false);
+  await f.approve();const {client,result}=await f.invite();assert.equal(result.status,200);assert.equal((await client.claim(f.api)).status,200);
+  const active=doctorDiagnosticContract((await client.diagnostics(f.api)).body);
+  assert.equal(active.state,'not_checked');assert.equal(active.checks.enrollment.state,'passed');
+  assert.equal(active.checks.client.safe_next_step,'none');
+  for(const name of ['git_identity','branch_verification','provider_app_permissions'])assert.equal(active.checks[name].state,'not_checked');
+  const forged=structuredClone(pending.body);forged.checks.provider_app_permissions={state:'passed',code:'no_live_preflight'};
+  assert.throws(()=>doctorDiagnosticContract(forged),e=>e.code==='diagnostic_projection');
+  forged.checks.provider_app_permissions={state:'not_checked',code:'attacker_controlled'};
+  assert.throws(()=>doctorDiagnosticContract(forged),e=>e.code==='diagnostic_projection');
+  assert.throws(()=>doctorDiagnosticContract({...pending.body,source:'live'}));
+  assert.throws(()=>doctorDiagnosticContract({...pending.body,token:'forbidden'}));
+  blocked(await f.get('/onboarding/v1/projects/'+binding.project_id+'/diagnostics',f.narrow),403);
+});
 
 test('offline vertical slice: request → approval → private invitation → one-use claim → persisted trusted scope → safe diagnostics',async t=>{
   const f=setup(t), requested=await f.apply();assert.equal(requested.state,'pending');
@@ -85,7 +111,7 @@ test('exact loopback Host/Origin/peer and CSRF deny cross-site, LAN, forwarding 
   assert.equal(f.count('requests'),0);
 });
 
-test('nonce session binding, expiry, replay and failed-request consumption survive restart; cookie expiry fails closed',async t=>{
+test('nonce binding, expiry and semantic-denial consumption survive restart; malformed input never consumes nonce',async t=>{
   const f=setup(t), nonce=(await f.get('/onboarding/v1/nonce')).body.nonce;
   const envelope={method:'POST',path:'/onboarding/v1/requests',body:binding,headers:{...f.headers(),'content-type':'application/json','x-awh-nonce':nonce}};
   blocked(await f.api.handle({...envelope,headers:{...envelope.headers,...f.headers(f.requester)}},f.operatorChannel),403);
@@ -94,10 +120,97 @@ test('nonce session binding, expiry, replay and failed-request consumption survi
   const failedNonce=(await f.get('/onboarding/v1/nonce',f.owner,{},f.operatorChannel,restored)).body.nonce;
   const failedEnvelope={...envelope,headers:{...envelope.headers,'x-awh-nonce':failedNonce}};
   blocked(await restored.handle({...failedEnvelope,body:{...binding,role:'operator'}},f.operatorChannel),400);
+  assert.equal((await restored.handle(failedEnvelope,f.operatorChannel)).status,200);
   blocked(await restored.handle(failedEnvelope,f.operatorChannel),403);
+  const deniedNonce=(await f.get('/onboarding/v1/nonce',f.owner,{},f.operatorChannel,restored)).body.nonce;
+  const deniedEnvelope={...envelope,headers:{...envelope.headers,'x-awh-nonce':deniedNonce}};
+  blocked(await restored.handle({...deniedEnvelope,path:'/onboarding/v1/requests/missing/decision',body:{decision:'approve'}},f.operatorChannel),404);
+  blocked(await restored.handle(deniedEnvelope,f.operatorChannel),403);
   const fresh=(await f.get('/onboarding/v1/nonce',f.owner,{},f.operatorChannel,restored)).body.nonce;f.time.value+=60_000;
   blocked(await restored.handle({...envelope,headers:{...envelope.headers,'x-awh-nonce':fresh}},f.operatorChannel),403);
   f.time.value=START+3_600_000;blocked(await f.get('/onboarding/v1/nonce',f.owner,{},f.operatorChannel,restored),401);
+});
+
+test('B0 R1 authenticated cross-scope decision is attributable and immutable; anonymous/malformed refusals write nothing',async t=>{
+  const f=setup(t), requested=await f.apply();
+  const bytes=()=>['','-wal'].map(s=>createHash('sha256').update(readFileSync(fixtureDatabase(f.fixture)+s)).digest('hex'));
+  const before=bytes(),rows=f.count('audit');
+  for(let i=0;i<10000;i++){
+    const result=await f.api.handle({method:'POST',path:'/onboarding/v1/requests/'+requested.id+'/decision',headers:{},body:{decision:'approve'}},f.operatorChannel);
+    assert([401,429].includes(result.status));
+  }
+  assert.deepEqual(bytes(),before);assert.equal(f.count('audit'),rows);
+  blocked(await f.post('/onboarding/v1/requests/'+requested.id+'/decision',{decision:'approve'},f.narrow),403);
+  const db=f.raw();try{
+    const denial=db.prepare("SELECT * FROM audit WHERE action='project_approve_denied'").all();assert.equal(denial.length,1);
+    assert.equal(denial[0].actor,f.narrow.session.id);assert.equal(denial[0].target,requested.id);
+    assert.equal(denial[0].project_id,binding.project_id);assert.equal(denial[0].repository,binding.repository);
+    assert.equal(denial[0].result,'denied');assert.equal(denial[0].code,'operator_scope');
+    assert.equal(JSON.stringify(denial).includes(f.narrow.cookie),false);
+    assert.equal(db.prepare('SELECT state FROM requests WHERE id=?').get(requested.id).state,'pending');
+    assert.equal(f.count('project_bindings'),0);assert.equal(f.count('clients'),0);
+    assert.throws(()=>db.exec("UPDATE audit SET code='hidden'"));assert.throws(()=>db.exec('DELETE FROM audit'));
+  }finally{db.close();}
+  const nonce=(await f.get('/onboarding/v1/nonce')).body.nonce,clean=bytes(),count=f.count('audit');
+  for(const changes of [{headers:{origin:'http://evil.invalid'}},{body:{decision:'approve',unexpected:'malformed'}}]){
+    const result=await f.api.handle({method:'POST',path:'/onboarding/v1/requests/'+requested.id+'/decision',
+      headers:{...f.headers(),'content-type':'application/json','x-awh-nonce':nonce,...changes.headers},body:changes.body??{decision:'approve'}},f.operatorChannel);
+    assert([400,403].includes(result.status));
+  }
+  assert.deepEqual(bytes(),clean);assert.equal(f.count('audit'),count);
+});
+
+test('B0 R1 expired known cookies stay anonymous; invalid clock cannot enter Operator lane',async t=>{
+  const expired=Array.from({length:6},(_,i)=>mockOperator('expired-'+i,'operator',['zlpoot/future-ui'],START));
+  const active=mockOperator('active-owner','operator',['zlpoot/future-ui'],START+3600000);
+  const f=setup(t,{operators:[...expired.map(s=>s.session),active.session]});
+  const bytes=()=>['','-wal'].map(s=>createHash('sha256').update(readFileSync(fixtureDatabase(f.fixture)+s)).digest('hex'));
+  const before=bytes(),rows=f.count('audit');
+  for(let i=0;i<10000;i++)assert([401,429].includes((await f.get('/onboarding/v1/nonce',expired[i%expired.length])).status));
+  assert.deepEqual(bytes(),before);assert.equal(f.count('audit'),rows);
+  let lanes=f.api.safetyDiagnostics().lanes;assert.equal(lanes.operator.requests,0);assert.equal(lanes.operator.identities,0);
+  assert.equal((await f.get('/onboarding/v1/nonce',active)).status,200);
+  lanes=f.api.safetyDiagnostics().lanes;assert.equal(lanes.operator.requests,1);assert.equal(lanes.operator.identities,1);
+  const after=bytes(),n=f.count('audit'),admitted=lanes.operator.requests;f.time.value=NaN;
+  blocked(await f.get('/onboarding/v1/nonce',active),500);
+  assert.equal(f.api.safetyDiagnostics().lanes.operator.requests,admitted);assert.deepEqual(bytes(),after);assert.equal(f.count('audit'),n);
+});
+
+test('B0 R1 mandatory denial audit fails closed on audit outage, persistent quota, storage and SQLite busy',async t=>{
+  for(const mode of ['audit_outage','audit_quota','storage','busy']){
+    const f=setup(t),requested=await f.apply(),nonce=(await f.get('/onboarding/v1/nonce',f.narrow)).body.nonce,db=f.raw();
+    const journal=fixtureDatabase(f.fixture)+'-journal';
+    try{
+      if(mode==='audit_outage')db.exec("CREATE TRIGGER fixture_denial_outage BEFORE INSERT ON audit WHEN NEW.action='project_approve_denied' BEGIN SELECT RAISE(ABORT,'fixture denial outage'); END");
+      if(mode==='audit_quota'){
+        const count=f.count('audit'),seed=db.prepare("INSERT INTO audit(at,actor,action,target,result,code) VALUES(?,'fixture','fixture_seed','fixture','accepted','ok')");
+        db.exec('BEGIN IMMEDIATE');for(let i=count;i<8191;i++)seed.run(new Date(START).toISOString());db.exec('COMMIT');
+      }
+      if(mode==='storage')writeFileSync(journal,Buffer.alloc(8*1024*1024));
+      if(mode==='busy')db.exec('BEGIN IMMEDIATE');
+      const before=f.count('audit');
+      blocked(await f.api.handle({method:'POST',path:'/onboarding/v1/requests/'+requested.id+'/decision',
+        headers:{...f.headers(f.narrow),'content-type':'application/json','x-awh-nonce':nonce},body:{decision:'approve'}},f.operatorChannel),mode==='audit_outage'?500:503);
+      assert.equal(db.prepare('SELECT state FROM requests WHERE id=?').get(requested.id).state,'pending');
+      assert.equal(f.count('project_bindings'),0);assert.equal(f.count('clients'),0);
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action='project_approve_denied'").get().n,0);
+      assert.equal(f.count('audit'),before+(mode==='audit_outage'||mode==='audit_quota'?1:0));
+    }finally{
+      if(mode==='busy')db.exec('ROLLBACK');db.close();if(mode==='storage')unlinkSync(journal);
+    }
+  }
+});
+
+test('B0 R1 private pairing denial keeps fixed peer attribution with no material or credential in audit',async t=>{
+  const f=setup(t);await f.approve();const {client,result}=await f.invite();assert.equal(result.status,200);
+  const wrong='awh_pair_'+randomBytes(32).toString('base64url');blocked(await client.claim(f.api,{},wrong),403);
+  const db=f.raw();try{
+    const rows=db.prepare("SELECT * FROM audit WHERE action='claim_denied'").all();assert.equal(rows.length,1);
+    assert.equal(rows[0].actor,scope.client_id);assert.equal(rows[0].target,result.body.id);
+    assert.equal(rows[0].result,'denied');assert.equal(rows[0].code,'pairing_denied');
+    assert.equal(JSON.stringify(rows).includes(wrong),false);assert.equal(client.containsSecret(JSON.stringify(rows)),false);
+    assert.equal(f.count('clients'),0);assert.equal(db.prepare('SELECT attempts FROM invitations WHERE id=?').get(result.body.id).attempts,1);
+  }finally{db.close();}
 });
 
 test('requester is owner-scoped; narrow Operator cannot decide or inspect another repository',async t=>{
@@ -216,9 +329,25 @@ test('two parallel SQLite connections race for one invitation: exactly one Clien
   await Promise.all(workers.map(async w=>{const [ready]=await once(w,'message');assert.equal(ready.ready,true);}));
   const pending=workers.map(async w=>{const [result]=await once(w,'message');return result;});
   Atomics.store(new Int32Array(barrier),0,1);Atomics.notify(new Int32Array(barrier),0,2);
-  const results=await Promise.all(pending);assert.deepEqual(results.map(r=>r.status).sort(),[200,410]);
+  const results=await Promise.all(pending);
+  assert.equal(results.filter(r=>r.status===200).length,1);
+  const rejected=results.find(r=>r.status!==200);
+  // B0 bounds SQLite wait: a loser may time out before observing the committed terminal invite.
+  assert(rejected.status===410 && rejected.code==='invitation_unavailable' ||
+    rejected.status===503 && rejected.code==='busy');
   assert.equal(f.count('clients'),1);assert.equal(f.store.clientRegistry().length,1);
   const db=f.raw();try{assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action='client_activated'").get().n,1);}finally{db.close();}
+});
+
+test('bounded SQLite busy during claim grants no credential; unlocked retry still consumes invitation only once',async t=>{
+  const f=setup(t);await f.approve();const {client}=await f.invite(),db=f.raw();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const denied=await client.claim(f.api);blocked(denied,503);assert.equal(denied.body.error.code,'busy');
+    assert.equal(f.count('clients'),0);assert.equal(f.store.clientRegistry().length,0);
+  }finally{db.exec('ROLLBACK');db.close();}
+  assert.equal((await client.claim(f.api)).status,200);blocked(await client.claim(f.api),410);
+  assert.equal(f.count('clients'),1);assert.equal(f.store.clientRegistry().length,1);
 });
 
 test('Client diagnostics require its own credential and exact scope; requester cannot read other projects',async t=>{
@@ -331,7 +460,7 @@ test('closed routes/headers/schema, complexity bounds and content types fail wit
   }
   blocked(await f.api.handle({method:'DELETE',path:'/onboarding/v1/requests',headers:f.headers()},f.operatorChannel),405);
   const deep={};let cursor=deep;for(let i=0;i<40;i++){cursor.child={};cursor=cursor.child;}blocked(await f.post('/onboarding/v1/requests',deep),400);
-  blocked(await f.post('/onboarding/v1/requests',{...binding,unknown:'x'.repeat(70_000)}),400);
+  blocked(await f.post('/onboarding/v1/requests',{...binding,unknown:'x'.repeat(70_000)}),413);
   assert.equal(f.count('requests'),0);
 });
 
