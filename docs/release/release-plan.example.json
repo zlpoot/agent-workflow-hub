@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "kind": "awh_release_plan",
+  "release": {
+    "name": "AWH v0.1.0-rc.1",
+    "proposed_tag": "v0.1.0-rc.1",
+    "channel": "rc",
+    "state": "design_only",
+    "inspection_baseline": "43823f9f70360543b8cdf07682764af6bb4d6601",
+    "source_commit": null,
+    "source_clean": null,
+    "human_release_gate": "NOT_AUTHORIZED",
+    "evidence_refs": []
+  },
+  "components": [
+    {
+      "id": "awh-client",
+      "package": "@zlpoot/awh-client",
+      "version": "0.4.6",
+      "version_state": "existing_module_version",
+      "entrypoints": [{ "command": "awh", "path": "dist/client/cli.js", "state": "existing" }],
+      "requires": { "node_major_min": 24, "protocol": "1.0", "cp_database_schema": 2, "handoff": "0.1" },
+      "policy_sha256": null
+    },
+    {
+      "id": "awh-control-plane",
+      "package": "@zlpoot/awh-control-plane",
+      "version": "0.1.0-rc.1",
+      "version_state": "proposed",
+      "entrypoints": [{ "command": "awh-control-plane", "path": "dist/control-plane-cli.js", "state": "bin_not_implemented" }],
+      "requires": { "node_major_min": 24, "protocol": "1.0", "cp_database_schema": 2 },
+      "contract_sha256": null
+    },
+    {
+      "id": "awh-viewer",
+      "package": "@zlpoot/awh-viewer",
+      "version": "0.1.0-rc.1",
+      "version_state": "proposed",
+      "entrypoints": [{ "command": "awh-viewer", "path": null, "state": "trusted_host_not_implemented" }],
+      "requires": { "node_major_min": 24, "protocol": "1.0", "cp_database_schema": 2, "dashboard_api": "1.0.0" },
+      "contract_sha256": null,
+      "default_enabled": false
+    },
+    {
+      "id": "awh-dashboard-ui",
+      "package": null,
+      "build_version": "0.1.0-rc.1",
+      "version_state": "proposed",
+      "entrypoints": [{ "route": "/dashboard", "path": "index.html", "state": "existing_protected_gateway_route" }],
+      "requires": { "dashboard_api": "1.0.0", "protected_same_origin_viewer": true },
+      "contract_sha256": null,
+      "validator_sha256": null
+    },
+    {
+      "id": "awh-builder",
+      "package": "@zlpoot/awh-builder",
+      "version": "0.1.0-rc.1",
+      "version_state": "proposed",
+      "entrypoints": [
+        { "command": "awh-builder", "path": "dist/builder-cli.js", "state": "bin_not_implemented" },
+        { "command": "awh-handoff-check", "path": "dist/cli.js", "state": "bin_not_implemented" }
+      ],
+      "requires": { "node_major_min": 24, "handoff": "0.1", "github_app_identity": "installation", "write_repository_scope": "single" },
+      "policy_sha256": null
+    }
+  ],
+  "artifacts": [
+    { "component": "awh-client", "target": "win32-x64", "filename": "awh-client-0.4.6-win32-x64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-client", "target": "darwin-arm64", "filename": "awh-client-0.4.6-darwin-arm64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-control-plane", "target": "win32-x64", "filename": "awh-control-plane-0.1.0-rc.1-win32-x64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-control-plane", "target": "darwin-arm64", "filename": "awh-control-plane-0.1.0-rc.1-darwin-arm64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-viewer", "target": "win32-x64", "filename": "awh-viewer-0.1.0-rc.1-win32-x64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-viewer", "target": "darwin-arm64", "filename": "awh-viewer-0.1.0-rc.1-darwin-arm64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-builder", "target": "win32-x64", "filename": "awh-builder-0.1.0-rc.1-win32-x64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-builder", "target": "darwin-arm64", "filename": "awh-builder-0.1.0-rc.1-darwin-arm64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-dashboard-ui", "target": "static", "filename": "awh-dashboard-ui-0.1.0-rc.1-static.zip", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" }
+  ],
+  "build_environment_fields": ["os", "cpu", "node_version", "pnpm_version", "npm_version", "typescript_version", "esbuild_version", "lockfile_sha256", "runtime_dependency_closure", "evidence_refs"],
+  "compatibility": [
+    { "pair": ["awh-client", "awh-control-plane"], "requirements": { "protocol": "1.0", "cp_database_schema": 2 }, "status": "NOTRUN", "evidence_refs": [] },
+    { "pair": ["awh-dashboard-ui", "awh-viewer"], "requirements": { "dashboard_api": "1.0.0", "contract_sha256": null }, "status": "NOTRUN", "evidence_refs": [] },
+    { "pair": ["awh-builder", "embedded-fixed-profiles"], "requirements": { "handoff": "0.1", "policy_sha256": null }, "status": "NOTRUN", "evidence_refs": [] }
+  ],
+  "verification": [
+    { "layer": "package", "target": "win32-x64", "status": "NOTRUN", "evidence_refs": [] },
+    { "layer": "package", "target": "darwin-arm64", "status": "NOTRUN", "evidence_refs": [] },
+    { "layer": "runtime_write", "project": "future-ui", "target": "win32-x64", "status": "NOTRUN", "evidence_refs": [] },
+    { "layer": "runtime_write", "project": "webskill", "target": "darwin-arm64", "status": "NOTRUN", "evidence_refs": [] },
+    { "layer": "full_delivery", "project": "future-ui", "target": "win32-x64", "status": "NOTRUN", "evidence_refs": [] },
+    { "layer": "full_delivery", "project": "webskill", "target": "darwin-arm64", "status": "NOTRUN", "evidence_refs": [] }
+  ],
+  "unsupported_targets": [{ "target": "darwin-x64", "status": "NOT_VERIFIED" }, { "target": "other", "status": "NOT_VERIFIED" }],
+  "deployments": [],
+  "acceptance": { "runtime_write": "NOT_ACCEPTED", "full_delivery": "NOT_ACCEPTED" },
+  "historical_dispositions": { "issue30": "PHASE_C_ACCEPTED_WITH_EXCEPTION", "issue35": "WINDOWS_FIRST_USABLE_OBSERVE_ONLY", "onboarding_api_1_0_0": "OFFLINE_FIXTURE_ONLY" }
+}

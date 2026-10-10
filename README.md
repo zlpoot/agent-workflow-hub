@@ -1,5 +1,7 @@
 # agent-workflow-hub
 
+Issue [#54](https://github.com/zlpoot/agent-workflow-hub/issues/54) 第一阶段冻结新增业务功能，完成 [R0 组件与统一发布包设计](docs/release/r0-design.md) 及 [惰性发布计划例子](docs/release/release-plan.example.json)。五个分发目标为 Client、Control Plane、Viewer、Dashboard UI、Builder；现有 Client 版本为 **0.4.6**，统一 `v0.1.0-rc.1` 仅为候选名称提议。当前没有据此制作或发布 RC，Windows/macOS 包级、真实 Runtime Write 和 Full Delivery 验收均未执行；生产操作与正式发布需要各自 Human Gate。下列旧版本描述保留为历史基线。
+
 The #32 baseline includes v0.2 repeatable delivery, v0.2.1 revision linking and v0.2.1-R1 publication recovery, with standalone **Client 0.4.4**. Hub #42/#44/#46 are merged and #41/#43/#45 are closed; the Future UI #90/#92 delivery chain has closed. These completed deliveries do not authorize a new production operation.
 
 Hub [#32](https://github.com/zlpoot/agent-workflow-hub/issues/32) adds the **Client 0.4.5 candidate** [read-only Doctor](docs/doctor.md): offline diagnosis by default, shared text/JSON statuses, and an explicit original-CP GET probe. Product tests and state remain unchanged; the candidate requires independent Review and separate production authorization.
