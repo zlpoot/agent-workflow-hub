@@ -34,7 +34,7 @@ try {
     run([modulePath(id,bin),'--help']);const version=run([modulePath(id,bin),'--version']);assert(version.includes(specs[id].version));
     const shim=join(install,'node_modules/.bin',command);
     if(process.platform==='win32') {
-      const cmd=spawnSync(join(process.env.SystemRoot,'System32/cmd.exe'),['/d','/s','/c',`""${shim}.cmd" --version"`],{cwd:scratch,env,encoding:'utf8',timeout:15000,windowsHide:true});assert.equal(cmd.status,0,cmd.stderr);assert(cmd.stdout.includes(specs[id].version));
+      const cmd=spawnSync(join(process.env.SystemRoot,'System32/cmd.exe'),['/d','/s','/c',`""${shim}.cmd" --version"`],{cwd:scratch,env,encoding:'utf8',timeout:15000,windowsHide:true,windowsVerbatimArguments:true});assert.equal(cmd.status,0,cmd.stderr);assert(cmd.stdout.includes(specs[id].version));
       const ps=spawnSync(join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',shim+'.ps1','--version'],{cwd:scratch,env,encoding:'utf8',timeout:15000,windowsHide:true});assert.equal(ps.status,0,ps.stderr);assert(ps.stdout.includes(specs[id].version));
     }else{assert(lstatSync(modulePath(id,bin)).mode&0o111);const r=spawnSync(shim,['--version'],{cwd:scratch,env,encoding:'utf8',timeout:15000});assert.equal(r.status,0);assert(r.stdout.includes(specs[id].version));}
   }checks.shims='PASS';
