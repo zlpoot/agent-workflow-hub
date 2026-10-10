@@ -48,6 +48,9 @@ try {
   await page.locator('[role="tab"][aria-selected="true"]').filter({ hasText: '项目' }).waitFor();
   await page.getByRole('button', { name: '添加项目向导', exact: true }).click();
   await page.getByRole('heading', { name: '第 1 步 · 选择项目' }).waitFor();
+  assert(await page.getByText('模拟 Reader 快照 · 非真实 CP', { exact: true }).isVisible());
+  await page.getByRole('combobox', { name: '选择项目与来源' }).click();
+  await page.getByRole('option', { name: 'Future UI · #35 历史离线样本', exact: true }).click();
   assert(await page.getByText('#35 已脱敏离线样本 · 2026-10-09', { exact: true }).isVisible());
   await page.getByRole('button', { name: '下一步', exact: true }).focus(); await page.keyboard.press('Enter');
   await page.getByRole('heading', { name: '第 2 步 · 安装 / 认领' }).waitFor();
@@ -106,6 +109,9 @@ try {
   await noViewer.goto(url); await noViewer.getByRole('alert').waitFor();
   await noViewer.getByRole('button', { name: '添加项目向导', exact: true }).click();
   await noViewer.getByText('没有 Viewer 快照', { exact: false }).waitFor();
+  assert(await noViewer.getByRole('button', { name: '下一步', exact: true }).isDisabled());
+  await noViewer.getByRole('combobox', { name: '选择项目与来源' }).click();
+  await noViewer.getByRole('option', { name: 'Future UI · #35 历史离线样本', exact: true }).click();
   for(let step=2;step<=4;step++){await noViewer.getByRole('button', { name: '下一步', exact: true }).click();await noViewer.getByRole('heading', { name: new RegExp('第 '+step+' 步') }).waitFor();}
   assert(await noViewer.getByRole('button', { name: '查看时间线', exact: true }).isDisabled());
   await noViewer.screenshot({ path: `${output}/wizard-no-viewer.png`, animations: 'disabled' });
