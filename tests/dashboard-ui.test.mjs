@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { ControlPlaneStore } from '../dist/control-plane/store.js';
-import { DashboardProjection } from '../dist/dashboard/projection.js';
+import { DashboardProjection, timeline } from '../dist/dashboard/projection.js';
+import { assertEntity } from '../dist/protocol/index.js';
 import { DashboardReader, assertContract, mergeEvents, safeGitHubUrl, safeSourceUrl } from '../dashboard/adapter.mjs';
 
 function fixture(t) {
@@ -50,6 +51,32 @@ test('Timeline dedup uses persistent global cursors, preserves gaps/order and re
   const third = { ...event, cursor: 3, event_id: 'third' };
   assert.deepEqual(mergeEvents([third], [event, third]).map(e => e.cursor), [1, 3]);
   assert.throws(() => mergeEvents([event], [{ ...event, result: 'passed' }]), /Conflicting/);
+});
+
+test('browser boots and streams projected PR revision history while retaining closed DTO validation', async t => {
+  const h = fixture(t), comment = number => ({ provider: 'github', repository: h.f.run.source.repository, kind: 'issue_comment', number });
+  const revision = assertEntity('event', { schema_version: '1.0', kind: 'event', id: 'revision-event', run_id: h.f.run.id,
+    sequence: 11, type: 'PR_REVISION_LINKED', occurred_at: '2026-10-08T00:00:00.000Z', payload: { schema_version: '1.0', extensions: {}, data: {
+      revision_id: 'revision-' + 'a'.repeat(64), source_sha: h.f.run.source.sha, previous_head: '2'.repeat(40), new_head: '3'.repeat(40), base_sha: '4'.repeat(40), ref: 'codex/awh-task-1',
+      pull_request: { provider: 'github', repository: h.f.run.source.repository, kind: 'pull_request', number: 1 }, previous_handoff: comment(2),
+      evidence: { comment: comment(3), sha256: 'b'.repeat(64) }, handoff: { comment: comment(4), sha256: 'c'.repeat(64) },
+      checks: [{ command: 'git diff --check origin/main...HEAD', exit_code: 0 }]
+    } } });
+  const view = h.store.dashboardReadView({ project_ids: [h.f.project.id] });
+  const projected = timeline({ cursor: 2, event: revision }, view);
+  const snapshot = { ...h.projection.snapshot(), cursor: 2 };
+  const history = { ...h.projection.timeline(null, 0, 100), items: [...h.projection.timeline(null, 0, 100).items, projected], snapshot_cursor: 2 };
+  const b = harness(h, async path => ({ ok: true, json: async () => structuredClone(path.endsWith('/snapshot') ? snapshot : history) }));
+  t.after(() => b.reader.stop()); await b.reader.refresh();
+  assert.equal(b.reader.state.phase, 'connecting'); assert.deepEqual(b.reader.state.events.map(event => event.cursor), [1, 2]);
+  assert.equal(b.reader.state.events[1].type, 'PR_REVISION_LINKED');
+  assert.equal(b.reader.state.events[1].source_sha, h.f.run.source.sha); assert.equal(b.reader.state.events[1].authority_verified, false);
+  assert.equal(b.reader.state.events[1].github_refs[0].kind, 'pull_request');
+  b.streams[0].emit('open'); assert.equal(b.reader.state.phase, 'live');
+  b.streams[0].emit('timeline-event', { ...projected, cursor: 3, sequence: 12, event_id: 'second-revision' }, '3');
+  assert.deepEqual(b.reader.state.events.map(event => event.cursor), [1, 2, 3]); assert.equal(b.reader.state.phase, 'partial');
+  for (const patch of [{ type: 'UNKNOWN_EVENT' }, { authority_verified: true }, { token: 'never-display' }])
+    assert.throws(() => assertContract('TimelineEvent', { ...projected, ...patch }), /contract mismatch/);
 });
 test('initial snapshot and history precede SSE; Connected appears only after actual open; refresh keeps connection', async t => {
   const h = fixture(t), b = harness(h); t.after(() => b.reader.stop()); await b.reader.refresh();
