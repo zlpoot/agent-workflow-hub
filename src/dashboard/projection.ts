@@ -160,10 +160,11 @@ export class DashboardProjection {
     const view = this.view();
     const values = this[kind](view).filter(item => {
       if (kind === 'projects') return !project || item.id === project;
-      if (kind === 'executors') return !project || view.runs.some(run => run.executor_id === item.id && run.project_id === project);
+      if (kind === 'executors') return !project || ('project_ids' in item && item.project_ids?.includes(project)) ||
+        view.runs.some(run => run.executor_id === item.id && run.project_id === project);
       const run = view.runs.find(run => run.id === item.id)!;
       return (!project || run.project_id === project) && (!executor || run.executor_id === executor) && (!state || run.state === state);
-    });
+    }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     if (after && !values.some(item => item.id === after)) fail(400, 'invalid_cursor', 'Cursor no longer belongs to this result set; restart pagination');
     const remaining = values.filter(value => value.id > after), items = remaining.slice(0, limit);
     return { ...envelope, items, next_cursor: remaining.length > limit ? Buffer.from(JSON.stringify([binding, items.at(-1)!.id])).toString('base64url') : null,

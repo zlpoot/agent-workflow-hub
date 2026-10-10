@@ -95,8 +95,11 @@ test('trusted development preparation requires current approved Work Item and ne
  git(root,['checkout','feature/customer-work']);const diagnosis=await diagnoseEnrollment(h.machinePath,root);assert.equal(diagnosis.checks.find(c=>c.id==='development').status,'blocked');assert.equal(diagnosis.checks.find(c=>c.id==='worktree').status,'passed');
 });
 
-test('installed Viewer headless browser selects directory, requests approval, connects and displays a run-free Executor',async t=>{
- const h=await fixture(t),root=repo(h.base,'browser-project');const viewerInstall=join(h.base,'viewer-install');mkdirSync(viewerInstall);
+test('installed Viewer selects the exact approved Work Item version, connects and displays a run-free Executor',async t=>{
+ const h=await fixture(t),root=repo(h.base,'browser-project','zlpoot/agent-workflow-hub');git(root,['checkout','-b','codex/new-business-901']);
+ const trust=trustedFixture(h.base,({catalog,approvals,approval})=>{const next={...catalog.work_items[0],work_item_version:'v2'};catalog.work_items.push(next);approvals.entries.push(approval('work_item',next.id,next.work_item_version,next));});
+ const machine=JSON.parse(readFileSync(h.machinePath));machine.policy_trust_file=trust.path;writeFileSync(h.machinePath,JSON.stringify(machine));
+ const viewerInstall=join(h.base,'viewer-install');mkdirSync(viewerInstall);
  const install=spawnSync(process.execPath,[npmEntry(),'install','--prefix',viewerInstall,'--offline','--ignore-scripts','--no-audit','--no-fund',resolve('.handoff/packages/zlpoot-awh-viewer-'+CLIENT_VERSION+'.tgz')],{env:npmEnv(join(h.base,'viewer-cache')),encoding:'utf8',windowsHide:true,timeout:60000});assert.equal(install.status,0);
  const viewerConfig=join(h.base,'viewer.json'),viewerPort=await port();writeFileSync(viewerConfig,JSON.stringify({schema_version:'1.0',mode:'local_browser_direct',database:h.database,port:viewerPort,viewer:{id:'local-viewer',project_ids:[]},local_bindings:[],machine_config_file:h.machinePath}));
  const entry=join(viewerInstall,'node_modules','@zlpoot','awh-viewer','dist','dashboard-cli.js');const child=spawn(process.execPath,[entry,'--config',viewerConfig],{windowsHide:true,stdio:['ignore','pipe','pipe']});const exit=once(child,'exit');resources.get(t).children.push({child,exit});let errors='',timer;child.stderr.on('data',x=>errors+=x);
@@ -104,8 +107,14 @@ test('installed Viewer headless browser selects directory, requests approval, co
  const browser=await chromium.launch({channel:'msedge',headless:true});resources.get(t).stops.push(()=>browser.close());const page=await browser.newPage({viewport:{width:1280,height:1000}});const failures=[];page.on('pageerror',e=>failures.push(e.message));
  await page.goto('http://127.0.0.1:'+viewerPort+'/dashboard');await page.getByRole('button',{name:'添加项目向导',exact:true}).click();
  await page.getByRole('button',{name:h.base,exact:true}).click();await page.getByRole('button',{name:'browser-project',exact:true}).click();await page.getByRole('button',{name:'识别项目',exact:true}).click();
+ await page.getByRole('combobox',{name:'新增项目能力',exact:true}).selectOption('develop');
+ const tasks=page.getByRole('combobox',{name:'批准任务',exact:true});await tasks.locator('option').nth(1).waitFor({state:'attached'});
+ const options=await tasks.locator('option').evaluateAll(items=>items.map(o=>({value:o.value,label:o.textContent})));
+ assert.equal(options.length,2);assert.notEqual(options[0].value,options[1].value);assert(options[1].label.endsWith('v2'));
+ await tasks.selectOption({label:options[1].label});assert.equal(await tasks.inputValue(),options[1].value);
  await page.getByRole('checkbox',{name:'确认新增项目授权'}).check();await page.getByRole('button',{name:'提交接入申请',exact:true}).click();await page.getByText('等待 CP 管理员批准。',{exact:false}).waitFor();
- const preview=enrollmentPreview(h.machinePath,root);approveEnrollment({request:preview.request_file,trustedConfig:h.trusted,database:h.database,confirm:true});
+ const preview=enrollmentPreview(h.machinePath,root);assert.deepEqual(JSON.parse(readFileSync(preview.request_file)).work_item,{id:trust.selection.id,version:'v2'});
+ approveEnrollment({request:preview.request_file,trustedConfig:h.trusted,database:h.database,confirm:true,policyTrust:trust.path});
  await page.getByRole('button',{name:'批准后确认接入 / 重试',exact:true}).click();await page.getByRole('heading',{name:'执行器',exact:true}).waitFor();const binding=enrollmentBindings(h.machinePath)[0];
  resources.get(t).stops.push(async()=>{await new Promise(resolve=>{const c=spawn(process.execPath,[h.entry,'--config',binding.config_file,'resident','stop'],{cwd:root,windowsHide:true,stdio:'ignore'});c.once('close',()=>resolve());});});
  await page.getByText(binding.executor_id,{exact:true}).waitFor();await page.getByText(root,{exact:true}).waitFor();await page.getByText('在线',{exact:true}).first().waitFor();assert.deepEqual(failures,[]);
