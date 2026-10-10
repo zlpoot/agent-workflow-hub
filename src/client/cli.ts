@@ -9,10 +9,11 @@ import { deliver, DeliveryError, deliveryDiagnostic } from './deliver.js';
 import { readFileSync, lstatSync } from 'node:fs';
 import { publicationDiagnostic } from '../builder.js';
 import { doctor, formatDoctor, isDoctorReport } from './doctor.js';
+import { residentControl, startResident } from './resident.js';
 
 export async function main(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
-  if (args.length === 1 && args[0] === '--help') return { commands: ['doctor [--json] [--probe-cp] [--policy-trust <external-file> --work-item <id> --work-item-version <version> --observations <json-file>]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
+  if (args.length === 1 && args[0] === '--help') return { commands: ['resident start|status|stop', 'doctor [--json] [--probe-cp] [--policy-trust <external-file> --work-item <id> --work-item-version <version> --observations <json-file>]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
     'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry',
     'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry',
     'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>'], event_types: CLIENT_EVENT_TYPES,
@@ -23,6 +24,14 @@ export async function main(args: string[]): Promise<unknown> {
     configPath = args[1]; args = args.slice(2);
   }
   const [command, ...rest] = args, options = new Map<string, string>();
+  if (command === 'resident') {
+    if (rest.length === 1 && rest[0] === '--help') return { usage: 'awh --config <existing-external-config> resident start|status|stop',
+      start: 'explicit foreground presence service; Ctrl+C or resident stop shuts it down; no task execution or auto-registration', authority_verified: false };
+    if (!configPath || rest.length !== 1 || !['start', 'status', 'stop'].includes(rest[0]!)) clientFail('arguments', 'resident requires existing explicit config and exactly start, status or stop');
+    if (rest[0] !== 'start') return residentControl(configPath, rest[0] as 'status' | 'stop');
+    const service = await startResident(configPath); console.log(JSON.stringify({ resident: 'started', mode: 'foreground', authority_verified: false }));
+    await service.done; return { resident: 'stopped', authority_verified: false };
+  }
   if (command === 'doctor') {
     if (rest.length === 1 && rest[0] === '--help') return { usage: 'awh [--config <absolute-external-json-file>] doctor [--json] [--probe-cp] [--policy-trust <absolute-external-file> --work-item <id> --work-item-version <version> --observations <json-file>]',
       statuses: ['passed','blocked','not_checked'], read_only: true, offline_default: true, authority_verified: false };

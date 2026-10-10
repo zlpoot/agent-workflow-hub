@@ -1,5 +1,9 @@
 # Dashboard Wizard prototype — Hub #33
 
+## #58 current implementation
+
+Client / Viewer 0.4.7 adds an explicit scoped local-browser entry and opt-in installed-Client offline diagnosis. The default selection uses the current Reader or asks for a source; history is selected explicitly. Operator-owned external bindings supply exact worktree/repository, pinned installed Client entry, existing config and optional approved Work Item. The browser selects only a scoped binding ID and never supplies an executable/config/permission. Current installation, configuration, Doctor checks and approved-version comparison are timestamped; missing observations remain not_checked. See [Windows installation and operation](windows-product.md). The following #33 account is retained as historical prototype behavior and evidence, not the current feature definition.
+
 Open **添加项目向导** in the existing Dashboard. Four steps support direct selection and previous/next navigation: select an existing scoped project or explicitly labeled historical sample; review independent Client/manual configuration instructions; inspect Doctor/Policy observations; return to Project, Executor, Run and Timeline views. The Wizard remains available without a Viewer snapshot; Reader destinations are unavailable until the project is in its protected scope.
 
 React 19, Radix Themes 3.3.0 and the existing `DashboardReader` same-origin GET/SSE contract remain unchanged. No browser approval, file/config/Doctor upload, filesystem scan, command execution, provider write or new server API. Copy copies a placeholder command template only. Reuse existing installs, Machine/Executor/endpoint/CA/credential/state. Config placeholders illustrate structure; they are not usable real configuration or approval.
