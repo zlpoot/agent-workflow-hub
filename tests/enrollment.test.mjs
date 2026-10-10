@@ -126,6 +126,9 @@ test('installed Viewer selects the exact approved Work Item version, connects an
  assert.equal(options.length,2);assert.notEqual(options[0].value,options[1].value);assert(options[1].label.endsWith('v2'));
  await tasks.selectOption({label:options[1].label});assert.equal(await tasks.inputValue(),options[1].value);
  await dialog.getByRole('button',{name:'确认接入',exact:true}).click();await page.getByText('申请已提交，等待管理员批准。',{exact:false}).waitFor();
+ // The waiting notice is rendered before the initial connect finishes. Wait for
+ // that operation to settle before simulating the separate owner's approval.
+ await dialog.waitFor({state:'hidden'});await page.locator('button:not(:disabled)').filter({hasText:/^完成接入$/}).waitFor();
  const preview=enrollmentPreview(h.machinePath,root);assert.deepEqual(JSON.parse(readFileSync(preview.request_file)).work_item,{id:trust.selection.id,version:'v2'});
  approveEnrollment({request:preview.request_file,trustedConfig:h.trusted,database:h.database,confirm:true,policyTrust:trust.path});
  await page.getByRole('button',{name:'完成接入',exact:true}).click();await dialog.getByRole('button',{name:'确认接入',exact:true}).click();await page.getByRole('heading',{name:'执行器',exact:true}).waitFor();const binding=enrollmentBindings(h.machinePath)[0];
