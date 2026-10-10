@@ -2,6 +2,7 @@
   "schema_version": "1.0",
   "kind": "awh_release_plan",
   "release": {
+    "id": null,
     "name": "AWH v0.1.0-rc.1",
     "proposed_tag": "v0.1.0-rc.1",
     "channel": "rc",
@@ -90,7 +91,15 @@
     { "layer": "full_delivery", "project": "webskill", "target": "darwin-arm64", "status": "NOTRUN", "evidence_refs": [] }
   ],
   "unsupported_targets": [{ "target": "darwin-x64", "status": "NOT_VERIFIED" }, { "target": "other", "status": "NOT_VERIFIED" }],
-  "deployments": [],
+  "deployment_records_design": {
+    "storage": "external_append_only",
+    "part_of_release_manifest": false,
+    "mutates_release_manifest_or_sha256sums": false,
+    "release_reference_fields": ["release_id", "release_tag", "release_source_commit", "release_manifest_sha256", "sha256sums_sha256"],
+    "artifact_reference_fields": ["component", "target", "artifact_sha256"],
+    "record_fields": ["record_id", "instance_alias", "roles", "os", "cpu", "node_version", "deployed_source_commit", "deployed_build_sha", "deployed_at", "verified_at", "status", "evidence_refs", "supersedes_record_id"],
+    "records": []
+  },
   "acceptance": { "runtime_write": "NOT_ACCEPTED", "full_delivery": "NOT_ACCEPTED" },
   "historical_dispositions": { "issue30": "PHASE_C_ACCEPTED_WITH_EXCEPTION", "issue35": "WINDOWS_FIRST_USABLE_OBSERVE_ONLY", "onboarding_api_1_0_0": "OFFLINE_FIXTURE_ONLY" }
 }

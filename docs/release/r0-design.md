@@ -134,25 +134,44 @@ Node built-in SQLite 均纳入平台 smoke。不把 Windows node_modules 拷贝�
 
 | 字段 / 对象 | 实际发布清单约束 |
 | --- | --- |
-| `release` | name、tag、`channel=rc`、`state=candidate/released`、`source_commit` 完整 40 hex、source clean、Human gate/evidence 引用；名称不等于授权 |
+| `release` | 固定 release id、name、tag、`channel=rc`、发行前冻结的 RC 状态、`source_commit` 完整 40 hex、source clean、Human gate/evidence 引用；名称不等于授权，发布状态变化不回写冻结字节 |
 | `components[]` | 恰好五个唯一 id，包 identity/version 或 UI build version、entrypoints、protocol/schema/contract requirements；记录嵌入 policy 与 contracts 的 digest |
-| `artifacts[]` | 唯一 filename/组件/target；九个必需实际资产；size_bytes >0、sha256 64 hex、source_commit、package/build version、build_environment 和 runtime Node minimum |
+| `artifacts[]` | filename 全局唯一；(`component`, `target`) 组合唯一且 component 必须引用已定义 id；九个必需组合各恰好一次，不同组件可使用相同 target；size_bytes >0、sha256 64 hex、source_commit、package/build version、build_environment 和 runtime Node minimum |
 | `build_environment` | OS/CPU、完整 Node/pnpm/npm/compiler/bundler 版本（未使用项显式 n/a）、lockfile SHA-256、offline install closure 清单和证据链接；不放绝对路径或环境变量转储 |
 | `compatibility[]` | Client↔CP Protocol 1.0/v2、UI↔Viewer Dashboard 1.0.0+contract hash、Builder↔内嵌固定 Profile+Handoff 0.1；范围与实际 tests/evidence、status 明确 |
 | `verification[]` | layer=package/runtime_write/full_delivery、target、status=PASS/BLOCKED/NOTRUN/NOT_VERIFIED、exact source/artifact digest、原始日志/evidence；不存在证据不得 PASS |
-| `deployments[]` | 经单独授权后追加脱敏 instance alias、roles(cp/viewer/client/builder)、OS/CPU/Node、deployed source/build SHA、artifact digest、evidence；不写 Machine UUID、私有 config、IP/host/key/token |
 | `unsupported_targets[]` | 明确 darwin-x64 等未实测目标；不由 architecture-independent 静态 UI 推导后端 PASS |
 
-实际清单 fail-closed：未知字段、重复 id/filename/target、丢失必需资产、未解析占位符/null
+实际清单 fail-closed：未知字段、重复 components[].id、重复 artifacts[].filename、
+重复 (`component`, `target`) 组合、未定义 component 引用、丢失必需组合、未解析占位符/null
 source/digest/环境、资产字节 hash 或包内部 identity/source 不符、source drift、缺兼容证据，
 均拒绝发布资格。验证中的 NOTRUN/BLOCKED 可以保留为事实，但不能通过必需门槛。
+同一 target 在不同组件中重复是合法的，不进行全局 target 去重。
 计划和 actual 的独立 kind 避免把例子误认真实发行。
 
 每包内嵌 `awh-build.json`：组件/source/target/Node/lock/closure 与 contract/policy
 digest。外部 Manifest 记录**完成 pack 后**的归档字节 digest；内嵌文件不放自身 tarball
 digest，避免自引用。`SHA256SUMS` 包含九个归档、安装指南和最终 Manifest 的 hash；
-Manifest 不包含自己的 hash，checksums 也不包含自身。部署证据更新清单版本/字节及
-checksums 并保留旧记录，不能静默替换已发布 tag/资产。
+Manifest 不包含自己的 hash，checksums 也不包含自身。发行前完成证据快照后冻结
+Release Manifest、SHA256SUMS、九个资产及安装指南；发布后字节保持不变，机器安装、
+运行或新增验收均不得原地编辑或替换它们。需要补充发布元数据时，只能以新名称/新
+revision、对应新 hash 和明确独立审核另行发布，保留旧事实，不替换原 Manifest、
+SHA256SUMS、tag 或资产。
+
+### 独立部署记录
+
+后续部署与验证记录存于仓库外独立的 `deployment-records`（或等价附件），不放入
+Release Manifest，也不重算原发行 SHA256SUMS。每条记录以固定 release id/tag、
+release source SHA、原 Manifest/SHA256SUMS digest 及 (`component`, `target`, artifact
+SHA-256) 为引用，先校验它们与原发行清单一致，再记录脱敏 instance alias、roles
+(cp/viewer/client/builder)、OS/CPU/Node、deployed source/build SHA、部署/验证时间、
+status 和 evidence。引用不符或缺失即拒绝记录为该 Release 的部署证据。
+不得包含 Machine UUID、私有 config、IP/host/key/token。
+
+记录只能追加；纠错新增带旧 record id 的替代记录，保留原记录和替代关系，不覆盖旧事实。
+记录可以有自己的 digest/版本，但不能由此改变固定 Release/产物哈希或推定发布、live
+或 Full Delivery 权限。计划例子的 `deployment_records_design` 仅描述此外部记录格式，
+不是正式 Manifest 字段或真实部署记录；未来实际部署证据按此独立保存。
 
 同轮九个产物初始要求一个 exact clean source；Windows x64、Mac arm64 各自安装锁定
 依赖并构建 Node 包，不能复用另一 OS 的 native dependency 闭包。UI 可单次构建，记录
