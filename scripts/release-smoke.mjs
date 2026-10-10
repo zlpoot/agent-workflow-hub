@@ -21,7 +21,7 @@ const evidenceName=`package-smoke-${target}.json`;assert(!existsSync(join(candid
 const scratch=mkdtempSync(join(tmpdir(),'awh-rc-离仓 space-')), install=join(scratch,'install 空目录'), cache=join(scratch,'empty-cache'), assets=join(scratch,'ui 资源');mkdirSync(install);mkdirSync(assets);
 const env=npmEnv(cache);env.PATH=dirname(process.execPath)+(process.platform==='win32'?delimiter+join(process.env.SystemRoot,'System32')+delimiter+join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0'):'');delete env.NODE_PATH;delete env.AWH_CLIENT_CONFIG;
 const entries=ids.filter(id=>id!=='awh-dashboard-ui'), children=new Set();
-const run=(argv,status=0)=>{const r=spawnSync(process.execPath,argv,{cwd:scratch,env,encoding:'utf8',timeout:60000,maxBuffer:4*1024*1024,windowsHide:true});assert.equal(r.status,status,'Installed command failed: '+r.stderr);return r.stdout.trim();};
+const run=(argv,status=0,channel='stdout')=>{const r=spawnSync(process.execPath,argv,{cwd:scratch,env,encoding:'utf8',timeout:60000,maxBuffer:4*1024*1024,windowsHide:true});assert.equal(r.status,status,'Installed command failed: '+r.stderr);return r[channel].trim();};
 const safeDelete=path=>{const real=realpathSync(path),base=realpathSync(scratch),rel=relative(base,real);assert(rel && !rel.startsWith('..')&&dirname(real)===base && !lstatSync(path).isSymbolicLink());rmSync(real,{recursive:true,force:true});};
 const freePort=async()=>{const server=createServer();server.listen(0,'127.0.0.1');await once(server,'listening');const port=server.address().port;await new Promise(done=>server.close(done));return port;};
 const modulePath=(component,path)=>join(install,'node_modules','@zlpoot',component,path);
@@ -42,7 +42,7 @@ try {
   const handoff=join(scratch,'handoff.json'),sha=candidate.source_commit;
   writeFileSync(handoff,JSON.stringify({schema_version:'0.1',kind:'builder_handoff',work_item:{repo:'zlpoot/agent-workflow-hub',issue:56},candidate:{pr:1,base_sha:sha,head_sha:sha},producer:{executor:'codex',run_id:'package-smoke'},verification:{subject_sha:sha,lifecycle:'completed',outcome:'pass',checks:[{command:'package smoke fixture',exit_code:0}],evidence_refs:['https://github.com/zlpoot/agent-workflow-hub/issues/56']},handoff:{next_step:'review',publication:'confirmed'}}));
   const offline=JSON.parse(run([modulePath('awh-builder','dist/cli.js'),handoff,'--expected-head',sha]));assert.equal(offline.schema_valid,true);assert.equal(offline.authority_verified,false);
-  const bad=JSON.parse(run([modulePath('awh-builder','dist/builder-cli.js'),'--repo','untrusted'],2));assert(bad.error);checks.builder_offline='PASS';
+  const bad=JSON.parse(run([modulePath('awh-builder','dist/builder-cli.js'),'--repo','untrusted'],2,'stderr'));assert(bad.error);checks.builder_offline='PASS';
   for(const [name,bytes] of readZip(readFileSync(join(uiDir,uiArtifact.filename)))){const path=join(assets,name);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,bytes);}
   const fixture=JSON.parse(readFileSync(join(root,'examples/protocol/future-ui.json'))),bearer='awh_cp_'+randomBytes(32).toString('base64url'),secret=randomBytes(32).toString('base64url');
   const trusted=join(scratch,'trusted.json'),database=join(scratch,'scratch.sqlite');
