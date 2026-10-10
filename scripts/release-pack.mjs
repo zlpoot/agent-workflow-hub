@@ -82,7 +82,7 @@ try {
   checkCandidate(candidate,file=>readFileSync(join(output,file)));
   writeFileSync(join(output,'candidate-index.json'),JSON.stringify(candidate,null,2)+'\n',{flag:'wx'});
   const names=[...artifacts.map(a=>a.filename),'candidate-index.json']; writeFileSync(join(output,'CANDIDATE-SHA256SUMS'),names.map(f=>sha256(readFileSync(join(output,f)))+'  '+f).join('\n')+'\n',{flag:'wx'});
-  console.log(JSON.stringify({source_commit:source,target,artifacts:artifacts.map(({build,...a})=>a),release_gate:'NOT_AUTHORIZED',mac_validation:target==='win32-x64'?'NOTRUN':'HOST_BUILD_ONLY'}));
+  console.log(JSON.stringify({source_commit:source,target,artifacts:artifacts.map(({build,...a})=>a),release_gate:'NOT_AUTHORIZED',windows_validation:'NOTRUN',mac_validation:'NOTRUN'}));
 } finally {
   const real=realpathSync(stage), base=realpathSync(output); assert.equal(dirname(real),base); assert(relative(base,real).startsWith('.stage-'));rmSync(real,{recursive:true,force:true});
 }
