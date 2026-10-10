@@ -1,5 +1,7 @@
 # C1-G read-only Dashboard
 
+The current #58 implementation adds a separately packaged opt-in local OS-user Viewer with scoped HttpOnly browser bootstrap and installed-Client offline onboarding. See [Windows product operation](windows-product.md) and [the closed Viewer deployment schema](local-viewer.schema.json). The existing authenticator mode remains default; no live instance is enabled by code changes. The following #30 description/evidence is retained historically.
+
 > Historical verification disposition remains **PHASE_C_ACCEPTED_WITH_EXCEPTION** (#30), not unconditional PASS. This change grants no live Dashboard/CP/Operator authorization.
 
 

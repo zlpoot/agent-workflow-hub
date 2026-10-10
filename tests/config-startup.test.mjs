@@ -41,7 +41,7 @@ test('documented config examples follow closed schemas; unknown fields fail', ()
   }
 });
 test('runtime and trusted parsing reject source/field/version/path conflicts before DB creation', t => {
-  const h = scratch(t); assert.deepEqual(readRuntimeConfig(h.runtime), h.data); assert.deepEqual(readTrustedConfig(h.config), trusted);
+  const h = scratch(t); assert.deepEqual(readRuntimeConfig(h.runtime), h.data); assert.deepEqual(readTrustedConfig(h.config), {...trusted,enrollments:[]});
   for (const change of [{ schema_version: '2.0' }, { unexpected: true }, { port: '4310' }, { port: 0 }, { database: 'relative.sqlite' }, { database: h.dir + '/child/../escape.sqlite' }, { https_config_file: '' }]) {
     h.put({ ...h.data, ...change }); assert.throws(() => readRuntimeConfig(h.runtime)); assert(!existsSync(h.database));
   }

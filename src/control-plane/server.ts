@@ -104,6 +104,8 @@ export function createControlPlaneServer(options: ServerOptions) {
       if (id && id !== 'register' && !validId(id)) fail(400, 'invalid_id', 'Invalid Registry ID');
       let result: unknown, status = 200;
       if (method === 'POST') {
+        if (principal.enrollment && !['/v1/projects/register','/v1/executors/register',`/v1/executors/${principal.enrollment.request.executor_id}/heartbeat`].includes(url.pathname))
+          fail(403, 'presence_only', 'Enrollment permits registration and heartbeat only');
         query(url, []);
         // Check the closed route set before consuming or interpreting body data.
         if (!['/v1/projects/register', '/v1/executors/register', '/v1/work-items/register', '/v1/runs'].includes(url.pathname) &&
@@ -132,7 +134,9 @@ export function createControlPlaneServer(options: ServerOptions) {
         }
         if (['created', 'appended'].includes((result as { disposition?: string }).disposition ?? '')) status = 201;
       } else if (method === 'GET') {
-        if (url.pathname === '/v1/capabilities') {
+        if (url.pathname === '/v1/enrollment') {
+          query(url, []); result = { enrollment: principal.enrollment ?? null };
+        } else if (url.pathname === '/v1/capabilities') {
           query(url, []); result = { revision_linking: 'v021-docs-v1', database_version: 2 };
         } else if (url.pathname === '/v1/profiles') {
           query(url, ['project_id']); const projectId = url.searchParams.get('project_id');

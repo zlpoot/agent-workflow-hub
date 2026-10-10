@@ -1,5 +1,7 @@
 # Client Doctor prototype — Hub #32
 
+For R1-D machine/project diagnosis and explicit repair, see [project enrollment](project-enrollment.md). The legacy Doctor below remains read-only and preserves its historical comparisons; it does not silently initialize or rebind a project.
+
 Client candidate **0.4.6** extends the independently installed package structure with read-only diagnosis. It needs Node 24+ and Git, and runs inside a real product worktree without a Hub checkout. This prototype has offline fixture coverage on the recorded Builder OS; it does not claim macOS or production acceptance.
 
 ## Run offline first

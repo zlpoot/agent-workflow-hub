@@ -209,6 +209,25 @@ export class AwhClient {
       return { project: p, executor: c.executor, client: c.metadata, last_seen: heartbeat.last_seen, authority_verified: false };
     });
   }
+  // Presence only: verify existing bindings before writing exactly one heartbeat.
+  // Never register/create a Machine, Session, Run or Event here.
+  presenceBinding(): string {
+    const c = this.context(false, true, false);
+    return this.presenceIdentity(c);
+  }
+  private presenceIdentity(c: Context): string {
+    return createHash('sha256').update(JSON.stringify([c.identity.root, c.manifest, c.config, c.machine, c.metadata])).digest('hex');
+  }
+  async heartbeat(expectedBinding?: string) {
+    const c = this.context(false, true);
+    if (expectedBinding !== undefined && this.presenceIdentity(c) !== expectedBinding) clientFail('response_binding', 'Resident configuration or identity changed; stop and request operator inspection');
+    await this.project(c); await this.executor(c);
+    const result = await this.request(c, '/v1/executors/' + encodeURIComponent(c.executor.id) + '/heartbeat', 'POST', {});
+    keys(result, ['executor', 'client', 'last_seen']);
+    if (!same(checked('executor', result.executor), c.executor) || !same(assertClientMetadata(result.client), c.metadata) || !timestamp(result.last_seen))
+      clientFail('response_binding', 'Heartbeat acknowledgment does not match the existing Client');
+    return { last_seen: result.last_seen as string, authority_verified: false as const };
+  }
   async status() {
     const c = this.context(), s = this.load(c), p = await this.project(c), executor = await this.executor(c);
     const timeline = s.initial && (s.events.some(e => e.type === 'PR_REVISION_LINKED') || s.pending?.type === 'PR_REVISION_LINKED') ? await this.timeline(s.initial.id) : null;

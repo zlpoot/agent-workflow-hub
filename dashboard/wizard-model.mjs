@@ -11,8 +11,8 @@ export const HISTORY = Object.freeze({
     source_sha: '1e507c35f0cd908bcd8b226417ff471a505d677b',
     sha256: 'a8e9a771a5a17e55b5797ef3c31c8ee1aa56813e850a088c3796b0b9921c257c' }
 });
-export const CANDIDATE_ARTIFACT = Object.freeze({ version: '0.4.6', status: 'not_checked',
-  note: '当前源码候选 0.4.6；新包来源 SHA 与实际 digest 需从候选 PR 的产物证据核对。历史 0.4.5 digest 不适用。' });
+export const CANDIDATE_ARTIFACT = Object.freeze({ version: '0.4.8', status: 'not_checked',
+  note: '当前源码候选 0.4.8；新包来源 SHA 与实际 digest 需从本次产物证据核对。历史包 digest 不适用。' });
 const preserve = '保留当前产品分支、文件与原有 Client state；请操作人做有界诊断，不自动切换、修复或重试。';
 const request = '向操作人申请已批准的 Profile / Work Item 版本；项目表单和历史记录不能批准权限。';
 const check = (id, status, code, source, safe_next_step) => ({ id, status, code, source, safe_next_step });
@@ -45,15 +45,18 @@ export function stepAt(step, direction) {
   if (!Number.isInteger(step) || step < 0 || step > 3 || ![-1, 1].includes(direction)) throw new Error('Invalid wizard navigation');
   return Math.max(0, Math.min(3, step + direction));
 }
-export function projectChoices(state, fixture = false) {
+export function projectChoices(state, fixture = false, bindings = []) {
   return [...(state.snapshot?.projects ?? []).map(p => ({ key: 'reader:' + p.id, id: p.id,
     repository: p.repository, profile_ref: p.profile_ref, source: fixture ? 'synthetic_reader' : 'reader_snapshot',
     label: `${p.id} · ${fixture ? '模拟 Reader 快照' : '当前 Reader 只读快照'}` })),
+    ...bindings.filter(b => !state.snapshot?.projects.some(p => p.id === b.project_id && p.repository === b.repository)).map(b => ({ key: 'local:' + b.id,
+      id: b.project_id, repository: b.repository, profile_ref: 'not_checked', source: 'trusted_local_binding', label: b.project_id + ' · 操作人登记本机工作树' })),
     { key: 'history:future-ui', id: 'future-ui', repository: HISTORY.repository, profile_ref: HISTORY.profile_ref,
       source: 'history_35', label: 'Future UI · #35 历史离线样本' }];
 }
-export function wizardModel(state, key, fixture = false) {
-  const project = projectChoices(state, fixture).find(p => p.key === key) ?? null;
+/** @param {any} state @param {string} key @param {boolean} fixture @param {any} diagnosis @param {any[]} bindings */
+export function wizardModel(state, key, fixture = false, diagnosis = null, bindings = []) {
+  const project = projectChoices(state, fixture, bindings).find(p => p.key === key) ?? null;
   const historical = project?.source === 'history_35';
   const runs = project && !historical ? (state.snapshot?.runs ?? []).filter(r => r.project_id === project.id) : [];
   const latest = [...runs].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
@@ -69,15 +72,17 @@ export function wizardModel(state, key, fixture = false) {
     compare('期望 / 历史 Issue', null, issue ? `历史保留 #${issue} · 非当前授权` : null),
     compare('执行器', null, historical ? '历史本地身份存在 · 标识已脱敏' : latest?.executor_id ?? null)
   ];
-  const checks = historical ? HISTORY_CHECKS : [
+  const current = !historical && project && diagnosis?.project_id === project.id && diagnosis?.repository === project.repository ? diagnosis : null;
+  const checks = historical ? HISTORY_CHECKS : current ? current.checks : [
     check('doctor', 'not_checked', 'local_doctor_not_observed', 'not_observed', '在真实工作树运行可信独立 Client 的离线 Doctor；本页面不执行命令或读取文件。'),
     check('configuration', 'not_checked', 'external_config_not_observed', 'not_observed', '操作人手工提供既有仓库外配置；不要上传到浏览器。'),
     check('approved_policy', 'not_checked', 'approved_work_item_unavailable', state.snapshot ? 'reader_snapshot' : 'not_observed', request),
     check('app_scope', 'not_checked', 'app_scope_not_verified', 'not_observed', '受保护 Reader 的项目可见性不等于 App 仓库写权限。')
   ];
-  return { project, historical, sourceLabel: project ? sourceLabel : '未实际验证', approvedVersion: null,
-    observedVersion, branch, issue, differences, checks, runs, authority_verified: false,
-    configuration: 'not_checked', currentDoctor: 'not_checked',
+  return { project, historical, sourceLabel: current ? '当前已安装 Client · 本机离线诊断' : project ? sourceLabel : '未实际验证', approvedVersion: current?.approved_version ?? null,
+    observedVersion, branch, issue, differences: current?.differences ?? differences, checks, runs, authority_verified: false,
+    configuration: current?.checks.find(c => c.id === 'configuration')?.status ?? 'not_checked', currentDoctor: current?.status ?? 'not_checked',
+    observedAt: current?.observed_at ?? null, installedVersion: current?.client_version ?? null,
     timeline: { available: !!state.snapshot && !!project && state.snapshot.projects.some(p => p.id === project.id),
       source: !state.snapshot ? 'not_observed' : fixture ? 'synthetic_reader' : 'reader_snapshot',
       phase: state.phase, cursor: state.snapshot?.cursor ?? null, lastRefresh: state.lastRefresh,

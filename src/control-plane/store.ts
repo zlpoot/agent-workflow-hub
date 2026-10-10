@@ -3,11 +3,13 @@ import { externalFilePath } from '../shared/external-files.js';
 import { appendEvent, assertEntity, assertClientMetadata, validateBindings, type ClientMetadata } from '../protocol/index.js';
 import type { Event, Executor, ProfilePolicy, Project, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
 import { executorAccess, fail, MAX_PAYLOAD_BYTES, projectAccess, safeData, type Principal } from './security.js';
+import type { EnrollmentGrant } from '../shared/enrollment.js';
 
 export const DATABASE_VERSION = 2;
 type Row = Record<string, string | number | bigint | Uint8Array | null>;
 export interface StoredEvent { cursor: number; event: Event }
 export interface DashboardReadView {
+  enrollment_bindings?: readonly PresenceBinding[];
   cursor: number;
   projects: Project[];
   policies: ProfilePolicy[];
@@ -29,7 +31,7 @@ function entity<K extends keyof ProtocolEntities>(kind: K, input: unknown): Prot
 }
 
 // Startup qualification is read-only; an existing service never initializes, migrates or seeds.
-export function validateExistingDatabase(path: string, policies: readonly ProfilePolicy[]): string {
+export function validateExistingDatabase(path: string, policies: readonly ProfilePolicy[], grants: readonly EnrollmentGrant[] = []): string {
   const checked = externalFilePath(path), db = new DatabaseSync(checked, { readOnly: true, allowExtension: false });
   try {
     if (Number(db.prepare('PRAGMA user_version').get()!.user_version) !== DATABASE_VERSION)
@@ -55,7 +57,8 @@ export function validateExistingDatabase(path: string, policies: readonly Profil
     for (const row of db.prepare('SELECT record FROM projects').all()) {
       const project = entity('project', decode(row));
       const versions = db.prepare('SELECT record FROM profiles WHERE ref = ?').all(project.profile_ref);
-      if (!versions.length || versions.some(version => entity('profile_policy', decode(version)).repository !== project.repository))
+      const enrolled = grants.some(g => g.manifest.project.id === project.id && g.manifest.project.repository === project.repository && g.manifest.profile.ref === project.profile_ref);
+      if (!versions.length && !enrolled || versions.some(version => entity('profile_policy', decode(version)).repository !== project.repository))
         fail(500, 'database_identity', 'Existing Project identity must agree with its trusted Profiles');
     }
     return checked;
@@ -66,11 +69,11 @@ export function validateExistingDatabase(path: string, policies: readonly Profil
 export class ControlPlaneStore {
   readonly #db: DatabaseSync;
   #revision = 0;
-  constructor(path: string, policies: readonly ProfilePolicy[], readonly now = () => new Date().toISOString(), mode: 'legacy' | 'existing' = 'legacy') {
+  constructor(path: string, policies: readonly ProfilePolicy[], readonly now = () => new Date().toISOString(), mode: 'legacy' | 'existing' = 'legacy', readonly enrollmentGrants: () => readonly EnrollmentGrant[] = () => []) {
     if (!Array.isArray(policies) || policies.length === 0 || policies.length > 256) fail(500, 'configuration', 'Trusted Profile policies are required');
     policies.forEach(policy => entity('profile_policy', policy));
     if (mode !== 'legacy' && mode !== 'existing') fail(500, 'configuration', 'Invalid store startup mode');
-    if (mode === 'existing') path = validateExistingDatabase(path, policies);
+    if (mode === 'existing') path = validateExistingDatabase(path, policies, enrollmentGrants());
     this.#db = new DatabaseSync(path, { timeout: 5000, enableForeignKeyConstraints: true, allowExtension: false });
     try {
       this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
@@ -138,7 +141,8 @@ export class ControlPlaneStore {
     const manifest = entity('manifest', input);
     projectAccess(principal, manifest.project.id);
     const policies = this.#db.prepare('SELECT record FROM profiles WHERE ref = ?').all(manifest.profile.ref).map(row => decode<ProfilePolicy>(row));
-    if (!policies.length || policies.some(policy => policy.repository !== manifest.project.repository))
+    if (principal.enrollment && canonical(principal.enrollment.manifest) !== canonical(manifest)) fail(403, 'enrollment_binding', 'Manifest differs from approved enrollment');
+    if (!policies.length && !principal.enrollment || policies.some(policy => policy.repository !== manifest.project.repository))
       fail(403, 'profile_binding', 'Manifest must match a trusted Profile repository');
     const project: Project = { schema_version: '1.0', kind: 'project', id: manifest.project.id,
       repository: manifest.project.repository, profile_ref: manifest.profile.ref };
@@ -160,6 +164,8 @@ export class ControlPlaneStore {
     const executor = entity('executor', input);
     if (client !== undefined) { safeData(client); assertClientMetadata(client); }
     executorAccess(principal, executor.id);
+    if (principal.enrollment && (executor.id !== principal.enrollment.request.executor_id || canonical(executor.machine) !== canonical(principal.enrollment.request.machine)))
+      fail(403, 'enrollment_binding', 'Executor differs from approved Machine binding');
     return this.transaction(() => {
       const old = this.#db.prepare('SELECT * FROM executors WHERE id = ?').get(executor.id);
       if (old && (old.client_id !== principal.id || canonical(decode(old)) !== canonical(executor)))
@@ -185,6 +191,7 @@ export class ControlPlaneStore {
     });
   }
   registerWorkItem(principal: Principal, input: unknown) {
+    if (principal.enrollment) fail(403, 'presence_only', 'Enrollment grants no business writes');
     const workItem = entity('work_item', input);
     this.getProject(principal, workItem.project_id);
     // Work references may belong to the Hub (external bootstrap); they remain provider declarations.
@@ -194,6 +201,7 @@ export class ControlPlaneStore {
     const workItem = decode<WorkItem>(this.row('work_items', id)); projectAccess(principal, workItem.project_id); return workItem;
   }
   createRun(principal: Principal, input: unknown) {
+    if (principal.enrollment) fail(403, 'presence_only', 'Enrollment grants no business writes');
     const run = entity('run', input);
     const project = this.getProject(principal, run.project_id);
     executorAccess(principal, run.executor_id);
@@ -229,6 +237,7 @@ export class ControlPlaneStore {
       .all(runId, after, limit).map(row => ({ cursor: Number(row.cursor), event: decode<Event>(row) }));
   }
   append(principal: Principal, runId: string, input: unknown) {
+    if (principal.enrollment) fail(403, 'presence_only', 'Enrollment grants no business writes');
     const event = entity('event', input);
     if (Buffer.byteLength(JSON.stringify(event.payload)) > MAX_PAYLOAD_BYTES) fail(413, 'payload_too_large', 'Event payload exceeds the byte limit');
     if (event.run_id !== runId) fail(409, 'binding', 'Event Run ID does not match the route');
@@ -250,7 +259,7 @@ export class ControlPlaneStore {
   latestCursor(): number { return Number(this.#db.prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events').get()!.cursor); }
   // One bounded SQLite read transaction; never seeds policies, mutates history or exposes client owners.
   dashboardReadView(principal: Pick<Principal, 'project_ids'>): DashboardReadView {
-    return readDashboard(this.#db, principal);
+    return readDashboard(this.#db, principal, this.enrollmentGrants().map(g => ({ project_id:g.manifest.project.id,executor_id:g.request.executor_id,client_id:g.request.client_id,machine_id:g.request.machine.id,worktree_id:g.request.worktree_id })));
   }
   streamEvents(principal: Principal, after: number, limit = 100): StoredEvent[] {
     const placeholders = principal.project_ids.map(() => '?').join(',');
@@ -270,9 +279,11 @@ function metadata(db: DatabaseSync, id: string): { client?: ClientMetadata } {
   const row = db.prepare('SELECT record FROM executor_clients WHERE executor_id = ?').get(id);
   return row ? { client: decode<ClientMetadata>(row) } : {};
 }
-function readDashboard(db: DatabaseSync, principal: Pick<Principal, 'project_ids'>): DashboardReadView {
+export interface PresenceBinding { project_id: string; executor_id: string; client_id: string; machine_id: string; worktree_id?: string; worktree?: string }
+function readDashboard(db: DatabaseSync, principal: Pick<Principal, 'project_ids'>, bindings: readonly PresenceBinding[] = []): DashboardReadView {
   const scope = principal.project_ids;
-  if (!scope.length || scope.length > 64) fail(403, 'forbidden', 'Explicit viewer project scope is required');
+  if (scope.length > 64) fail(403, 'forbidden', 'Explicit viewer project scope is required');
+  if (!scope.length) return {cursor:latestCursor(db),projects:[],policies:[],runs:[],work_items:[],executors:[],events:[]};
   const placeholders = scope.map(() => '?').join(',');
   const bounded = (sql: string, args: string[], limit: number): Row[] => {
     const rows = db.prepare(sql + ' LIMIT ?').all(...args, limit + 1);
@@ -287,18 +298,25 @@ function readDashboard(db: DatabaseSync, principal: Pick<Principal, 'project_ids
     const workItems = bounded(`SELECT record FROM work_items WHERE project_id IN (${placeholders}) ORDER BY id`, [...scope], 1000).map(row => decode<WorkItem>(row));
     const executors = bounded(`SELECT DISTINCT e.* FROM executors e JOIN runs r ON r.executor_id = e.id WHERE r.project_id IN (${placeholders}) ORDER BY e.id`, [...scope], 1000)
       .map(row => ({ executor: decode<Executor>(row), ...metadata(db, String(row.id)), last_seen: String(row.last_seen) }));
+    for (const b of bindings.filter(b => scope.includes(b.project_id))) {
+      const row = db.prepare('SELECT * FROM executors WHERE id = ? AND client_id = ?').get(b.executor_id,b.client_id);
+      if (!row || executors.some(e => e.executor.id === b.executor_id)) continue;
+      const executor = decode<Executor>(row);
+      if (executor.machine.id !== b.machine_id) fail(409,'enrollment_binding','Presence binding differs from Registry');
+      executors.push({executor,...metadata(db,b.executor_id),last_seen:String(row.last_seen)});
+    }
     const events = bounded(`SELECT e.cursor, e.record FROM events e JOIN runs r ON r.id = e.run_id WHERE r.project_id IN (${placeholders}) ORDER BY e.cursor`, [...scope], 10000)
       .map(row => ({ cursor: Number(row.cursor), event: decode<Event>(row) }));
     const policies = bounded(`SELECT DISTINCT p.record FROM profiles p JOIN projects j ON j.id IN (${placeholders}) AND p.ref = json_extract(j.record, '$.profile_ref') ORDER BY p.ref, p.version`, [...scope], 256)
       .map(row => decode<ProfilePolicy>(row));
     db.exec('COMMIT');
-    return { cursor, projects, policies, runs, work_items: workItems, executors, events };
+    return { cursor, projects, policies, runs, work_items: workItems, executors, events, ...(bindings.length ? {enrollment_bindings:bindings.filter(b => scope.includes(b.project_id))} : {}) };
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 // A separate sidecar can read an existing v2 DB without migrations, trusted config or write methods.
 export class DashboardReadStore implements DashboardStore {
   readonly #db: DatabaseSync;
-  constructor(path: string) {
+  constructor(path: string, readonly presenceBindings: () => readonly PresenceBinding[] = () => []) {
     this.#db = new DatabaseSync(path, { readOnly: true, timeout: 1000, allowExtension: false });
     try {
       if (Number(this.#db.prepare('PRAGMA user_version').get()!.user_version) !== DATABASE_VERSION)
@@ -307,5 +325,5 @@ export class DashboardReadStore implements DashboardStore {
   }
   close() { this.#db.close(); }
   dashboardRevision() { return String(this.#db.prepare('PRAGMA data_version').get()!.data_version) + ':' + latestCursor(this.#db); }
-  dashboardReadView(principal: Pick<Principal, 'project_ids'>) { return readDashboard(this.#db, principal); }
+  dashboardReadView(principal: Pick<Principal, 'project_ids'>) { return readDashboard(this.#db, principal, this.presenceBindings()); }
 }

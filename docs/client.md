@@ -1,5 +1,7 @@
 # Client / C1-C and C1-D
 
+R1-D candidate 0.4.8 adds machine setup, project init and bounded Doctor repair; see [project enrollment](project-enrollment.md). Existing commands and historical bindings remain available. Production deployment and real project enrollment require separate authorization.
+
 Hub #32 introduced the 0.4.5 read-only `awh doctor` prototype. Hub #33 now provides the **0.4.6 candidate** with unavailable dynamic Issue diagnostics, using the existing standalone package structure. See the [Doctor and manual trusted configuration guide](doctor.md), also included in the tarball. This candidate is not production deployment approval.
 
 The #32 baseline main ships Client **0.4.4**, including v0.2 repeatable delivery, v0.2.1 controlled document revision linking and [v0.2.1-R1 one-shot publication recovery](publication-recovery.md). Hub #42/#44/#46 are merged and #41/#43/#45 are closed. Independent Review of any new head and separate Human production authorization remain required; old recovery decisions are not reusable.
@@ -20,6 +22,10 @@ npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --
 ```
 
 Windows 使用相同 prefix 的 `node_modules\.bin\awh.cmd`。`--prefix` 应是独立工具目录，不改变产品 package.json/lockfile。支持 Windows、macOS、Linux；自动测试中的平台取自实际 OS，其他 OS 的实测结果必须单独记录。模拟 platform 字段或 fixture 不能证明双平台 PASS。
+
+## 正式常驻与本机 Viewer（0.4.7）
+
+`awh --config <原外置配置> resident start|status|stop` 提供显式前台常驻及心跳，仅复用已有身份，不自动注册或执行任务。普通浏览器 Viewer、当前已安装 Client 离线 Doctor、外置配置模板和安装/启停路径见 [Windows 产品接入](windows-product.md)。真实部署仍需独立授权。
 
 ## 项目身份与本地状态
 

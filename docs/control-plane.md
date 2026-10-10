@@ -1,5 +1,7 @@
 # C1-B Control Plane MVP (Hub #20)
 
+R1-D adds a local CP-owner `approve-project` command and narrowly scoped enrollment records in external trusted configuration; see [project enrollment](project-enrollment.md). No database Schema migration or HTTP approval endpoint is added. Registration/presence grants cannot create Work Items, Runs or Events.
+
 Control Plane 保存 runtime Registry、Executor last-seen、Run 和 Event timeline。GitHub 仍是 Issue/Commit/Branch/PR/Evidence/Handoff/Review/Merge 的长期事实源。本服务不连接 GitHub、扫描工程目录、运行命令或启动 Executor。JSON/SSE data 都含 `authority_verified: false`；`REVIEW_PASSED` 等只是 runtime declaration，不产生 Review/merge 权限。
 
 本阶段只交付 HTTP + SQLite，不含 Dashboard、可安装 Client (#21)、Builder Adapter (#22)、远程调度或部署平台。复用 [C1-A Protocol](protocol.md)，保留 C0 只读 CLI 和现有 App Builder。

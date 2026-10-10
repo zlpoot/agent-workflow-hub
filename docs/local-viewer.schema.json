@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AWH explicit local browser Viewer deployment",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "mode", "database", "port", "viewer", "local_bindings"],
+  "properties": {
+    "schema_version": { "const": "1.0" }, "mode": { "const": "local_browser_direct" },
+    "database": { "$ref": "#/$defs/path" }, "machine_config_file": { "$ref": "#/$defs/path" }, "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "viewer": {
+      "type": "object", "additionalProperties": false, "required": ["id", "project_ids"],
+      "properties": { "id": { "$ref": "#/$defs/id" }, "project_ids": { "type": "array", "minItems": 0, "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } } }
+    },
+    "local_bindings": { "type": "array", "maxItems": 64, "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "project_id", "repository", "worktree", "client_entry", "client_entry_sha256"],
+      "dependentRequired": { "policy_trust_file": ["work_item"], "work_item": ["policy_trust_file"] },
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "project_id": { "$ref": "#/$defs/id" },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$" },
+        "worktree": { "$ref": "#/$defs/path" }, "client_entry": { "$ref": "#/$defs/path" },
+        "client_entry_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "config_file": { "$ref": "#/$defs/path" }, "policy_trust_file": { "$ref": "#/$defs/path" },
+        "work_item": { "type": "object", "additionalProperties": false, "required": ["id", "version"], "properties": { "id": { "$ref": "#/$defs/id" }, "version": { "$ref": "#/$defs/id" } } }
+      }
+    } }
+  },
+  "allOf": [{ "if": { "not": { "properties": { "machine_config_file": {} }, "required": ["machine_config_file"] } }, "then": { "properties": { "viewer": { "type": "object", "properties": { "project_ids": { "type": "array", "minItems": 1 } } } } } }],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$" },
+    "path": { "type": "string", "minLength": 1, "pattern": "^(?:[A-Za-z]:[\\\\/]|/)" }
+  }
+}
