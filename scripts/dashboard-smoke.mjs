@@ -17,6 +17,11 @@ try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.AWH_DASHBOARD_TEST_BROWSER || undefined });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1024 } });
   const page = await context.newPage(), errors = [], network = [];
+  const isCpRoute = pathname => /^\/v1\/(?:projects|executors|runs)(?:\/|$)/.test(pathname);
+  assert(isCpRoute('/v1/projects'));
+  assert(isCpRoute('/v1/executors/executor-1'));
+  assert(!isCpRoute('/dashboard/v1/projects'));
+  assert(!isCpRoute('/dashboard/onboarding/v1/projects'));
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => network.push({ url: request.url(), method: request.method(), headers: request.headers() }));
   await page.route('**/*', route => new URL(route.request().url()).origin === new URL(url).origin ? route.continue() : route.abort());
@@ -86,7 +91,7 @@ try {
   const storage = await page.evaluate(() => ({ cookies: document.cookie, local: localStorage.length, session: sessionStorage.length }));
   assert.deepEqual(storage, { cookies: '', local: 0, session: 0 });
   assert(network.every(request => request.method === 'GET' && new URL(request.url).origin === new URL(url).origin && !request.headers.authorization));
-  assert(!network.some(request => /\/v1\/(?:projects|executors|runs)(?:\/|$)/.test(new URL(request.url).pathname.replace('/dashboard/v1/', '/read/'))));
+  assert(!network.some(request => isCpRoute(new URL(request.url).pathname)));
   await context.setOffline(true);
   await page.getByRole('button', { name: '刷新', exact: true }).click();
   await page.getByRole('alert').waitFor();
@@ -117,6 +122,7 @@ try {
   await noViewer.screenshot({ path: `${output}/wizard-no-viewer.png`, animations: 'disabled' });
   await noViewer.close();
   assert(network.every(request => request.method === 'GET' && new URL(request.url).origin === new URL(url).origin && !request.headers.authorization));
+  assert(!network.some(request => isCpRoute(new URL(request.url).pathname)));
   assert.equal(errors.length, 0, errors.join('\n'));
   // Evidence contains no cookie values or request headers.
   const evidence = { browser: await browser.version(), views: ['Overview', 'Projects', 'Executors', 'Runs', 'Timeline', 'Wizard'],
