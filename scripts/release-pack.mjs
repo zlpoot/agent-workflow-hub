@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
 import { npmEntry, npmEnv } from './npm-tool.mjs';
 import { ids, specs, provenancePaths, sha256, tree, checkCandidate } from './release-lib.mjs';
-import { zipFiles } from './release-archive.mjs';
+import { zipFiles, executableTar } from './release-archive.mjs';
 
 const root=dirname(dirname(fileURLToPath(import.meta.url))), args=process.argv.slice(2), target=process.platform+'-'+process.arch;
 assert(args.length===2 && args[0]==='--output','release-pack --output <new-empty-directory>');
@@ -66,6 +66,9 @@ try {
       build=metadata(component,tree(pkgStage),copied);writeFileSync(join(pkgStage,'awh-build.json'),JSON.stringify(build,null,2)+'\n');
       const [packed]=JSON.parse(run(process.execPath,[npmEntry(),'pack','--json','--ignore-scripts','--offline','--pack-destination',output],{cwd:pkgStage}));
       assert.equal(packed.name,spec.name); filename=`${component}-${spec.version}-${target}.tgz`; renameSync(join(output,packed.filename),join(output,filename));
+      // npm on Windows does not retain POSIX chmod bits. Normalize only declared bin headers;
+      // content/closure hashes stay unchanged and final outer hash is computed afterwards.
+      writeFileSync(join(output,filename),executableTar(readFileSync(join(output,filename)),Object.values(spec.bin)));
     }
     const bytes=readFileSync(join(output,filename)); artifacts.push({component,target:build.target,filename,source_commit:source,size_bytes:bytes.length,sha256:sha256(bytes),build});
   }

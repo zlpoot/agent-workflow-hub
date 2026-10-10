@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 
 export function safeName(name) {
   assert(typeof name === 'string' && name && !name.includes('\\') && !name.startsWith('/') && !name.includes(':') &&
@@ -28,6 +28,17 @@ export function readTar(bytes) {
     files.set(name.slice(8), { body: Buffer.from(body), mode: octal(h.subarray(100,108)) });
   }
   assert(files.size && Object.keys(pax).length === 0, 'Empty/incomplete tar'); return files;
+}
+export function executableTar(bytes, bins) {
+  const files=readTar(bytes);for(const bin of bins)assert(files.has(bin),'Missing bin');
+  const data=gunzipSync(bytes,{maxOutputLength:128*1024*1024});let offset=0,changed=0;
+  while(offset+512<=data.length){const h=data.subarray(offset,offset+512);if(h.every(b=>!b))break;
+    const text=b=>b.toString('utf8').replace(/\0.*$/s,''),prefix=text(h.subarray(345,500)),name=(prefix?prefix+'/':'')+text(h.subarray(0,100));
+    const size=parseInt(text(h.subarray(124,136)).trim()||'0',8);
+    if(bins.includes(name.replace(/^package\//,''))){assert.equal(text(h.subarray(156,157)),'0');h.write('0000755\0',100);h.fill(32,148,156);h.write(h.reduce((n,b)=>n+b,0).toString(8).padStart(6,'0')+'\0 ',148);changed++;}
+    offset+=512+Math.ceil(size/512)*512;
+  }
+  assert.equal(changed,bins.length,'Ambiguous bin headers');return gzipSync(data);
 }
 function crc32(data) { let c = 0xffffffff; for (const b of data) { c ^= b; for(let j=0;j<8;j++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0); } return (c ^ 0xffffffff) >>> 0; }
 // Deliberately small stored ZIP subset; no executable external archive tools or symlinks.

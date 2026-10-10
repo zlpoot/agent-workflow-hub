@@ -19,6 +19,8 @@ pack 自行从干净 HEAD 编译 TS/UI，并再次核对 HEAD/工作树；不消
 新目录要求避免原地替换候选。失败目录保留，修复后使用新的目录和重新验证。
 pnpm 仅用于预先安装开发依赖；产物构建直接使用已锁定 tsc/esbuild 和本机 npm，
 build_environment.pnpm=not-used，其他工具版本来自实际执行工具。
+Windows npm 不保留 POSIX chmod；打包后只将声明的 bin tar header 归一为 0755，
+重算 tar header checksum 后再计算归档 digest，不改变 runtime 文件字节。
 
 每个主机输出四个 native-target npm tgz 和一个 UI ZIP；包含 npm 运行依赖的
 完整扁平闭包及第三方许可证。导入图从编译 JS AST 检查；未知裸依赖、相对越界、
