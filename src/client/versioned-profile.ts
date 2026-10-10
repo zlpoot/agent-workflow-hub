@@ -124,6 +124,14 @@ export function loadApprovedWorkItem(trustPath: string, selection: { id: string;
   revisions.set(sourcePath, history);
   freeze(selected); loaded.add(selected); return selected;
 }
+export function listApprovedWorkItems(trustPath: string): VersionedWorkItem[] {
+  const catalog = parse(read(join(dirname(trustPath),'profiles.json')));
+  if (!Array.isArray(catalog.work_items) || catalog.work_items.length > 64) deny('schema');
+  return catalog.work_items.flatMap((w: VersionedWorkItem) => {
+    try { return [loadApprovedWorkItem(trustPath,{id:w.id,version:w.work_item_version}).work_item]; }
+    catch { return []; }
+  });
+}
 function authentic(value: ApprovedWorkItem, now: string): void {
   if (!loaded.has(value) || !timestamp(now)) deny('untrusted_source');
   if (value.approval.approved_at > now || value.profile_approval.approved_at > now) deny('approval_source');

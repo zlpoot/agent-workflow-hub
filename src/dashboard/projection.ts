@@ -101,7 +101,9 @@ export class DashboardProjection {
     const observed = this.now();
     return view.executors.map(({ executor, client, last_seen }) => {
       const age = observed - Date.parse(last_seen);
+      const bindings = view.enrollment_bindings?.filter(b => b.executor_id === executor.id) ?? [];
       return { ...envelope, id: executor.id, display_name: executor.display_name, type: client?.executor_type ?? null,
+        ...(bindings.length ? {project_ids:[...new Set(bindings.map(b => b.project_id))],worktrees:bindings.map(b => ({id:b.worktree_id ?? null,path:b.worktree ?? null}))} : {}),
         machine: { ...executor.machine, name: client?.machine_name ?? null, arch: client?.arch ?? null }, platform: executor.machine.platform,
         last_seen, heartbeat_at: null, status: !Number.isFinite(age) || age < 0 ? 'unknown' as const : age <= 60000 ? 'online' as const : 'offline' as const,
         observed_at: new Date(observed).toISOString(), freshness_ms: 60000, presence_provenance: 'server_registration_or_heartbeat' as const,

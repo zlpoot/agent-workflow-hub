@@ -8,9 +8,10 @@ import { dashboardRoute } from './routes.js';
 import { localBrowserSession } from './local-browser.js';
 import type { Viewer } from './security.js';
 import type { createLocalOnboarding } from './onboarding.js';
+import { enrollmentBody, type createEnrollmentService } from './enrollment.js';
 
 export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; now?: () => number;
-  localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding> }
+  localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding>; enrollment?: ReturnType<typeof createEnrollmentService> }
 export const dashboardHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin',
   'Cross-Origin-Opener-Policy': 'same-origin', 'Referrer-Policy': 'no-referrer',
@@ -45,6 +46,18 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
       if (!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.length > 2048 || request.url.includes('\\') || /%2e|%2f|%5c/i.test(request.url))
         fail(400, 'invalid_route', 'Invalid request target');
       const url = new URL(request.url, 'http://dashboard.invalid');
+      if (url.pathname.startsWith('/dashboard/enrollment/v1/')) {
+        if (!local || !options.enrollment) fail(404,'not_found','Local project initialization is not configured');
+        const viewer = authenticate(request);
+        if (!viewer) fail(401,'viewer_unauthorized','Viewer session required');
+        if (request.method !== 'POST' || request.headers.origin !== `http://${host}` || request.headers['sec-fetch-site'] !== 'same-origin' || url.search)
+          fail(403,'enrollment_origin','Explicit same-origin local interaction required');
+        const action = url.pathname.slice('/dashboard/enrollment/v1/'.length);
+        const data = await enrollmentBody(request);
+        const result = await options.enrollment.handle(action,data);
+        for (const binding of options.enrollment.bindings()) if (!options.localBrowserViewer!.project_ids.includes(binding.project_id)) (options.localBrowserViewer!.project_ids as string[]).push(binding.project_id);
+        response.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});response.end(JSON.stringify({item:result,authority_verified:false}));return;
+      }
       if (url.pathname.startsWith('/dashboard/onboarding/v1/')) {
         const viewer = authenticate(request);
         if (!viewer) fail(401, 'viewer_unauthorized', 'A separate viewer session is required');
@@ -75,6 +88,7 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
   server.maxHeadersCount = 64;
   server.on('clientError', (_error, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'));
   return { server, close: async () => {
+    await options.enrollment?.close();
     for (const stream of streams) stream.destroy();
     await new Promise<void>((resolve, reject) => { server.close(error => error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING' ? reject(error) : resolve()); server.closeAllConnections(); });
   } };

@@ -93,7 +93,7 @@ test('ordinary browser bootstrap is explicit scoped loopback navigation; APIs, f
   assert.equal((await fetch(root+'/dashboard',{headers:{...headers,Host:'localhost:'+gateway.server.address().port}})).status,401);
   assert.equal((await fetch(root+'/dashboard',{headers:{...headers,Authorization:'Bearer invalid'}})).status,401);
   assert.equal((await fetch(root+'/dashboard/onboarding/v1/doctor/webskill',{headers:auth,method:'POST'})).status,405);
-  now+=3600001;assert.equal((await fetch(root+'/dashboard/v1/snapshot',{headers:auth})).status,401);assert.equal((await fetch(root+'/dashboard',{headers})).status,401);
+  now+=3600001;assert.equal((await fetch(root+'/dashboard/v1/snapshot',{headers:auth})).status,401);const renewed=await fetch(root+'/dashboard',{headers});assert.equal(renewed.status,200);assert.notEqual(renewed.headers.get('set-cookie'),cookie);
 });
 test('unavailable local installation is a current timestamped blocker, scoped IDs and configuration overrides fail closed',async t=>{
   const h=await setup(t),binding={id:'local-webskill',project_id:'webskill',repository:'zlpoot/webskill',worktree:h.repo,client_entry:join(h.base,'missing/dist/client/cli.js'),client_entry_sha256:'a'.repeat(64),config_file:h.configPath};

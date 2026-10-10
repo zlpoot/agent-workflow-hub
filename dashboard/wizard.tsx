@@ -3,6 +3,7 @@ import { Badge, Button, Card, Flex, Heading, Select, Text, TextField } from '@ra
 import { CANDIDATE_ARTIFACT, CONFIG_TEMPLATE, HISTORY, WIZARD_STEPS, installationTemplate, projectChoices, stepAt, wizardModel } from './wizard-model.mjs';
 import { text } from './zh-CN.mjs';
 import { localBindings, localDoctor, matchLocalBinding } from './onboarding.mjs';
+import { Enrollment } from './enrollment.js';
 
 type ReaderState = { snapshot: { cursor: number; projects: { id: string; repository: string; profile_ref: string }[];
   runs: { id: string; project_id: string; updated_at: string; source: { ref: string }; profile: { version: string };
@@ -22,6 +23,7 @@ export function Wizard({ state, fixture, onNavigate, onProject }: { state: Reade
   const [copyStatus, setCopyStatus] = useState('');
   const [bindings, setBindings] = useState<LocalBinding[]>([]), [localError, setLocalError] = useState<string | null>(null), [checking, setChecking] = useState(false);
   const [enteredRepo, setEnteredRepo] = useState(''), [enteredRoot, setEnteredRoot] = useState('');
+  const [manualBlocked,setManualBlocked] = useState(false);
   const controller = useRef<AbortController | null>(null);
   useEffect(() => { const abort = new AbortController();
     void localBindings(abort.signal).then(setBindings).catch((error: Error) => { if (!abort.signal.aborted) setLocalError(error.message); });
@@ -32,7 +34,7 @@ export function Wizard({ state, fixture, onNavigate, onProject }: { state: Reade
   const choices = projectChoices(state, fixture, bindings), selected = choices.find(p => p.key === key);
   const binding = key.startsWith('local:') ? bindings.find(b => 'local:' + b.id === key) : bindings.find(b => b.project_id === selected?.id && b.repository === selected?.repository);
   const model = wizardModel(state, key, fixture, binding?.current, bindings);
-  useEffect(() => { if (!key) { const first = choices.find(p => p.source !== 'history_35'); if (first) setKey(first.key); } }, [key, state.snapshot, bindings]);
+  useEffect(() => { if (!key && !manualBlocked) { const first = choices.find(p => p.source !== 'history_35'); if (first) setKey(first.key); } }, [key, state.snapshot, bindings, manualBlocked]);
   const diagnose = async () => {
     if (!binding) return;
     controller.current?.abort(); const abort = controller.current = new AbortController(); setChecking(true); setLocalError(null);
@@ -45,8 +47,9 @@ export function Wizard({ state, fixture, onNavigate, onProject }: { state: Reade
     try { await navigator.clipboard.writeText(template); setCopyStatus('已复制脱敏命令模板；占位符需人工替换。'); }
     catch { setCopyStatus('浏览器未允许复制；可手工选中下方模板。'); }
   };
-  const choose = (value: string) => { controller.current?.abort(); setChecking(false); setKey(value); setCopyStatus(''); setLocalError(null); };
+  const choose = (value: string) => { controller.current?.abort(); setChecking(false); setKey(value);setManualBlocked(false); setCopyStatus(''); setLocalError(null); };
   return <section className="wizard" aria-label="项目接入向导">
+    <Enrollment onConnected={project => onNavigate('Executors',project)} />
     <div className="notice">只读接入向导 · 可显式请求已登记 Client 的离线 Doctor；不接收配置或凭据、不批准权限。原 #30 历史结论 PHASE_C_ACCEPTED_WITH_EXCEPTION 保留。</div>
     <nav aria-label="接入步骤"><ol className="wizard-steps">{WIZARD_STEPS.map((label, index) => <li key={label}><button
       aria-current={step === index ? 'step' : undefined} onClick={() => setStep(index)}><span>{index + 1}</span>{label}</button></li>)}</ol></nav>
@@ -61,7 +64,7 @@ export function Wizard({ state, fixture, onNavigate, onProject }: { state: Reade
         <details><summary>输入本机实际 Git 工作树与仓库</summary><div className="wizard-stack">
           <label>仓库<TextField.Root aria-label="本机仓库" value={enteredRepo} onChange={e => setEnteredRepo(e.target.value)} placeholder="owner/repository" /></label>
           <label>工作树绝对路径<TextField.Root aria-label="本机工作树" value={enteredRoot} onChange={e => setEnteredRoot(e.target.value)} /></label>
-          <Button variant="soft" onClick={() => { const matched = matchLocalBinding(bindings, enteredRepo, enteredRoot); if (matched) choose(choices.find(p => p.id === matched.project_id && p.repository === matched.repository)?.key ?? 'local:' + matched.id); else setLocalError('BLOCKED：此工作树未在当前 Viewer 范围登记。请操作人登记可信接入；表单不能增加权限。'); }}>核对本机登记</Button>
+          <Button variant="soft" onClick={() => { const matched = matchLocalBinding(bindings, enteredRepo, enteredRoot); if (matched) choose(choices.find(p => p.id === matched.project_id && p.repository === matched.repository)?.key ?? 'local:' + matched.id); else {setKey('');setManualBlocked(true);setLocalError('BLOCKED：此工作树未在当前 Viewer 范围登记。请使用上方新增项目流程，或核对可信本机登记。');} }}>核对本机登记</Button>
           <Text size="2">输入只与已登记项比较，不扫描磁盘或上传配置。</Text></div></details>
         {model.project ? <dl className="wizard-facts"><dt>仓库</dt><dd>{model.project.repository}</dd><dt>当前 Profile ref</dt><dd>{model.project.profile_ref}</dd>
           <dt>观察到的版本</dt><dd>{unavailable(model.observedVersion)} · 存储 / 历史记录，非审批</dd><dt>已批准 Work Item 版本</dt><dd>{model.approvedVersion ?? 'not_checked · 未核验'}</dd>
