@@ -11,12 +11,14 @@ import { npmEntry, npmEnv } from './npm-tool.mjs';
 import { ids, specs, sha256, checkCandidate, checkArtifact } from './release-lib.mjs';
 import { readZip } from './release-archive.mjs';
 import { chromium } from 'playwright';
+import { checkManifest, checkSums, checkSmoke } from './release-validate.mjs';
+import { targets } from './release-lib.mjs';
 
-const args=process.argv.slice(2);assert((args.length===1||args.length===3&&args[1]==='--ui-from'),'release-smoke <candidate-dir> [--ui-from <candidate-dir>]');
+const args=process.argv.slice(2);assert(args.length===1,'release-smoke <frozen-candidate-dir>');
 const root=dirname(dirname(fileURLToPath(import.meta.url))), candidateDir=realpathSync(args[0]), candidate=JSON.parse(readFileSync(join(candidateDir,'candidate-index.json'))), target=process.platform+'-'+process.arch;
-checkCandidate(candidate,name=>readFileSync(join(candidateDir,name)));assert.equal(candidate.target,target,'Smoke requires actual target hardware');
-let uiArtifact=candidate.artifacts.find(a=>a.component==='awh-dashboard-ui'),uiDir=candidateDir;
-if(args[2]){uiDir=realpathSync(args[2]);const other=JSON.parse(readFileSync(join(uiDir,'candidate-index.json')));checkCandidate(other,name=>readFileSync(join(uiDir,name)));assert.equal(other.source_commit,candidate.source_commit);uiArtifact=other.artifacts.find(a=>a.component==='awh-dashboard-ui');}
+checkCandidate(candidate,name=>readFileSync(join(candidateDir,name)));assert(targets.includes(target),'Smoke requires actual supported hardware');
+const read=name=>readFileSync(join(candidateDir,name)),manifest=JSON.parse(read('release-manifest.json'));checkManifest(manifest,read,candidate.source_commit);checkSums(read('SHA256SUMS').toString(),manifest,read);assert.deepEqual(manifest.artifacts,candidate.artifacts);
+const uiArtifact=candidate.artifacts.find(a=>a.component==='awh-dashboard-ui'),uiDir=candidateDir;
 checkArtifact(readFileSync(join(uiDir,uiArtifact.filename)),uiArtifact,candidate.source_commit);
 const evidenceName=`package-smoke-${target}.json`;assert(!existsSync(join(candidateDir,evidenceName)),'Do not replace existing smoke evidence');
 const scratch=mkdtempSync(join(tmpdir(),'awh-rc-离仓 space-')), install=join(scratch,'install 空目录'), cache=join(scratch,'empty-cache'), assets=join(scratch,'ui 资源');mkdirSync(install);mkdirSync(assets);
@@ -28,6 +30,9 @@ const freePort=async()=>{const server=createServer();server.listen(0,'127.0.0.1'
 const modulePath=(component,path)=>join(install,'node_modules','@zlpoot',component,path);
 const installAll=()=>run([npmEntry(),'install','--prefix',install,'--offline','--ignore-scripts','--no-audit','--no-fund',...entries.map(id=>join(candidateDir,candidate.artifacts.find(a=>a.component===id).filename))]);
 const checks={};
+const environment={os:process.platform,cpu:process.arch,node:process.version,npm:run([npmEntry(),'--version']),browser:null};
+const artifacts=candidate.artifacts.map(a=>({component:a.component,sha256:a.sha256}));
+const record=status=>{const result={schema_version:'1.0',kind:'awh_package_smoke',source_commit:candidate.source_commit,target,status,artifacts,checks,environment,failure:status==='PASS'?null:'PACKAGE_SMOKE_FAILED',model_calls:0,production_touched:false};checkSmoke(result,candidate.artifacts,candidate.source_commit,target);writeFileSync(join(candidateDir,evidenceName),JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify(result));};
 try {
   assert.equal(Object.keys(env).filter(k=>/^npm_config_/.test(k)).includes('npm_config_offline'),true);
   installAll();checks.empty_cache_install='PASS';
@@ -45,7 +50,8 @@ try {
   const offline=JSON.parse(run([modulePath('awh-builder','dist/cli.js'),handoff,'--expected-head',sha]));assert.equal(offline.schema_valid,true);assert.equal(offline.authority_verified,false);
   const bad=JSON.parse(run([modulePath('awh-builder','dist/builder-cli.js'),'--repo','untrusted'],2,'stderr'));assert(bad.error);checks.builder_offline='PASS';
   for(const [name,bytes] of readZip(readFileSync(join(uiDir,uiArtifact.filename)))){const path=join(assets,name);mkdirSync(dirname(path),{recursive:true});writeFileSync(path,bytes);}
-  const fixture=JSON.parse(readFileSync(join(root,'examples/protocol/future-ui.json'))),bearer='awh_cp_'+randomBytes(32).toString('base64url'),secret=randomBytes(32).toString('base64url');
+  const fixturePath=existsSync(join(dirname(fileURLToPath(import.meta.url)),'smoke-fixture.json'))?join(dirname(fileURLToPath(import.meta.url)),'smoke-fixture.json'):join(root,'examples/protocol/future-ui.json');
+  const fixture=JSON.parse(readFileSync(fixturePath)),bearer='awh_cp_'+randomBytes(32).toString('base64url'),secret=randomBytes(32).toString('base64url');
   const trusted=join(scratch,'trusted.json'),database=join(scratch,'scratch.sqlite');
   writeFileSync(trusted,JSON.stringify({profiles:[fixture.profile_policy],clients:[{id:'scratch-client',project_ids:[fixture.project.id],executor_ids:[fixture.executor.id],token_sha256:sha256(bearer)}]}),{mode:0o600});
   run([modulePath('awh-control-plane','dist/control-plane-cli.js'),'init','--database',database,'--config',trusted]);
@@ -69,6 +75,7 @@ try {
   const headers={Cookie:cookie.split(';')[0]};for(const path of ['/dashboard','/dashboard/app.js','/dashboard/app.css','/dashboard/v1/snapshot']){const r=await fetch(origin+path,{headers});assert.equal(r.status,200);assert(r.headers.get('content-security-policy'));await r.arrayBuffer();}
   assert.equal((await fetch(origin+'/dashboard/v1/snapshot',{method:'POST',headers})).status,405);assert.equal((await fetch(origin+'/dashboard',{headers:{...headers,Origin:'https://evil.invalid'}})).status,401);
   const browser=await chromium.launch({headless:true,executablePath:process.env.AWH_DASHBOARD_TEST_BROWSER||undefined});
+  environment.browser=browser.version();
   try {
     const context=await browser.newContext(),page=await context.newPage(),errors=[],requests=[];
     // Trusted local host client exchanges the fixture secret; the page never receives it in JS.
@@ -77,14 +84,14 @@ try {
     await page.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
     await page.goto(origin+'/dashboard');await page.getByRole('heading',{name:'最近运行'}).waitFor();assert.equal(await page.title(),'AWH · 工作流面板');
     assert.deepEqual(await page.evaluate(()=>({cookies:document.cookie,local:localStorage.length,session:sessionStorage.length})),{cookies:'',local:0,session:0});
-    assert.deepEqual(errors,[]);assert(requests.length>=4&&requests.every(r=>r.origin===origin&&r.method==='GET'));await page.screenshot({path:join(candidateDir,'viewer-package-smoke.png'),fullPage:true});
+    assert.deepEqual(errors,[]);assert(requests.length>=4&&requests.every(r=>r.origin===origin&&r.method==='GET'));await page.screenshot({path:join(candidateDir,`viewer-package-smoke-${target}.png`),fullPage:true});
     await context.close();
   }finally{await browser.close();}
   await stop(viewer);assert.equal(sha256(readFileSync(database)),dbBefore,'Viewer must not modify SQLite bytes');checks.viewer_ui='PASS';
   safeDelete(install);safeDelete(cache);mkdirSync(install);installAll();for(const id of entries)for(const bin of Object.values(specs[id].bin))run([modulePath(id,bin),'--version']);checks.reinstall='PASS';
-  const artifacts=candidate.artifacts.map(a=>a.component==='awh-dashboard-ui'?uiArtifact:a).map(a=>({component:a.component,sha256:a.sha256}));
-  const result={schema_version:'1.0',kind:'awh_package_smoke',source_commit:candidate.source_commit,target,status:'PASS',artifacts,checks,model_calls:0,production_touched:false};
-  writeFileSync(join(candidateDir,evidenceName),JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify(result));
+  record('PASS');
+} catch {
+  record('BLOCKED');console.error('Package smoke blocked; scratch retained, no platform PASS granted');process.exitCode=1;
 } finally {
   for(const child of children)child.kill();
   // Preserve the isolated scratch on failure for diagnosis; never touch external production state.

@@ -9,9 +9,9 @@ import { npmEntry, npmEnv } from './npm-tool.mjs';
 import { ids, specs, provenancePaths, sha256, tree, checkCandidate } from './release-lib.mjs';
 import { zipFiles, executableTar } from './release-archive.mjs';
 
-const root=dirname(dirname(fileURLToPath(import.meta.url))), args=process.argv.slice(2), target=process.platform+'-'+process.arch;
+const root=dirname(dirname(fileURLToPath(import.meta.url))), args=process.argv.slice(2), target='universal';
 assert(args.length===2 && args[0]==='--output','release-pack --output <new-empty-directory>');
-assert(['win32-x64','darwin-arm64'].includes(target),'Build on the actual supported target host');
+assert(['win32-x64','darwin-arm64'].includes(process.platform+'-'+process.arch),'Use an actual supported build host; artifact target is independent');
 const git = params => { const r=spawnSync('git',params,{cwd:root,encoding:'utf8',windowsHide:true}); assert.equal(r.status,0,'Git source inspection failed'); return r.stdout.trim(); };
 assert.equal(git(['status','--porcelain']),'','Commit all source changes before building candidates');
 const source=git(['rev-parse','HEAD']), output=resolve(args[1]); assert(!existsSync(output),'Candidate output must be a new directory; immutable bytes are never overwritten'); mkdirSync(output,{recursive:true});
@@ -53,13 +53,15 @@ try {
         let path=dirname(req.resolve(name));
         while(!existsSync(join(path,'package.json'))||JSON.parse(readFileSync(join(path,'package.json'))).name!==name){const parent=dirname(path);assert.notEqual(parent,path);path=parent;}
         const data=JSON.parse(readFileSync(join(path,'package.json')));assert(readFileSync(join(root,'pnpm-lock.yaml'),'utf8').includes(`  ${name}@${data.version}:`),'Runtime dependency not present at exact lock version');if(direct.has(name))assert.equal(data.version,packageRoot.dependencies[name]);if(copied[name]){assert.equal(copied[name],data.version,'Runtime version conflict');return;}copied[name]=data.version;
-        cpSync(realpathSync(path),join(pkgStage,'node_modules',name),{recursive:true,dereference:true,filter:file=>!relative(path,file).split(/[\\/]/).includes('node_modules')});
+        // Exclude dependency development fixtures/tooling; retained runtime JS is audited below.
+        const excluded=new Set(['node_modules','test','tests','spec','benchmark','.github','.gitattributes','eslint.config.js','.eslintrc.yml','tsconfig.json']);
+        cpSync(realpathSync(path),join(pkgStage,'node_modules',name),{recursive:true,dereference:true,filter:file=>!relative(path,file).split(/[\\/]/).some(p=>excluded.has(p))});
         assert(!data.os&&!data.cpu&&!data.gypfile && !Object.values(data.scripts??{}).some(s=>/node-gyp|prebuild-install/.test(s)),'Native dependency requires explicit platform build');
         assert(!Object.keys(data.optionalDependencies??{}).length,'Optional closure must be explicitly resolved');
         for(const child of Object.keys(data.dependencies??{}))copyDependency(child,createRequire(join(path,'package.json')));
       };
       for(const name of [...direct].sort()){dependencies[name]=packageRoot.dependencies[name];copyDependency(name,versions);}
-      const pkg={name:spec.name,version:spec.version,private:true,type:'module',engines:{node:'>=24'},os:[process.platform],cpu:[process.arch],bin:spec.bin,
+      const pkg={name:spec.name,version:spec.version,private:true,type:'module',engines:{node:'>=24'},bin:spec.bin,
         ...(component==='awh-client'?{exports:{'.':'./dist/client/index.js'}}:{}),files:['dist','contracts','docs','awh-build.json'],dependencies,bundledDependencies:Object.keys(dependencies)};
       writeFileSync(join(pkgStage,'package.json'),JSON.stringify(pkg,null,2)+'\n');
       for(const bin of Object.values(spec.bin))chmodSync(join(pkgStage,bin),0o755);

@@ -4,6 +4,26 @@
 [Issue #54](https://github.com/zlpoot/agent-workflow-hub/issues/54) 第一阶段；只冻结发布工程范围，
 不宣告包级、真实 Runtime Write 或 Full Delivery 验收通过。
 
+## Owner 设计修订（2026-10-10，当前有效）
+
+Issue #56 顶部及 #54/PR #57 最新 Owner 决定取代下文第一阶段的九资产和双端 native build 规则。
+原第一阶段设计作为历史保留；本 RC 按以下五资产模型实施，其他信任/生产/发布边界不变：
+
+- 一次从 exact clean HEAD 构建四个 Node >=24 通用 tgz（target=universal，无 npm os/cpu）及一个 static UI ZIP。
+- Windows x64 构建主机如实写入 build_environment；Mac 安装相同字节，不重打包、不复制 Windows node_modules。
+- 逐档检查完整 runtime 闭包、静态/动态 import/require、原生文件扩展及 ELF/PE/Mach-O magic、依赖 os/cpu/生命周期/optional 限制。
+- 单份 release-manifest.json / SHA256SUMS 在五包齐全后、Smoke 前冻结；verification 是冻结时两端 NOTRUN/null 快照。
+- 后续 package-smoke-win32-x64.json 与 package-smoke-darwin-arm64.json 独立追加，包含实际主机/Node/npm/browser、相同五包 source/digest、PASS 或 BLOCKED；缺文件为 NOTRUN。
+- release-validate --manifest 单独校验外部证据，双端均 PASS 才 package_acceptance=true；不改变 Manifest/包/SHA256SUMS，publishable 恒 false。
+- SHA256SUMS 仅覆盖五包、两端指南及 Manifest，不包含自身、后续证据或截图。candidate index 及 CANDIDATE-SHA256SUMS 是辅助构建元数据。
+- 提供独立 Smoke kit（固定 TypeScript/Playwright 仅为验证辅助）；已安装运行包无需这些工具、pnpm 或 Hub checkout。
+- 实测范围仅 Windows x64 与 Mac arm64。Mac 验证由 Owner 手动执行，当前 NOTRUN；其他架构 NOT_VERIFIED。
+- 旧 ef18a6f Windows-only 候选/证据原样保留。新 head 需新 Review，仍 Draft，无 Release/tag/npm/生产/Run/Event/Deliver 权限。
+
+当前实现/可执行步骤见 [rc-packaging.md](rc-packaging.md)。惰性 release-plan.example.json 已同步为五资产设计，仍不是实际 Manifest。
+
+## 以下为第一阶段历史冻结设计（被上述资产/构建修订部分取代）
+
 ## 事实基线与冻结范围
 
 核对日期：2026-10-10。GitHub main 准备基线为

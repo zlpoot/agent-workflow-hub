@@ -1,14 +1,14 @@
 # macOS arm64 候选包安装与待执行验证
 
-本指南不是 Mac PASS。Mac mini 实机须从独立 Review 的 exact source 构建自己的依赖
-和四个 arm64 包；Windows node_modules 不可复制。Node.js >=24 arm64 + npm，项目
+本指南不是 Mac PASS。Mac mini 安装 Windows 一次构建的四个 universal tgz，禁止重打包；
+包、Manifest、SHA256SUMS 的字节必须与可信 Windows 记录一致。Windows node_modules 不可复制。Node.js >=24 arm64 + npm，项目
 操作另需 Git。Intel x64/其他目标 NOT_VERIFIED。无 tag/Release/npm 发布授权。
 
-核对可信候选 index / CANDIDATE-SHA256SUMS，或最终九资产 Manifest / SHA256SUMS；
+核对可信候选 index / CANDIDATE-SHA256SUMS，或最终五资产 Manifest / SHA256SUMS；
 `shasum -a 256 <artifact>` 与可信 digest 对照，再离仓安装：
 
 ```sh
-npm install --prefix "<external-prefix>" --cache "<new-empty-cache>" --offline --ignore-scripts --no-audit --no-fund "<candidate>/awh-control-plane-0.1.0-rc.1-darwin-arm64.tgz" "<candidate>/awh-viewer-0.1.0-rc.1-darwin-arm64.tgz" "<candidate>/awh-client-0.4.6-darwin-arm64.tgz" "<candidate>/awh-builder-0.1.0-rc.1-darwin-arm64.tgz"
+npm install --prefix "<external-prefix>" --cache "<new-empty-cache>" --offline --ignore-scripts --no-audit --no-fund "<candidate>/awh-control-plane-0.1.0-rc.1-universal.tgz" "<candidate>/awh-viewer-0.1.0-rc.1-universal.tgz" "<candidate>/awh-client-0.4.6-universal.tgz" "<candidate>/awh-builder-0.1.0-rc.1-universal.tgz"
 unzip "<candidate>/awh-dashboard-ui-0.1.0-rc.1-static.zip" -d "<external-ui>"
 "<external-prefix>/node_modules/.bin/awh-control-plane" --help
 "<external-prefix>/node_modules/.bin/awh-viewer" --help
@@ -18,7 +18,7 @@ unzip "<candidate>/awh-dashboard-ui-0.1.0-rc.1-static.zip" -d "<external-ui>"
 
 离线空缓存必须无 registry fallback。验证 npm Unix symlink/shebang/executable、空格/非
 ASCII 路径、本机 Node SQLite、正常退出、删除本次 prefix 后重装。实际证据使用
-release-smoke.mjs，统一 UI 可通过 --ui-from 选择；不能更改已有 smoke/Manifest 字节。
+独立 Smoke kit 的 release-smoke.mjs（步骤见 rc-packaging.md）；不能更改已有 smoke/Manifest 字节。
 
 CP 只对 Mac 新 scratch v2 DB 做 init/serve。正常配置全部仓库外、显式绝对路径，无
 symlink；Mac secret/session file mode 0600，目录 owner-only。Viewer 默认 OFF，

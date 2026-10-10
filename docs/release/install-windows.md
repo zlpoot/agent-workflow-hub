@@ -2,13 +2,13 @@
 
 Node.js >=24 x64 + npm；Builder/Client 项目操作另需 Git。无需 Hub checkout、pnpm、
 Docker 或常驻服务。先取得可信候选目录、exact source 和 CANDIDATE-SHA256SUMS；
-最终九资产集合则使用 release-manifest.json / SHA256SUMS。用 Get-FileHash -Algorithm
-SHA256 对照每个资产/清单；不要运行错误架构或使用 force。Mac 尚未实测不能称双端 PASS。
+最终五资产集合则使用 release-manifest.json / SHA256SUMS。用 Get-FileHash -Algorithm
+SHA256 对照每个资产/清单；四个 Node tgz 无 os/cpu 限制，但支持范围仍须实测。Mac 尚未实测不能称双端 PASS。
 
 在新外置目录安装每个本地 tgz（名称见 candidate index）：
 
 ```powershell
-npm install --prefix "<external-prefix>" --cache "<new-empty-cache>" --offline --ignore-scripts --no-audit --no-fund "<candidate>/awh-control-plane-0.1.0-rc.1-win32-x64.tgz" "<candidate>/awh-viewer-0.1.0-rc.1-win32-x64.tgz" "<candidate>/awh-client-0.4.6-win32-x64.tgz" "<candidate>/awh-builder-0.1.0-rc.1-win32-x64.tgz"
+npm install --prefix "<external-prefix>" --cache "<new-empty-cache>" --offline --ignore-scripts --no-audit --no-fund "<candidate>/awh-control-plane-0.1.0-rc.1-universal.tgz" "<candidate>/awh-viewer-0.1.0-rc.1-universal.tgz" "<candidate>/awh-client-0.4.6-universal.tgz" "<candidate>/awh-builder-0.1.0-rc.1-universal.tgz"
 Expand-Archive "<candidate>/awh-dashboard-ui-0.1.0-rc.1-static.zip" "<external-ui>"
 & "<external-prefix>/node_modules/.bin/awh-control-plane.cmd" --help
 & "<external-prefix>/node_modules/.bin/awh-viewer.cmd" --help

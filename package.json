@@ -21,6 +21,7 @@
     "release:smoke": "node scripts/release-smoke.mjs",
     "release:validate": "node scripts/release-validate.mjs",
     "release:assemble": "node scripts/release-assemble.mjs",
+    "release:kit": "node scripts/release-kit.mjs",
     "dashboard:fixture": "node scripts/dashboard-fixture.mjs",
     "dashboard:smoke": "node scripts/dashboard-smoke.mjs",
     "dashboard:load": "node scripts/dashboard-load.mjs",

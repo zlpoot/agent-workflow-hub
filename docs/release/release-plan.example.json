@@ -66,14 +66,10 @@
     }
   ],
   "artifacts": [
-    { "component": "awh-client", "target": "win32-x64", "filename": "awh-client-0.4.6-win32-x64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
-    { "component": "awh-client", "target": "darwin-arm64", "filename": "awh-client-0.4.6-darwin-arm64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
-    { "component": "awh-control-plane", "target": "win32-x64", "filename": "awh-control-plane-0.1.0-rc.1-win32-x64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
-    { "component": "awh-control-plane", "target": "darwin-arm64", "filename": "awh-control-plane-0.1.0-rc.1-darwin-arm64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
-    { "component": "awh-viewer", "target": "win32-x64", "filename": "awh-viewer-0.1.0-rc.1-win32-x64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
-    { "component": "awh-viewer", "target": "darwin-arm64", "filename": "awh-viewer-0.1.0-rc.1-darwin-arm64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
-    { "component": "awh-builder", "target": "win32-x64", "filename": "awh-builder-0.1.0-rc.1-win32-x64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
-    { "component": "awh-builder", "target": "darwin-arm64", "filename": "awh-builder-0.1.0-rc.1-darwin-arm64.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-client", "target": "universal", "filename": "awh-client-0.4.6-universal.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-control-plane", "target": "universal", "filename": "awh-control-plane-0.1.0-rc.1-universal.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-viewer", "target": "universal", "filename": "awh-viewer-0.1.0-rc.1-universal.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
+    { "component": "awh-builder", "target": "universal", "filename": "awh-builder-0.1.0-rc.1-universal.tgz", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" },
     { "component": "awh-dashboard-ui", "target": "static", "filename": "awh-dashboard-ui-0.1.0-rc.1-static.zip", "source_commit": null, "size_bytes": null, "sha256": null, "build_environment": null, "status": "NOT_BUILT" }
   ],
   "build_environment_fields": ["os", "cpu", "node_version", "pnpm_version", "npm_version", "typescript_version", "esbuild_version", "lockfile_sha256", "runtime_dependency_closure", "evidence_refs"],
