@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { gzipSync } from 'node:zlib';
+import { ids,specs,components,provenancePaths,sha256,checkArtifact,checkCandidate } from '../scripts/release-lib.mjs';
+import { zipFiles,readZip,readTar } from '../scripts/release-archive.mjs';
+import { checkManifest,checkSums } from '../scripts/release-validate.mjs';
+
+// Tiny synthetic archives exercise verifier failure modes; never evidence of platform execution.
+const source='a'.repeat(40),provenance=Object.fromEntries(provenancePaths.map(p=>[p,sha256(Buffer.from(p))]));
+function tar(files) {
+  const chunks=[];for(const [name,b] of Object.entries(files)){const h=Buffer.alloc(512);h.write('package/'+name);h.write('0000755\0',100);h.write('0000000\0',108);h.write('0000000\0',116);h.write(b.length.toString(8).padStart(11,'0')+'\0',124);h.fill(32,148,156);h.write('0',156);h.write('ustar\0',257);const sum=h.reduce((n,b)=>n+b,0);h.write(sum.toString(8).padStart(6,'0')+'\0 ',148);chunks.push(h,b,Buffer.alloc((512-b.length%512)%512));}return gzipSync(Buffer.concat([...chunks,Buffer.alloc(1024)]));
+}
+function asset(component,target,modify=()=>{}) {
+  const spec=specs[component],files={};
+  if(target==='static'){for(const p of ['index.html','app.js','app.css','validators.cjs','build-inputs.json'])files[p]=Buffer.from(p);files['dashboard-v1.openapi.json']=Buffer.from('contracts/dashboard-v1.openapi.json');}
+  else{files['package.json']=Buffer.from(JSON.stringify({name:spec.name,version:spec.version,private:true,type:'module',engines:{node:'>=24'},os:[target.split('-')[0]],cpu:[target.split('-')[1]],bin:spec.bin,dependencies:{}}));files['contracts/dashboard-v1.openapi.json']=Buffer.from('contracts/dashboard-v1.openapi.json');for(const p of Object.values(spec.bin))files[p]=Buffer.from('#!/usr/bin/env node\n');}
+  const build={schema_version:'1.0',kind:'awh_build',component,target,source_commit:source,source_clean:true,version:spec.version,node_major_min:24,build_environment:{os:target==='static'?'win32':target.split('-')[0],cpu:target==='static'?'x64':target.split('-')[1],node:'v24.21.0',npm:'11.0.0',pnpm:'not-used',typescript:'5.9.3',esbuild:'0.28.2'},provenance,runtime_dependencies:{},files:Object.fromEntries(Object.entries(files).map(([p,b])=>[p,sha256(b)]))};
+  modify(files,build);files['awh-build.json']=Buffer.from(JSON.stringify(build));const bytes=target==='static'?zipFiles(files):tar(files);
+  return {bytes,record:{component,target,filename:`${component}-${spec.version}-${target}.${target==='static'?'zip':'tgz'}`,source_commit:source,size_bytes:bytes.length,sha256:sha256(bytes),build}};
+}
+function setup() {
+  const assets=ids.flatMap(id=>id==='awh-dashboard-ui'?[asset(id,'static')]:['win32-x64','darwin-arm64'].map(t=>asset(id,t))),files=new Map(assets.map(a=>[a.record.filename,a.bytes]));
+  const guides={windows:{filename:'install-windows.md',sha256:sha256(Buffer.from('Windows'))},macos:{filename:'install-macos.md',sha256:sha256(Buffer.from('Mac'))}};files.set('install-windows.md',Buffer.from('Windows'));files.set('install-macos.md',Buffer.from('Mac'));
+  const manifest={schema_version:'1.0',kind:'awh_release_manifest',release:{id:'awh-'+source+'-rc.1',name:'AWH v0.1.0-rc.1',tag:'v0.1.0-rc.1',channel:'rc',state:'candidate_frozen',source_commit:source,source_clean:true,human_release_gate:'NOT_AUTHORIZED'},components,artifacts:assets.map(a=>a.record),compatibility:{protocol:'1.0',cp_database_schema:2,dashboard_api:'1.0.0',dashboard_contract_sha256:provenance['contracts/dashboard-v1.openapi.json'],handoff:'0.1',fixed_profile_policy_sha256:provenance['src/profiles.ts']},verification:['win32-x64','darwin-arm64'].map(target=>({layer:'package',target,status:'NOTRUN',evidence:null})),unsupported_targets:[{target:'darwin-x64',status:'NOT_VERIFIED'},{target:'other',status:'NOT_VERIFIED'}],acceptance:{runtime_write:'NOT_ACCEPTED',full_delivery:'NOT_ACCEPTED'},historical_dispositions:{issue30:'PHASE_C_ACCEPTED_WITH_EXCEPTION',issue35:'WINDOWS_FIRST_USABLE_OBSERVE_ONLY',onboarding_api_1_0_0:'OFFLINE_FIXTURE_ONLY'},guides};return {manifest,files,read:n=>{assert(files.has(n));return files.get(n);}};
+}
+test('nine combinations share targets legally; NOTRUN never grants package/publishing authority',()=>{const h=setup();assert.deepEqual(checkManifest(h.manifest,h.read,source),{valid:true,publishable:false,package_acceptance:false,authority_verified:false});});
+test('manifest fails closed on missing/duplicate pairs, unknown components/fields, source and hash drift',()=>{
+  const mutations=[m=>m.artifacts.pop(),m=>m.artifacts[1]=m.artifacts[0],m=>m.artifacts[0].component='unknown',m=>m.components.push(m.components[0]),m=>m.artifacts[0].filename=m.artifacts[1].filename,m=>m.release.source_commit='b'.repeat(40),m=>m.artifacts[0].sha256='0'.repeat(64),m=>m.deployments=[],m=>m.release.human_release_gate='PASS',m=>m.verification[0].status='PASS',m=>m.kind='awh_release_plan',m=>m.artifacts[0].build.build_environment.os='darwin'];
+  for(const mutate of mutations){const h=setup(),m=structuredClone(h.manifest);mutate(m);assert.throws(()=>checkManifest(m,h.read,source));}
+});
+test('a recomputed tar hash cannot conceal a missing relative import or dependency',()=>{
+  for(const content of ["#!/usr/bin/env node\nimport './missing.js';\n","#!/usr/bin/env node\nimport 'unknown-package';\n"]){const a=asset('awh-builder','win32-x64',(files,build)=>{files['dist/builder-cli.js']=Buffer.from(content);build.files['dist/builder-cli.js']=sha256(files['dist/builder-cli.js']);});assert.throws(()=>checkArtifact(a.bytes,a.record,source));}
+});
+test('native target build host and closure file inventory cannot be forged by outer hash alone',()=>{
+  const a=asset('awh-viewer','darwin-arm64',(_f,b)=>b.build_environment.os='win32');assert.throws(()=>checkArtifact(a.bytes,a.record,source));
+  const b=asset('awh-builder','win32-x64',(f)=>f['credentials/key.pem']=Buffer.from('synthetic'));assert.throws(()=>checkArtifact(b.bytes,b.record,source));
+});
+test('platform slice stays candidate-only; no missing component or smoke PASS in immutable index',()=>{const h=setup(),c={schema_version:'1.0',kind:'awh_release_candidate',source_commit:source,source_clean:true,target:'win32-x64',artifacts:h.manifest.artifacts.filter(a=>a.target==='win32-x64'||a.target==='static'),package_verification:'NOTRUN',runtime_write:'NOTRUN',full_delivery:'NOTRUN',release_gate:'NOT_AUTHORIZED'};assert(checkCandidate(c,h.read));c.package_verification='PASS';assert.throws(()=>checkCandidate(c,h.read));c.package_verification='NOTRUN';c.artifacts.pop();assert.throws(()=>checkCandidate(c,h.read));});
+test('checksums require all assets/guides/manifest, reject self-hash, duplicates and modified bytes',()=>{const h=setup();h.files.set('release-manifest.json',Buffer.from(JSON.stringify(h.manifest)));const sums=[...h.files].map(([p,b])=>sha256(b)+'  '+p).join('\n')+'\n';assert(checkSums(sums,h.manifest,h.read));assert.throws(()=>checkSums(sums+sha256(Buffer.from(''))+'  SHA256SUMS\n',h.manifest,h.read));assert.throws(()=>checkSums(sums+sums.split('\n')[0]+'\n',h.manifest,h.read));h.files.set(h.manifest.artifacts[0].filename,Buffer.from('modified'));assert.throws(()=>checkSums(sums,h.manifest,h.read));});
+test('archive validation rejects corrupt bytes and unsafe names',()=>{const zip=zipFiles({a:Buffer.from('hello')});assert.equal(readZip(zip).get('a').toString(),'hello');const bad=Buffer.from(zip);bad[31]^=1;assert.throws(()=>readZip(bad));assert.throws(()=>zipFiles({'../escape':Buffer.from('x')}));const tgz=asset('awh-builder','win32-x64').bytes;assert(readTar(tgz).has('awh-build.json'));assert.throws(()=>readTar(Buffer.from('bad')));});

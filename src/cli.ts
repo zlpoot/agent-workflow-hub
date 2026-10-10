@@ -1,7 +1,11 @@
+#!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { inputFailure, isFullSha, validateHandoff, type Result } from './validator.js';
+import { RELEASE_VERSION } from './release/version.js';
 
 const usage = 'Usage: pnpm handoff:check <handoff.json> --expected-head <full-sha>';
+if (process.argv.length === 3 && process.argv[2] === '--help') { console.log(usage + '\nRead-only offline validation; authority_verified=false.'); process.exit(0); }
+if (process.argv.length === 3 && process.argv[2] === '--version') { console.log(RELEASE_VERSION); process.exit(0); }
 
 async function main(args: string[]): Promise<{ result: Result; exitCode: number }> {
   if (args.length !== 3 || !args[0] || args[0].startsWith('-') || args[1] !== '--expected-head' || !isFullSha(args[2])) {

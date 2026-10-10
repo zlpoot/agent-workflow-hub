@@ -1,9 +1,15 @@
+#!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
 import { BuilderError, connectBuilder } from './builder.js';
 import { DEFAULT_SELECTION, ProfileError, selectWorkflow, type BuilderSelection } from './profiles.js';
+import { RELEASE_VERSION } from './release/version.js';
 
 // Validate the entire command before reading a key or making any request.
 const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === '--version') { console.log(RELEASE_VERSION); process.exit(0); }
+if (args.length === 1 && args[0] === '--help') {
+  console.log('awh-builder [--profile <fixed-profile> --workflow <fixed-workflow>] <operation>\nOperations: preflight, push, pr-create, pr-update, pr-read, comment-create, comment-edit, comment-read, pr-ready. Fixed trusted policies only; App credentials required for network operations. Install help/version grants no authority.'); process.exit(0);
+}
 let selection: BuilderSelection = DEFAULT_SELECTION;
 if (args[0] === '--profile' && args[2] === '--workflow') {
   selection = { profile: args[1] ?? '', workflow: args[3] ?? '' };

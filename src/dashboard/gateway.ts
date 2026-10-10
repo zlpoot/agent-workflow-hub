@@ -1,4 +1,4 @@
-import { createServer, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ControlPlaneError, fail } from '../control-plane/security.js';
@@ -6,7 +6,8 @@ import type { DashboardStore } from '../control-plane/store.js';
 import type { AuthenticateViewer } from './security.js';
 import { dashboardRoute } from './routes.js';
 
-export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; now?: () => number }
+export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; now?: () => number;
+  provision?: (request: IncomingMessage, response: ServerResponse) => Promise<void> }
 export const dashboardHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin',
   'Cross-Origin-Opener-Policy': 'same-origin', 'Referrer-Policy': 'no-referrer',
@@ -24,7 +25,7 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
     ['/dashboard/app.css', { type: 'text/css; charset=utf-8', body: readFileSync(resolve(options.assets!, 'app.css')) }]
   ]) : new Map();
   const streams = new Set<ServerResponse>();
-  const server = createServer({ maxHeaderSize: 16384, requestTimeout: 15000, headersTimeout: 10000 }, (request, response) => {
+  const server = createServer({ maxHeaderSize: 16384, requestTimeout: 15000, headersTimeout: 10000 }, async (request, response) => {
     for (const [key, value] of Object.entries(dashboardHeaders)) response.setHeader(key, value);
     try {
       if (!options.enabled) fail(404, 'not_found', 'Dashboard gateway is not enabled');
@@ -38,6 +39,9 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
       if (!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.length > 2048 || request.url.includes('\\') || /%2e|%2f|%5c/i.test(request.url))
         fail(400, 'invalid_route', 'Invalid request target');
       const url = new URL(request.url, 'http://dashboard.invalid');
+      if (options.provision && url.pathname === '/dashboard/session' && !url.search) {
+        await options.provision(request, response); return;
+      }
       if (url.pathname.startsWith('/dashboard/v1/')) {
         dashboardRoute(request, response, url, { store: options.store!, authenticate: options.authenticate!, streams, interval: 250, now: options.now }); return;
       }
