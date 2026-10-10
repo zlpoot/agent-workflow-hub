@@ -10,6 +10,7 @@ import { randomBytes } from 'node:crypto';
 import { npmEntry, npmEnv } from './npm-tool.mjs';
 import { ids, specs, sha256, checkCandidate, checkArtifact } from './release-lib.mjs';
 import { readZip } from './release-archive.mjs';
+import { chromium } from 'playwright';
 
 const args=process.argv.slice(2);assert((args.length===1||args.length===3&&args[1]==='--ui-from'),'release-smoke <candidate-dir> [--ui-from <candidate-dir>]');
 const root=dirname(dirname(fileURLToPath(import.meta.url))), candidateDir=realpathSync(args[0]), candidate=JSON.parse(readFileSync(join(candidateDir,'candidate-index.json'))), target=process.platform+'-'+process.arch;
@@ -67,6 +68,18 @@ try {
   const exchange=await fetch(origin+'/dashboard/session',{method:'POST',headers:{Origin:origin,'Content-Type':'text/plain'},body:secret});assert.equal(exchange.status,204);const cookie=exchange.headers.get('set-cookie');assert(cookie.includes('HttpOnly; SameSite=Strict; Path=/dashboard'));assert.equal(await exchange.text(),'');
   const headers={Cookie:cookie.split(';')[0]};for(const path of ['/dashboard','/dashboard/app.js','/dashboard/app.css','/dashboard/v1/snapshot']){const r=await fetch(origin+path,{headers});assert.equal(r.status,200);assert(r.headers.get('content-security-policy'));await r.arrayBuffer();}
   assert.equal((await fetch(origin+'/dashboard/v1/snapshot',{method:'POST',headers})).status,405);assert.equal((await fetch(origin+'/dashboard',{headers:{...headers,Origin:'https://evil.invalid'}})).status,401);
+  const browser=await chromium.launch({headless:true,executablePath:process.env.AWH_DASHBOARD_TEST_BROWSER||undefined});
+  try {
+    const context=await browser.newContext(),page=await context.newPage(),errors=[],requests=[];
+    // Trusted local host client exchanges the fixture secret; the page never receives it in JS.
+    const session=await context.request.post(origin+'/dashboard/session',{headers:{Origin:origin,'Content-Type':'text/plain'},data:secret});assert.equal(session.status(),204);
+    page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>requests.push({method:r.method(),origin:new URL(r.url()).origin}));
+    await page.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
+    await page.goto(origin+'/dashboard');await page.getByRole('heading',{name:'最近运行'}).waitFor();assert.equal(await page.title(),'AWH · 工作流面板');
+    assert.deepEqual(await page.evaluate(()=>({cookies:document.cookie,local:localStorage.length,session:sessionStorage.length})),{cookies:'',local:0,session:0});
+    assert.deepEqual(errors,[]);assert(requests.length>=4&&requests.every(r=>r.origin===origin&&r.method==='GET'));await page.screenshot({path:join(candidateDir,'viewer-package-smoke.png'),fullPage:true});
+    await context.close();
+  }finally{await browser.close();}
   await stop(viewer);assert.equal(sha256(readFileSync(database)),dbBefore,'Viewer must not modify SQLite bytes');checks.viewer_ui='PASS';
   safeDelete(install);safeDelete(cache);mkdirSync(install);installAll();for(const id of entries)for(const bin of Object.values(specs[id].bin))run([modulePath(id,bin),'--version']);checks.reinstall='PASS';
   const artifacts=candidate.artifacts.map(a=>a.component==='awh-dashboard-ui'?uiArtifact:a).map(a=>({component:a.component,sha256:a.sha256}));

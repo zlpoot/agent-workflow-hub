@@ -42,7 +42,10 @@ node_modules，安装后 help/version、Windows cmd/PowerShell shim 或 Mac Unix
 CP 只初始化新 scratch v2 DB，并以 fixture policy/credential 启动、认证 GET capabilities、
 关闭。Viewer 只读同一 scratch DB，显式 enable、外置 session digest/配置与抽取的 UI。
 验证未授权请求拒绝、可信会话 exchange、受保护 HTML/JS/CSS/REST、写请求拒绝、
-源/contract/静态文件匹配及退出前后 DB 字节不变。最后删除 install/cache 并空缓存重装。
+源/contract/静态文件匹配、headless 浏览器实际展示、零 page error、页面 JS/storage
+不持有 cookie、退出前后 DB 字节不变。最后删除 install/cache 并空缓存重装。
+浏览器只用已安装的 Playwright Chromium 或明确 AWH_DASHBOARD_TEST_BROWSER 路径，
+不自动下载；截图仅 scratch 空数据库。浏览器缺失则 smoke 阻塞，不能标 UI 展示 PASS。
 Windows smoke 的 IPC launcher 只向 installed main 的现有 SIGTERM handler 输送关闭事件；
 shim 另行真实运行。不会依靠 Windows kill 强停来证明正常关闭。
 临时目录保留供故障调查；只输出脱敏状态，生成的随机 fixture secret 不上传。
