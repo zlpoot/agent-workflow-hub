@@ -93,3 +93,5 @@ Dashboard 的项目 name/enabled 缺失表示属性未维护/未提供，不能�
 离线验收使用临时 Git 项目、临时 CP v2 和独立安装包；核对只发送心跳、原项目/Client state 字节不变、启停重启、拒绝越权和普通浏览器会话、REST/SSE presence 刷新。最小命令为 build、typecheck、相关 Client/Doctor/Dashboard 与 `windows-product` 回归，以及本机 synthetic 浏览器 smoke；失败原始日志保留。
 
 真实 Future UI 的 CP/SQLite/身份、第二个真实项目、安装部署、业务写入、App Draft 发布、Ready/Merge、Mac 和新 RC/Release 均不能由离线测试推断 PASS，仍按 #58 各自批准后执行。
+
+本次 Human 单独批准代码发布映射 `hub/issue58`：固定 Hub repository、base `main`、branch `codex/issue58-windows-product`、work item Hub #58，以及 `src/profiles.ts` 中按序列出的最小检查。仅用于 App 身份推送、关联 Draft PR、Builder evidence 与 Handoff；保持 Draft，不进入真实项目验收或 Release。该映射不改变默认 workflow、其他 Profile、selected-set、单仓库 token 或 Client Provider/Deliver 授权。
