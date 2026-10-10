@@ -61,15 +61,12 @@ test('installation templates copy instructions only, preserve existing identitie
     assert(!template.includes(HISTORY.artifact.sha256));
   }
   assert.throws(()=>installationTemplate('arbitrary-shell'));
-  const ui=readFileSync(new URL('../dashboard/wizard.tsx',import.meta.url),'utf8');
-  assert(!/fetch\(|EventSource|FileReader|type="file"|localStorage|sessionStorage|document\.cookie|console\.|Authorization/.test(ui));
-  assert(ui.includes('navigator.clipboard.writeText(template)'));
 });
 
 test('Wizard remains outside missing-snapshot branch, and scoped destinations reuse existing Reader navigation', () => {
   const source=readFileSync(new URL('../dashboard/app.tsx',import.meta.url),'utf8');
   assert(source.indexOf("view === 'Wizard' ?")<source.indexOf(': !snapshot ?'));
-  assert(source.includes('setProject(id)'));assert(source.includes('onProject={id =>'));
+  assert(source.includes('setProject(id)'));assert(source.includes("onNavigate={(destination, id) =>"));
 });
 
 test('one-time c1j publication mapping is exact and does not create Client Deliver authority or change existing workflows', () => {

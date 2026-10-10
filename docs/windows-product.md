@@ -1,99 +1,49 @@
-# Windows Client / Viewer 接入
+# Windows 0.4.8 快速使用指南
 
-R1-D（Client / Viewer 0.4.8）新增完整的本机项目初始化、CP 管理员批准、Doctor 修复与可续用的 Viewer 会话。新用户流程和安装设置见 [项目接入](project-enrollment.md)。下文 0.4.7 是 #59 的保留基线；其既有身份、证据和候选产物不被追认或覆盖。
+这份指南对应当前已上线的 Windows 本机 Client / Viewer 0.4.8，以及来自已审查源码的 CP。Future UI 与 agent-desktop 的真实 Observe 接入已经完成 R1-E 验收；用户已反馈当前页面使用正常；本次接入简化和本机管理员按钮属于独立修复候选，仍需独立代码 Review，不扩大为完整业务链路验收。
 
-本功能实现 #58 的离线代码范围。Client 0.4.7 增加正式 presence 常驻入口；Viewer 0.4.7 增加普通浏览器本机入口及当前已安装 Client 的离线 Doctor。它不改变既有 CP、身份、业务历史或审批。真实 Future UI 验收、新 Windows RC、独立 Review 和 Release 仍是后续门槛，旧 #57 ZIP 不因本功能而成为合格候选。
+## 普通用户日常查看
 
-## 从外置目录安装
+1. 在当前 Windows 机器的浏览器打开 [Dashboard](http://127.0.0.1:4311/dashboard)。无需重装或启动第二套服务。此地址只适用于这台机器。
+2. 点击左侧“项目”（Projects），按仓库字段找到 `zlpoot/future-ui` 和 `zlpoot/agent-desktop`。项目名称或启用状态显示“未提供”表示没有提供该属性，不表示离线。
+3. 点击“执行器”（Executors），查看“在线状态”和“最近服务端联系”。点执行器名称可以打开详情，查看机器归属和数据来源。在线依据 CP 注册/心跳时间，不是业务执行批准。
+4. 页面上方“按项目筛选”下拉显示 **Project ID**，不是仓库名。先从“项目”卡片复制 agent-desktop 对应的 ID，再到“执行器”选择它。即使该项目没有 Run，其已登记执行器也应显示。需要查看其他项目时切回“全部项目”。筛选器在项目/执行器/运行等视图显示，概览没有该筛选器。
+5. 顶部“刷新”读取当前数据。“重新进入 Dashboard”重新打开同一个 Dashboard 文档入口，恢复本机会话。0.4.8 会话到期后无需重启 Viewer；再次进入后仍可查看授权项目。不要通过停服务解决会话到期。
 
-Node.js 24+、Git 和 npm 是运行前提。操作人先核对本次源码 SHA、两个 tarball 的 SHA-256 和来源，再安装到新的仓库外目录。不要覆盖旧安装或产品 package.json/lockfile。无需 AWH 源码 checkout：
+“在线”表示 Resident 正在发送 presence；“离线”表示最近联系超过 CP 的有效窗口；Reader 显示 offline/outdated 时，执行器状态可能为“未知”，应先区分读取服务失联与执行器离线。Run、Event 与 Timeline 是既有业务历史，心跳不会创建新的业务记录。agent-desktop 当前零 Run 是正常的 Observe 状态。
 
-```powershell
-Get-FileHash -Algorithm SHA256 '<本次 Client tarball>'
-Get-FileHash -Algorithm SHA256 '<本次 Viewer tarball>'
-npm install --prefix '<新的外置 Client 目录>' --offline --ignore-scripts --no-audit --no-fund '<Client tarball 绝对路径>'
-npm install --prefix '<新的外置 Viewer 目录>' --offline --ignore-scripts --no-audit --no-fund '<Viewer tarball 绝对路径>'
-& '<Client 目录>/node_modules/.bin/awh.cmd' --version
-```
+## 查看 Doctor 与接入说明
 
-本仓库开发构建提供 `pnpm client:pack` / `pnpm viewer:pack`；归档包含依赖及说明，hash 从实际归档字节计算。新产物不要复用任何历史 digest。打包功能不发布 npm 或 GitHub Release，也不修改 #57 冻结产物。
+点击顶部“添加项目”，打开当前真实接入入口。旧四步向导和 #35 历史样本已从产品页面移除；原证据和业务历史仍保留。
 
-## 复用身份和配置
+展开“已接入项目”，从中找到 agent-desktop 的本机工作树。将该目录填入“项目目录”，点击“接入项目”或“重新检查接入”，核对确认框后可取消；展开“详情与诊断”，点击“Doctor 检查”查看逐项状态和建议。本次体验只做识别和 Doctor，不重复提交申请、确认接入或执行修复。Doctor 结果在新增项目区域逐项显示；这一 UI 操作没有独立 CLI 退出码展示。
 
-Client 接入复用现有项目 `.awh/project.yaml`、仓库外 Client config、Machine/Executor、专用 credential、endpoint/CA 和 state。运行离线 Doctor 不创建配置或身份：
+agent-desktop 的 R1-E 显式 CP 只读 probe 原件为 **5 passed / 1 not_checked，整体 not_checked，CLI exit 0**。history not_checked 表示保留的历史未在该 Doctor 中对账，不等于接入失败，也不等于全项 PASS。界面 Doctor 默认本地诊断，和带 `--probe-cp` 的 CLI 结果有不同的检查范围，不能要求所有项照抄原 probe。
 
-```powershell
-Set-Location '<真实已登记 Git worktree>'
-& '<Client 目录>/node_modules/.bin/awh.cmd' --config '<原外置 Client config>' doctor --json
-```
+Future UI 的既有业务 Doctor 可能显示 dirty、branch 或 journal blocked（旧记录 CLI exit 2）。这些是 Workflow readiness 的检查结果；如果 Executor 仍在线，不能据此判为 Observe 离线。不要为了消除提示切换分支、清理改动或重试业务 Journal。
 
-没有 Manifest/配置或没有批准 Policy 时结果是 `blocked` 或 `not_checked`。第二个 Git 项目也可诊断，但输入和 Manifest 不授予 Profile/Provider 权限。不为解决分支冲突而 checkout/reset/clean。
+## 新项目接入如何进行
 
-升级版本后，CP 保存的 Client version 可能与新安装不同。常驻会阻断并报告 `response_binding`；操作人须在另行批准的现场接入中用既有 `register` 更新同一身份的版本元数据。常驻不自动注册，不重建 Machine，不触碰 Session/Journal、Run 或 Event。
+后续经明确授权增加项目时：选择本机 Git 目录 → “接入项目” → 确认框核对仓库、分支、目录和默认“仅观察” → “确认接入” → 在待批准区域点击“管理员批准并接入…” → Windows 管理员确认框明确批准 → 到“执行器”确认真实在线。未配置本机管理员入口时，等待管理员按原 CLI 批准，再点“完成接入”并确认。取消确认框不会提交申请；取消管理员确认保留已提交的申请。详细管理员步骤见 [项目接入](project-enrollment.md)。
 
-## 显式启动 / 状态 / 停止
+普通用户无需手写 credential、SHA、Manifest 或 JSON；申请不会立即注册项目。批准之后完成接入才会生成缺失的最小 Manifest 和外置项目配置、注册并启动 Resident。Observe 允许保留本机改动。当前 Grant 只有 `register_presence`，不能创建业务 Run/Event、调用 Provider 或 Deliver。“受信开发准备”同样不是自动执行权限。
 
-在真实工作树的专用终端启动：
+本次 5–10 分钟体验不新增项目、不为原项目重复申请或批准。
 
-```powershell
-& '<Client 目录>/node_modules/.bin/awh.cmd' --config '<原外置 Client config>' resident start
-```
+## 一次性管理员设置与日常操作分工
 
-这是前台常驻服务，终端需保持开启，不是任务 `start --issue`。每 15 秒核对已有 Project/Executor/Client 绑定，随后只向原 CP 发送一次心跳。不会执行任务、报告业务 Event、retry/sync/Deliver 或进行 GitHub 操作。断网和诊断阻断会显示离线并在下一周期重新检查；没有并发心跳。
+管理员负责：核验候选来源与 tarball SHA-256，安装独立 Client / Viewer 到 Git 之外；准备 Node.js 24+、Git、安装用 npm；保护外置 machine home、配置、信任文件和身份；设置固定 CP endpoint / 公共 CA / 允许的项目根目录；用 `awh setup` 初始化或显式复用原 Machine 元数据；把 machine 配置接入 Viewer；在 CP 宿主机批准专用 Observe 申请。
 
-另一个终端在同一工作树运行：
+当前机器以上设置已经完成。普通用户只需打开 Dashboard、查看项目/执行器、识别目录、读 Doctor、等待管理员批准以及重新进入会话。本机管理员入口是显式可选配置，提供按钮和 Windows 原生确认框；未配置时保留宿主机 CLI 审批方式。按钮只批准专用登记和心跳，不批准新的开发任务或 GitHub 写权限。用户不需要复制秘密或修改 JSON。
 
-```powershell
-& '<Client 目录>/node_modules/.bin/awh.cmd' --config '<原外置 Client config>' resident status
-& '<Client 目录>/node_modules/.bin/awh.cmd' --config '<原外置 Client config>' resident stop
-```
+## 运行、停止与升级边界
 
-`status` 返回本机服务 running、online、last_seen、observed_at、failures/code，不能替代 CP Reader 的在线判定。Ctrl+C 或 stop 等待在途心跳完成并清除自身 lease。重新 start 复用原身份。停止后 CP 在线状态按既有 60 秒 presence 窗口转离线，不伪造停机 Event。进程异常退出留下 lease 时 status 为 `resident_unreachable`，须由操作人核对原进程后清理该单一 lease；不自动删除或终止任何未知进程。
+当前本机已接入 Future UI、agent-desktop、test-awh。test-awh 是仅观察接入，没有已批准的开发任务。本次体验不执行停止、重启或升级。Resident 通常每 15 秒检查原绑定并发送心跳；正常停机之后 CP 按既有 60 秒 presence 窗口判离线，体验清单不要求重做 TTL 测试。
 
-lease 保存于原仓库外 state，只含随机短期本机控制能力；不要分享或上传该文件。控制监听只接受专用本机 CLI，拒绝浏览器 Origin/cookie；它不能注册、运行或交付任务。保护外置配置/state 的 OS ACL，与既有 Client 凭据边界一致。
+维护时管理员必须另外安排窗口：CP 管理既有 v2 SQLite；Viewer 只读该库；原 Future UI Resident 是单独启动的，新增项目 Resident 受 Viewer 生命周期管理。关闭 Viewer 可能停止由它启动的新增项目 Resident，因此浏览器页面关闭与 Viewer 进程停止不是同一操作。
 
-## 普通浏览器 Viewer
+升级先保留原安装、逻辑一致备份、配置及身份；新字节需要来源/摘要核验及现场授权。只在当前 DB/trust 兼容的前提下回退二进制，不能为恢复“在线”而恢复接入前旧 DB/trust、覆盖身份或删除 Journal/State。包内 `os/cpu`、平台验证和迁移路径须以其实际元数据为准，Windows 实测不外推 Mac。
 
-操作人提供仓库外闭合配置，字段契约见 [Viewer schema](local-viewer.schema.json)。运行时还核对真实路径、唯一登记和 viewer scope；schema 不是批准 Policy。下面是结构示意，占位符必须明确替换：
+## 已交付范围
 
-```json
-{
-  "schema_version": "1.0",
-  "mode": "local_browser_direct",
-  "database": "<原 CP v2 SQLite 绝对路径>",
-  "port": 4311,
-  "viewer": { "id": "windows-local-viewer", "project_ids": ["future-ui"] },
-  "local_bindings": [{
-    "id": "windows-future-ui",
-    "project_id": "future-ui",
-    "repository": "zlpoot/future-ui",
-    "worktree": "<真实 Git worktree 根目录绝对路径>",
-    "client_entry": "<Client 目录>/node_modules/@zlpoot/awh-client/dist/client/cli.js",
-    "client_entry_sha256": "<此安装 cli.js 的 SHA-256>",
-    "config_file": "<原外置 Client config>"
-  }]
-}
-```
-
-`local_bindings` 可以为空。已批准的 Versioned Work Item 可在同一项附加 `policy_trust_file` 和 `work_item: {id, version}`，二者必须同时存在，Doctor 验证独立批准/指纹，不从表单授权。配置与整个 Client 安装须由受信操作人管理；entry hash 是入口比对，不是完整供应链签名。tarball 来源与 hash 仍需安装前核对。
-
-取得本次安装入口 hash 后，经明确现场授权启动独立 Viewer：
-
-```powershell
-Get-FileHash -Algorithm SHA256 '<Client 目录>/node_modules/@zlpoot/awh-client/dist/client/cli.js'
-& '<Viewer 目录>/node_modules/.bin/awh-viewer.cmd' --config '<仓库外 Viewer config>'
-```
-
-Viewer 只读打开原 v2 DB，不迁移、不 seed、不重启 CP；端口冲突时失败，不停止现有服务。地址栏打开输出的 `http://127.0.0.1:<port>/dashboard`。这是**显式本机 OS 用户访问模式**，不是 LAN/公网匿名服务：exact IPv4 loopback socket/Host/port、同源 Origin/Fetch Metadata、无 CORS、无 Authorization bearer。导航换取仅在本机 Viewer 内存中存在、限定 Project 范围的一小时 HttpOnly / SameSite=Strict cookie；API/资源本身不允许无 cookie 自举。过期后重新启动 Viewer 获得新本机会话。既有独立 cookie authenticator 模式保持可用，不能与 local_browser_direct 混用。
-
-接入向导默认当前 Reader 项目；没有快照时要求选择数据来源。历史 #35 样本仍可手动查看，原 9/4/9 不改写。输入工作树/repository 只匹配当前 Viewer 范围内操作人已登记项，未知项明确 BLOCKED，不扫描磁盘或自动注册。点击“检测当前安装与配置”或“运行离线 Doctor”会通过受保护同源只读通道调用那个安装的固定 `doctor --json`，没有 `--probe-cp`，不会上传配置/secret。报告只显示状态、code/source、下一步、批准版本和观测时间；缺失安装、错误版本/hash、仓库或 Manifest 不匹配均阻断。
-
-Dashboard 的项目 name/enabled 缺失表示属性未维护/未提供，不能解读成连接失败。Machine 来自 Executor；Run/Event/Timeline 来自原 CP，lastRefresh/cursor 与 Reader 离线状态单独显示。新心跳只刷新 presence，不增长历史游标，也不把旧 Run/Event 算成本次接入生成。
-
-## 本轮验证与后续门槛
-
-离线验收使用临时 Git 项目、临时 CP v2 和独立安装包；核对只发送心跳、原项目/Client state 字节不变、启停重启、拒绝越权和普通浏览器会话、REST/SSE presence 刷新。最小命令为 build、typecheck、相关 Client/Doctor/Dashboard 与 `windows-product` 回归，以及本机 synthetic 浏览器 smoke；失败原始日志保留。
-
-真实 Future UI 的 CP/SQLite/身份、第二个真实项目、安装部署、业务写入、App Draft 发布、Ready/Merge、Mac 和新 RC/Release 均不能由离线测试推断 PASS，仍按 #58 各自批准后执行。
-
-本次 Human 单独批准代码发布映射 `hub/issue58`：固定 Hub repository、base `main`、branch `codex/issue58-windows-product`、work item Hub #58，以及 `src/profiles.ts` 中按序列出的最小检查。仅用于 App 身份推送、关联 Draft PR、Builder evidence 与 Handoff；保持 Draft，不进入真实项目验收或 Release。该映射不改变默认 workflow、其他 Profile、selected-set、单仓库 token 或 Client Provider/Deliver 授权。
+Windows Client / Viewer 0.4.8 包和真实双项目 Observe 已可供本机体验。CP 是 PR #60 已审查源码的实机编译产物，不能称为新的独立正式 npm CP 包。#57 是早期打包候选；统一五资产跨平台发行、Mac 验证、Release Manifest/Tag/npm 发布仍归 #54/#56，尚未完成。跨机器、24×7、开发→PR→Review→Merge 全链路也不由本次本机 Observe 验收证明。
