@@ -1955,6 +1955,7 @@
               "VERIFICATION_FAILED",
               "GITHUB_PUSH_COMPLETED",
               "GITHUB_PR_CREATED",
+              "PR_REVISION_LINKED",
               "HANDOFF_PUBLISHED",
               "REVIEW_STARTED",
               "REVIEW_PASSED",

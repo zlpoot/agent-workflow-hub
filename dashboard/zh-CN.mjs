@@ -10,6 +10,7 @@ const messages = {
   RUN_STARTED: '运行开始', STEP_STARTED: '步骤开始', STEP_COMPLETED: '步骤完成',
   VERIFICATION_STARTED: '验证开始', VERIFICATION_PASSED: '验证通过', VERIFICATION_FAILED: '验证失败',
   GITHUB_PUSH_COMPLETED: 'GitHub 推送完成', GITHUB_PR_CREATED: 'GitHub 拉取请求已创建',
+  PR_REVISION_LINKED: '拉取请求修订已关联',
   HANDOFF_PUBLISHED: '交接记录已发布', REVIEW_STARTED: '审查开始', REVIEW_PASSED: '审查通过',
   RUN_COMPLETED: '运行完成', RUN_FAILED: '运行失败',
   branch: '分支', checks: '验证命令', work_item: '工作项', policy_version: '策略版本',
