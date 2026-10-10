@@ -55,7 +55,10 @@ try {
         const data=JSON.parse(readFileSync(join(path,'package.json')));assert(readFileSync(join(root,'pnpm-lock.yaml'),'utf8').includes(`  ${name}@${data.version}:`),'Runtime dependency not present at exact lock version');if(direct.has(name))assert.equal(data.version,packageRoot.dependencies[name]);if(copied[name]){assert.equal(copied[name],data.version,'Runtime version conflict');return;}copied[name]=data.version;
         // Exclude dependency development fixtures/tooling; retained runtime JS is audited below.
         const excluded=new Set(['node_modules','test','tests','spec','benchmark','.github','.gitattributes','eslint.config.js','.eslintrc.yml','tsconfig.json']);
-        cpSync(realpathSync(path),join(pkgStage,'node_modules',name),{recursive:true,dereference:true,filter:file=>!relative(path,file).split(/[\\/]/).some(p=>excluded.has(p))});
+        // AJV's opt-in RE2 adapter is not used by AWH's fixed validators and needs an uninstalled native addon.
+        // Omit that adapter, not its imports from the audit: any retained reference still fails closure validation.
+        const omitted=name==='ajv'?['dist/runtime/re2.js','dist/runtime/re2.js.map','dist/runtime/re2.d.ts','lib/runtime/re2.ts']:[];
+        cpSync(realpathSync(path),join(pkgStage,'node_modules',name),{recursive:true,dereference:true,filter:file=>{const rel=relative(path,file).replaceAll('\\','/');return !rel.split('/').some(p=>excluded.has(p)) && !omitted.includes(rel);}});
         assert(!data.os&&!data.cpu&&!data.gypfile && !Object.values(data.scripts??{}).some(s=>/node-gyp|prebuild-install/.test(s)),'Native dependency requires explicit platform build');
         assert(!Object.keys(data.optionalDependencies??{}).length,'Optional closure must be explicitly resolved');
         for(const child of Object.keys(data.dependencies??{}))copyDependency(child,createRequire(join(path,'package.json')));

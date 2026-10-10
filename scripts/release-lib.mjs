@@ -113,7 +113,7 @@ export function checkPortableClosure(archive, dependencies) {
         const parts=path.split('/'), boundary=parts[1].startsWith('@')?parts.slice(0,3).join('/'):parts.slice(0,2).join('/');
         assert(rel.startsWith(boundary+'/') && [rel,rel+'.js',rel+'.json',rel+'/index.js'].some(p=>archive.has(p)),'Missing/escaping dependency import');
       }else {
-        const id=name.startsWith('@')?name.split('/').slice(0,2).join('/'):name.split('/')[0];assert(Object.hasOwn(dependencies,id),'Undeclared dependency closure');
+        const id=name.startsWith('@')?name.split('/').slice(0,2).join('/'):name.split('/')[0];assert(Object.hasOwn(dependencies,id),'Undeclared dependency closure: '+path+' -> '+id);
         const pkg=JSON.parse(archive.get('node_modules/'+id+'/package.json').body);
         const rel=name===id?posix.join('node_modules',id,pkg.main??'index.js'):'node_modules/'+name;
         assert([rel,rel+'.js',rel+'.json',rel+'/index.js'].some(p=>archive.has(p)),'Missing bare dependency import');

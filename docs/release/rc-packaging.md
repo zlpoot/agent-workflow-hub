@@ -27,6 +27,9 @@ npm Windows tar bin header 规范成 0755，最终 hash 在规范后计算，内
 从本机锁定依赖复制为扁平闭包，仅 JS/JSON/文档，包含第三方许可证，无开发依赖。
 校验器拒绝 native 扩展、ELF/PE/Mach-O bytes、依赖 os/cpu/生命周期/optional 限制、
 非字面动态 import/require、缺失/越界相对导入与未声明裸依赖。构建工具平台性质不进入运行闭包。
+AJV 的 opt-in RE2 adapter 需要未安装的 native addon，AWH 固定 validators 不使用它；
+只从发行闭包排除这四个 adapter JS/type/source/map 文件及依赖开发测试/工具配置。
+保留模块如仍引用缺失 adapter，会被闭包校验拒绝，不把 RE2 作为可用功能分发。
 
 assemble 只消费同一份五资产 candidate；从同 source 指南冻结唯一 Manifest/SHA256SUMS，
 不构建第二端、不变更包字节。Manifest verification 为冻结时两端 NOTRUN/null 快照。
