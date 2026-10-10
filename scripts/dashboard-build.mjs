@@ -20,4 +20,8 @@ await build({ entryPoints: ['dashboard/app.tsx'], bundle: true, outfile: 'dist/d
   writeFileSync('dist/dashboard-ui/build-inputs.json', JSON.stringify(Object.keys(result.metafile.inputs), null, 2));
 });
 copyFileSync('dashboard/index.html', 'dist/dashboard-ui/index.html');
+// Preserve Chinese text under Windows PowerShell 5.1; the helper is opt-in.
+mkdirSync('dist/dashboard', { recursive: true });
+const ownerPrompt = readFileSync('src/dashboard/owner-confirm.ps1', 'utf8').replace(/^\uFEFF/, '');
+writeFileSync('dist/dashboard/owner-confirm.ps1', '\uFEFF' + ownerPrompt);
 console.log('Dashboard browser bundle and static OpenAPI validators built');

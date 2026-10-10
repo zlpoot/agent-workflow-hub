@@ -19,6 +19,10 @@ import { npmEntry, npmEnv } from '../scripts/npm-tool.mjs';
 import { CLIENT_VERSION } from '../dist/client/version.js';
 import { chromium } from 'playwright';
 import { trustedFixture } from './versioned-profile-fixture.mjs';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { createOwnerApproval } from '../dist/dashboard/owner-approval.js';
+import { createEnrollmentService } from '../dist/dashboard/enrollment.js';
 
 const hash = v => createHash('sha256').update(v).digest('hex');
 const resources = new WeakMap();
@@ -105,21 +109,76 @@ test('installed Viewer selects the exact approved Work Item version, connects an
  const entry=join(viewerInstall,'node_modules','@zlpoot','awh-viewer','dist','dashboard-cli.js');const child=spawn(process.execPath,[entry,'--config',viewerConfig],{windowsHide:true,stdio:['ignore','pipe','pipe']});const exit=once(child,'exit');resources.get(t).children.push({child,exit});let errors='',timer;child.stderr.on('data',x=>errors+=x);
  try{await Promise.race([new Promise(r=>child.stdout.on('data',x=>{if(x.toString().includes('explicit_local_os_user'))r();})),exit.then(()=>{throw new Error(errors);}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Viewer startup timeout')),10000);})]);}finally{clearTimeout(timer);}
  const browser=await chromium.launch({channel:'msedge',headless:true});resources.get(t).stops.push(()=>browser.close());const page=await browser.newPage({viewport:{width:1280,height:1000}});const failures=[];page.on('pageerror',e=>failures.push(e.message));
- await page.goto('http://127.0.0.1:'+viewerPort+'/dashboard');await page.getByRole('button',{name:'添加项目向导',exact:true}).click();
- await page.getByRole('button',{name:h.base,exact:true}).click();await page.getByRole('button',{name:'browser-project',exact:true}).click();await page.getByRole('button',{name:'识别项目',exact:true}).click();
+ await page.goto('http://127.0.0.1:'+viewerPort+'/dashboard');await page.getByRole('button',{name:'添加项目',exact:true}).click();
+ assert.equal(await page.getByText('Future UI · #35 历史离线样本',{exact:true}).count(),0);
+ assert.equal(await page.getByRole('navigation',{name:'接入步骤'}).count(),0);
+ await page.getByRole('button',{name:h.base,exact:true}).click();await page.getByRole('button',{name:'browser-project',exact:true}).click();await page.getByRole('button',{name:'接入项目',exact:true}).click();
+ const dialog=page.getByRole('dialog');await dialog.waitFor();await dialog.getByRole('button',{name:'取消',exact:true}).click();assert.equal(enrollmentPreview(h.machinePath,root).request_file,null);
+ const noPolicy=repo(h.base,'no-policy-project','sample/no-approved-task');
+ await page.getByRole('textbox',{name:'新增项目目录'}).fill(noPolicy);await page.getByRole('button',{name:'接入项目',exact:true}).click();
+ await dialog.locator('summary',{hasText:'高级选项'}).click();await dialog.getByRole('combobox',{name:'新增项目能力'}).selectOption('develop');
+ assert.equal(await dialog.getByRole('combobox',{name:'批准任务'}).isDisabled(),true);assert.equal(await dialog.getByRole('combobox',{name:'批准任务'}).textContent(),'暂无已批准任务');
+ assert.equal(await dialog.getByRole('button',{name:'确认接入',exact:true}).isDisabled(),true);await dialog.getByRole('button',{name:'取消',exact:true}).click();assert.equal(enrollmentPreview(h.machinePath,noPolicy).request_file,null);
+ await page.getByRole('textbox',{name:'新增项目目录'}).fill(root);await page.getByRole('button',{name:'接入项目',exact:true}).click();await dialog.locator('summary',{hasText:'高级选项'}).click();
  await page.getByRole('combobox',{name:'新增项目能力',exact:true}).selectOption('develop');
  const tasks=page.getByRole('combobox',{name:'批准任务',exact:true});await tasks.locator('option').nth(1).waitFor({state:'attached'});
  const options=await tasks.locator('option').evaluateAll(items=>items.map(o=>({value:o.value,label:o.textContent})));
  assert.equal(options.length,2);assert.notEqual(options[0].value,options[1].value);assert(options[1].label.endsWith('v2'));
  await tasks.selectOption({label:options[1].label});assert.equal(await tasks.inputValue(),options[1].value);
- await page.getByRole('checkbox',{name:'确认新增项目授权'}).check();await page.getByRole('button',{name:'提交接入申请',exact:true}).click();await page.getByText('等待 CP 管理员批准。',{exact:false}).waitFor();
+ await dialog.getByRole('button',{name:'确认接入',exact:true}).click();await page.getByText('申请已提交，等待管理员批准。',{exact:false}).waitFor();
  const preview=enrollmentPreview(h.machinePath,root);assert.deepEqual(JSON.parse(readFileSync(preview.request_file)).work_item,{id:trust.selection.id,version:'v2'});
  approveEnrollment({request:preview.request_file,trustedConfig:h.trusted,database:h.database,confirm:true,policyTrust:trust.path});
- await page.getByRole('button',{name:'批准后确认接入 / 重试',exact:true}).click();await page.getByRole('heading',{name:'执行器',exact:true}).waitFor();const binding=enrollmentBindings(h.machinePath)[0];
+ await page.getByRole('button',{name:'完成接入',exact:true}).click();await dialog.getByRole('button',{name:'确认接入',exact:true}).click();await page.getByRole('heading',{name:'执行器',exact:true}).waitFor();const binding=enrollmentBindings(h.machinePath)[0];
  resources.get(t).stops.push(async()=>{await new Promise(resolve=>{const c=spawn(process.execPath,[h.entry,'--config',binding.config_file,'resident','stop'],{cwd:root,windowsHide:true,stdio:'ignore'});c.once('close',()=>resolve());});});
  await page.getByText(binding.executor_id,{exact:true}).waitFor();await page.getByText(root,{exact:true}).waitFor();await page.getByText('在线',{exact:true}).first().waitFor();assert.deepEqual(failures,[]);
  const cookie=(await page.context().cookies())[0];const origin='http://127.0.0.1:'+viewerPort;
  const bad=await fetch(origin+'/dashboard/enrollment/v1/connect',{method:'POST',headers:{Cookie:cookie.name+'='+cookie.value,'Content-Type':'application/json'},body:JSON.stringify({directory:root})});assert.equal(bad.status,403);
  mkdirSync('.handoff/enrollment-evidence',{recursive:true});await page.screenshot({path:'.handoff/enrollment-evidence/installed-viewer.png',fullPage:true});
  const db=new DatabaseSync(h.database,{readOnly:true});assert.equal(db.prepare('SELECT COUNT(*) n FROM runs').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM events').get().n,0);db.close();
+});
+
+test('owner confirmation cancels safely, rejects changed requests and grants only fixture presence', {skip:process.platform!=='win32'}, async t=>{
+ const h=await fixture(t),root=repo(h.base,'owner-project');const p=submitEnrollment(h.machinePath,root,'observe');
+ const helper=join(h.base,'confirmation.ps1'),cpEntry=join(h.base,'cp-entry.js'),ownerPath=join(h.base,'owner.json');
+ writeFileSync(helper,'# isolated confirmation fixture');writeFileSync(cpEntry,'// isolated pinned CP entry');
+ const owner={schema_version:'1.0',cp_entry:cpEntry,cp_entry_sha256:hash(readFileSync(cpEntry)),trusted_config_file:h.trusted,database:h.database,owner_sid:'S-1-5-21-1-2-3-1001',confirmation_script:helper,confirmation_script_sha256:hash(readFileSync(helper))};
+ writeFileSync(ownerPath,JSON.stringify(owner));let answer='CANCELLED',change=false,hold=false,release;const calls=[];
+ const launch=(entry,args,options)=>{
+  const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{};
+  calls.push({entry,args:[...args],windowsHide:options.windowsHide});
+  const finish=()=>{try{
+   let value;
+   if(entry===process.execPath){
+    assert.equal(args[0],cpEntry);assert.equal(args[1],'approve-project');assert.equal(options.windowsHide,true);
+    value=JSON.stringify(approveEnrollment({request:args[args.indexOf('--request')+1],trustedConfig:h.trusted,database:h.database,confirm:args.includes('--confirm')}));
+   }else{
+    assert(entry.endsWith('WindowsPowerShell\\v1.0\\powershell.exe'));assert.equal(options.windowsHide,false);assert(args.includes('-Sta'));assert.equal(args[args.indexOf('-ExpectedOwnerSid')+1],owner.owner_sid);
+    if(change){const request=JSON.parse(readFileSync(p.request_file));request.branch='changed/while-confirming';writeFileSync(p.request_file,JSON.stringify(request));}
+    value=answer;
+   }
+   child.stdout.write(value);child.emit('close',0);
+  }catch{child.stderr.write(JSON.stringify({error:{code:'fixture_failure'}}));child.emit('close',2);}};
+  if(hold && entry!==process.execPath)release=finish;else queueMicrotask(finish);return child;
+ };
+ const approve=createOwnerApproval(h.machinePath,ownerPath,h.database,launch),before=readFileSync(h.trusted),requestBefore=readFileSync(p.request_file);
+ await assert.rejects(approve(root),e=>e.code==='owner_cancelled');assert.deepEqual(readFileSync(h.trusted),before);assert(!calls.some(c=>c.args.includes('--confirm')));
+ answer='CONFIRMED';change=true;await assert.rejects(approve(root),e=>e.code==='owner_request_changed');assert.deepEqual(readFileSync(h.trusted),before);assert(!calls.some(c=>c.args.includes('--confirm')));
+ writeFileSync(p.request_file,requestBefore);change=false;
+ writeFileSync(helper,'# changed helper');await assert.rejects(approve(root),e=>e.code==='owner_installation');assert.deepEqual(readFileSync(h.trusted),before);writeFileSync(helper,'# isolated confirmation fixture');
+ const service=createEnrollmentService(h.machinePath,approve);resources.get(t).stops.push(()=>service.close());
+ for(const data of [{directory:root,command:'anything'},{directory:root,mode:'develop'}])await assert.rejects(service.handle('owner-approve',data),e=>e.code==='enrollment_input');
+ assert.equal((await service.handle('owner-capabilities',{})).enabled,true);hold=true;const pending=service.handle('owner-approve',{directory:root});
+ for(let i=0;i<40&&!release;i++)await new Promise(r=>setTimeout(r,10));assert.equal(typeof release,'function');
+ await assert.rejects(service.handle('owner-approve',{directory:root}),e=>e.code==='enrollment_busy');release();
+ const result=await pending;assert.equal(result.status,'approved');assert.equal(result.capability,'register_presence');assert.equal(result.authority_verified,false);
+ const trusted=readTrustedConfig(h.trusted);assert.deepEqual(trusted.clients[0],h.oldClient);assert.deepEqual(trusted.profiles,[policy]);
+ assert.equal(trusted.enrollments.length,1);assert.equal(trusted.enrollments[0].request.mode,'observe');assert.equal(trusted.enrollments[0].request.work_item,null);
+ assert.deepEqual(trusted.clients.at(-1).project_ids,[result.project_id]);assert.deepEqual(trusted.clients.at(-1).executor_ids,[trusted.enrollments[0].request.executor_id]);
+ const db=new DatabaseSync(h.database,{readOnly:true});assert.equal(db.prepare('SELECT COUNT(*) n FROM runs').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM events').get().n,0);db.close();
+ const unavailable=createEnrollmentService(h.machinePath);await assert.rejects(unavailable.handle('owner-approve',{directory:root}),e=>e.code==='owner_unavailable');await unavailable.close();
+});
+
+test('packaged owner confirmation script has PowerShell 5.1 encoding and parses without executing UI', {skip:process.platform!=='win32'}, ()=>{
+ const helper=resolve('dist/dashboard/owner-confirm.ps1');assert.deepEqual([...readFileSync(helper).subarray(0,3)],[239,187,191]);
+ const parse=spawnSync(join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-NonInteractive','-Command',`$parseTokens=$null; $parseErrors=$null; [void][Management.Automation.Language.Parser]::ParseFile('${helper.replaceAll("'","''")}',[ref]$parseTokens,[ref]$parseErrors); if($parseErrors.Count){exit 1}`],{encoding:'utf8',windowsHide:true});assert.equal(parse.status,0,'Native confirmation helper syntax');
 });
