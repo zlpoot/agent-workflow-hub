@@ -71,13 +71,19 @@ export function checkArtifact(bytes, artifact, source) {
   }
   return build;
 }
+export function readArtifact(artifact,source,read) {
+  closed(artifact,['component','target','filename','source_commit','size_bytes','sha256','build']);
+  assert(ids.includes(artifact.component));assert(artifact.component==='awh-dashboard-ui'?artifact.target==='static':targets.includes(artifact.target));
+  assert.equal(artifact.filename,`${artifact.component}-${specs[artifact.component].version}-${artifact.target}.${artifact.target==='static'?'zip':'tgz'}`);
+  return checkArtifact(read(artifact.filename),artifact,source);
+}
 export function checkCandidate(candidate, read) {
   closed(candidate,['schema_version','kind','source_commit','source_clean','target','artifacts','package_verification','runtime_write','full_delivery','release_gate']);
   assert.equal(candidate.schema_version,'1.0'); assert.equal(candidate.kind,'awh_release_candidate'); assert.equal(candidate.source_clean,true); assert(targets.includes(candidate.target)); assert.equal(candidate.release_gate,'NOT_AUTHORIZED'); assert.equal(candidate.runtime_write,'NOTRUN'); assert.equal(candidate.full_delivery,'NOTRUN');
   const required=ids.map(id=>id+'\0'+(id==='awh-dashboard-ui'?'static':candidate.target));
   assert.deepEqual(candidate.artifacts.map(a=>a.component+'\0'+a.target).sort(),required.sort()); assert.equal(new Set(candidate.artifacts.map(a=>a.filename)).size,5);
   assert.equal(candidate.package_verification,'NOTRUN','Build index cannot assert smoke PASS; keep later evidence external');
-  for(const artifact of candidate.artifacts) checkArtifact(read(artifact.filename),artifact,candidate.source_commit);
+  for(const artifact of candidate.artifacts) readArtifact(artifact,candidate.source_commit,read);
   const reference=candidate.artifacts[0].build.provenance; for(const artifact of candidate.artifacts) assert.deepEqual(artifact.build.provenance,reference);
   return true;
 }

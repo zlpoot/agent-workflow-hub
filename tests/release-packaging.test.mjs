@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { gzipSync } from 'node:zlib';
-import { ids,specs,components,provenancePaths,sha256,checkArtifact,checkCandidate } from '../scripts/release-lib.mjs';
+import { ids,specs,components,provenancePaths,sha256,checkArtifact,readArtifact,checkCandidate } from '../scripts/release-lib.mjs';
 import { zipFiles,readZip,readTar,executableTar } from '../scripts/release-archive.mjs';
 import { checkManifest,checkSums } from '../scripts/release-validate.mjs';
 
@@ -39,3 +39,4 @@ test('platform slice stays candidate-only; no missing component or smoke PASS in
 test('checksums require all assets/guides/manifest, reject self-hash, duplicates and modified bytes',()=>{const h=setup();h.files.set('release-manifest.json',Buffer.from(JSON.stringify(h.manifest)));const sums=[...h.files].map(([p,b])=>sha256(b)+'  '+p).join('\n')+'\n';assert(checkSums(sums,h.manifest,h.read));assert.throws(()=>checkSums(sums+sha256(Buffer.from(''))+'  SHA256SUMS\n',h.manifest,h.read));assert.throws(()=>checkSums(sums+sums.split('\n')[0]+'\n',h.manifest,h.read));h.files.set(h.manifest.artifacts[0].filename,Buffer.from('modified'));assert.throws(()=>checkSums(sums,h.manifest,h.read));});
 test('archive validation rejects corrupt bytes and unsafe names',()=>{const zip=zipFiles({a:Buffer.from('hello')});assert.equal(readZip(zip).get('a').toString(),'hello');const bad=Buffer.from(zip);bad[31]^=1;assert.throws(()=>readZip(bad));assert.throws(()=>zipFiles({'../escape':Buffer.from('x')}));const tgz=asset('awh-builder','win32-x64').bytes;assert(readTar(tgz).has('awh-build.json'));assert.throws(()=>readTar(Buffer.from('bad')));});
 test('npm Windows archive modes normalize declared bins without changing runtime bytes',()=>{const original=asset('awh-builder','win32-x64').bytes,paths=Object.values(specs['awh-builder'].bin),normalized=executableTar(original,paths),before=readTar(original),after=readTar(normalized);for(const [p,b]of before)assert(b.body.equals(after.get(p).body));for(const p of paths)assert.equal(after.get(p).mode,0o755);assert.throws(()=>executableTar(original,['dist/missing.js']));});
+test('untrusted artifact filename is rejected before any external read',()=>{const a=asset('awh-builder','win32-x64');a.record.filename='../../credentials/key.pem';let reads=0;assert.throws(()=>readArtifact(a.record,source,()=>{reads++;return a.bytes;}));assert.equal(reads,0);});

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { checkCandidate, components, targets, sha256 } from './release-lib.mjs';
 import { checkManifest, checkSums } from './release-validate.mjs';
 
@@ -10,11 +11,14 @@ const args=process.argv.slice(2);assert(args.length===6 && args[0]==='--windows'
 const dirs=[resolve(args[1]),resolve(args[3])], candidates=dirs.map(dir=>JSON.parse(readFileSync(join(dir,'candidate-index.json'))));
 for(const [i,c] of candidates.entries()){checkCandidate(c,name=>readFileSync(join(dirs[i],name)));assert.equal(c.target,targets[i]);}
 const source=candidates[0].source_commit;assert.equal(candidates[1].source_commit,source,'Different source heads');
+const root=dirname(dirname(fileURLToPath(import.meta.url)));
+const git=args=>{const r=spawnSync('git',args,{cwd:root,encoding:'utf8',windowsHide:true});assert.equal(r.status,0);return r.stdout.trim();};
+assert.equal(git(['rev-parse','HEAD']),source,'Assembly code/guides must match candidate source');assert.equal(git(['status','--porcelain']),'','Assembly requires clean source');
 for(const a of candidates[1].artifacts)assert.deepEqual(a.build.provenance,candidates[0].artifacts[0].build.provenance,'Different lock/policy/contracts');
 const output=resolve(args[5]);assert(!existsSync(output),'Never overwrite frozen candidates');mkdirSync(output,{recursive:true});
 const artifacts=[];
 for(const [i,c] of candidates.entries())for(const a of c.artifacts){if(i===1&&a.component==='awh-dashboard-ui')continue;copyFileSync(join(dirs[i],a.filename),join(output,a.filename));artifacts.push(a);}
-const guides={},root=dirname(dirname(fileURLToPath(import.meta.url)));
+const guides={};
 for(const [key,name] of [['windows','install-windows.md'],['macos','install-macos.md']]){copyFileSync(join(root,'docs/release',name),join(output,name));guides[key]={filename:name,sha256:sha256(readFileSync(join(output,name)))};}
 const verification=targets.map((target,i)=>{
   const name=`package-smoke-${target}.json`,path=join(dirs[i],name);if(!existsSync(path))return {layer:'package',target,status:'NOTRUN',evidence:null};
@@ -31,4 +35,5 @@ const manifest={schema_version:'1.0',kind:'awh_release_manifest',release:{id:'aw
 checkManifest(manifest,name=>readFileSync(join(output,name)),source);writeFileSync(join(output,'release-manifest.json'),JSON.stringify(manifest,null,2)+'\n',{flag:'wx'});
 const names=[...artifacts.map(a=>a.filename),...Object.values(guides).map(g=>g.filename),'release-manifest.json',...verification.filter(v=>v.evidence).map(v=>v.evidence.filename)];
 const sums=names.map(name=>sha256(readFileSync(join(output,name)))+'  '+name).join('\n')+'\n';checkSums(sums,manifest,name=>readFileSync(join(output,name)));writeFileSync(join(output,'SHA256SUMS'),sums,{flag:'wx'});
+assert.equal(git(['rev-parse','HEAD']),source);assert.equal(git(['status','--porcelain']),'');
 console.log(JSON.stringify({source_commit:source,assets:9,package_verification:verification,publishable:false,authority_verified:false}));

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { checkCandidate, checkArtifact, closed, ids, components, targets, sha256 } from './release-lib.mjs';
+import { checkCandidate, readArtifact, closed, ids, components, targets, sha256 } from './release-lib.mjs';
 import { pathToFileURL } from 'node:url';
 
 export function checkManifest(manifest, read, expectedSource) {
@@ -12,7 +12,7 @@ export function checkManifest(manifest, read, expectedSource) {
   assert.deepEqual(manifest.components,components); assert.equal(manifest.artifacts.length,9);
   const combos=ids.flatMap(id=>id==='awh-dashboard-ui'?[id+'\0static']:targets.map(t=>id+'\0'+t));
   assert.deepEqual(manifest.artifacts.map(a=>a.component+'\0'+a.target).sort(),combos.sort());assert.equal(new Set(manifest.artifacts.map(a=>a.filename)).size,9);
-  for(const a of manifest.artifacts)checkArtifact(read(a.filename),a,expectedSource);
+  for(const a of manifest.artifacts)readArtifact(a,expectedSource,read);
   const provenance=manifest.artifacts[0].build.provenance;for(const a of manifest.artifacts)assert.deepEqual(a.build.provenance,provenance);
   closed(manifest.guides,['windows','macos']);for(const g of Object.values(manifest.guides)){closed(g,['filename','sha256']);assert(['install-windows.md','install-macos.md'].includes(g.filename));assert.equal(sha256(read(g.filename)),g.sha256);}
   assert.deepEqual(manifest.compatibility,{protocol:'1.0',cp_database_schema:2,dashboard_api:'1.0.0',dashboard_contract_sha256:provenance['contracts/dashboard-v1.openapi.json'],handoff:'0.1',fixed_profile_policy_sha256:provenance['src/profiles.ts']});
