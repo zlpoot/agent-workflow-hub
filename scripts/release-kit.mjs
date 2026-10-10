@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { sha256 } from './release-lib.mjs';
+
+const args=process.argv.slice(2);assert(args.length===2 && args[0]==='--output','release-kit --output <new-directory>');
+const root=dirname(dirname(fileURLToPath(import.meta.url))),output=resolve(args[1]);
+const git=args=>{const r=spawnSync('git',args,{cwd:root,encoding:'utf8',windowsHide:true});assert.equal(r.status,0);return r.stdout.trim();};
+assert.equal(git(['status','--porcelain']),'','Kit must bind clean source');const source=git(['rev-parse','HEAD']);
+assert(!existsSync(output),'Never overwrite a kit');mkdirSync(output,{recursive:true});
+const files=['release-smoke.mjs','release-validate.mjs','release-lib.mjs','release-archive.mjs','npm-tool.mjs'];
+for(const name of files)copyFileSync(join(root,'scripts',name),join(output,name));
+copyFileSync(join(root,'examples/protocol/future-ui.json'),join(output,'smoke-fixture.json'));
+const pkg=JSON.parse(readFileSync(join(root,'package.json')));
+writeFileSync(join(output,'package.json'),JSON.stringify({name:'awh-verification-kit',version:'0.1.0-rc.1',private:true,type:'module',engines:{node:'>=24'},dependencies:{typescript:pkg.devDependencies.typescript,playwright:pkg.devDependencies.playwright}},null,2)+'\n',{flag:'wx'});
+writeFileSync(join(output,'README.txt'),'Verification helper only; not a sixth release component or runtime dependency.\nSource: '+source+'\nInstall the pinned helper dependencies here using npm install --ignore-scripts --no-audit --no-fund (network required once, separate from offline artifact installation).\nSet AWH_DASHBOARD_TEST_BROWSER to an existing local Chrome/Chromium executable; no browser is downloaded by smoke.\nnode release-validate.mjs --manifest <candidate-dir> '+source+'\nnode release-smoke.mjs <candidate-dir>\nnode release-validate.mjs --manifest <candidate-dir> '+source+'\nA prior result is never overwritten. Retain failed attempts and retry in a fresh copy of the frozen candidate.\n',{flag:'wx'});
+const inventory=[...files,'smoke-fixture.json','package.json','README.txt'];
+writeFileSync(join(output,'kit.json'),JSON.stringify({source_commit:source,kind:'awh_verification_helper',files:Object.fromEntries(inventory.map(name=>[name,sha256(readFileSync(join(output,name)))]))},null,2)+'\n',{flag:'wx'});
+assert.equal(git(['rev-parse','HEAD']),source);assert.equal(git(['status','--porcelain']),'');
+console.log(JSON.stringify({source_commit:source,helper_only:true,package_runtime_dependencies_added:false}));

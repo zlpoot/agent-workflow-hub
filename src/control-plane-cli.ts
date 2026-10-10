@@ -1,12 +1,15 @@
-import { closeSync, openSync } from 'node:fs';
+#!/usr/bin/env node
+import { closeSync, openSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createAuthenticator, createControlPlaneServer, ControlPlaneStore, ControlPlaneError } from './control-plane/index.js';
 import { readHttpsConfig } from './control-plane/tls.js';
 import { readRuntimeConfig, readTrustedConfig } from './control-plane/config.js';
 import { externalPath, externalFilePath } from './shared/external-files.js';
+import { RELEASE_VERSION } from './release/version.js';
 
 export async function main(args: string[]): Promise<void> {
+  if (args.length === 1 && args[0] === '--version') { console.log(RELEASE_VERSION); return; }
   if (args.length === 1 && args[0] === '--help') {
     console.log('Usage: node dist/control-plane-cli.js [init|serve] --runtime-config <external-json-file>\nLegacy arguments: [init|serve] --database <external-sqlite-file> --config <external-trusted-json-file> [--port <1-65535>] [--https-config <external-json-file>]\nNormal startup requires an existing CP v2 database. init exclusively creates a new database and exits. HTTP binds only to 127.0.0.1; optional native HTTPS uses an explicit private IPv4 interface.'); return;
   }
@@ -55,6 +58,6 @@ export async function main(args: string[]): Promise<void> {
   };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
   main(process.argv.slice(2)).catch(() => { console.error('Control Plane startup failed; check arguments, external configuration and existing database (details suppressed)'); process.exitCode = 1; });
 }
