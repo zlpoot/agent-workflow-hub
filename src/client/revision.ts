@@ -9,6 +9,7 @@ export { REVISION_COMMAND } from '../profiles.js';
 import { clientFail, git, readJson, same } from './local.js';
 import { exclusiveRecoveryFile } from './recovery.js';
 import { validateHandoff } from '../validator.js';
+import { safeData, ControlPlaneError } from '../shared/security.js';
 
 export const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 export const revisionId = (run: string, task: TaskBinding, previous: string, head: string, pr: number) =>
@@ -67,6 +68,15 @@ export function parseRevisionEvidence(body: string, actor: string, head: string,
 
 // Each phase is exclusive and fsynced. Interrupted provider phases are never replayed.
 interface Phase { schema_version: '1.0'; revision_id: string; phase: number; previous_sha256: string | null; value: any }
+function safeReceiptData(value: unknown) {
+  try { safeData(value); }
+  catch (error) {
+    // safeData inspects credentials, shape and complexity before its final byte check.
+    // Only that final aggregate limit differs for the existing bounded local Receipt.
+    if (!(error instanceof ControlPlaneError) || error.code !== 'body_too_large' || error.status !== 413 ||
+        Buffer.byteLength(JSON.stringify(value)) > 256 * 1024) throw error;
+  }
+}
 export class RevisionReceipt {
   constructor(readonly directory: string, readonly id: string) {
     if (!/^revision-[a-f0-9]{64}$/.test(id)) clientFail('revision_receipt', 'Invalid revision receipt ID');
@@ -76,7 +86,8 @@ export class RevisionReceipt {
     const result: Phase[] = [];
     for (let phase = 0; phase <= 5; phase++) {
       if (!existsSync(this.file(phase))) continue;
-      const p = readJson(this.file(phase), 256 * 1024) as Phase;
+      const p = readJson(this.file(phase), 256 * 1024, false) as Phase;
+      safeReceiptData(p);
       if (phase !== result.length || !p || Object.keys(p).sort().join(',') !== 'phase,previous_sha256,revision_id,schema_version,value' ||
           p.schema_version !== '1.0' || p.revision_id !== this.id || p.phase !== phase ||
           p.previous_sha256 !== (phase ? digest(readFileSync(this.file(phase - 1))) : null))
@@ -88,8 +99,12 @@ export class RevisionReceipt {
   append(value: unknown) {
     const phases = this.phases(), phase = phases.length;
     if (phase > 5) clientFail('revision_receipt', 'Revision receipt is already complete');
-    exclusiveRecoveryFile(this.file(phase), JSON.stringify({ schema_version: '1.0', revision_id: this.id, phase,
-      previous_sha256: phase ? digest(readFileSync(this.file(phase - 1))) : null, value }, null, 2));
+    const record = { schema_version: '1.0', revision_id: this.id, phase,
+      previous_sha256: phase ? digest(readFileSync(this.file(phase - 1))) : null, value };
+    safeReceiptData(record);
+    const bytes = JSON.stringify(record, null, 2);
+    if (Buffer.byteLength(bytes) > 256 * 1024) clientFail('revision_receipt', 'Revision receipt exceeds its bounded file limit');
+    exclusiveRecoveryFile(this.file(phase), bytes);
   }
 }
 

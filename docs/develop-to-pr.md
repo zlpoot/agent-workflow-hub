@@ -60,4 +60,6 @@ After native Review and Human merge reconcile the prior Run to completed, the ad
 
 ## Verification boundary
 
+Local Revision Receipts remain bounded at 256 KiB. Their reader retains the credential, plain-JSON and complexity checks while using the local aggregate limit; the CP JSON limit remains 64 KiB. A retained phase 0 can resume only after reconstructing and comparing its entire immutable preparation (Run, namespace, Session/Journal/CP hashes, Task, old/new HEAD, PR, previous Handoff, native Evidence, verification and diff). Phase 0 precedes the Handoff intent, so no Handoff POST has been attempted. Once phase 1 exists, ordinary stage execution still blocks and requires explicit publication reconciliation. Successful resume appends subsequent phases without replacing phase 0, original delivery bytes or historical Events.
+
 `tests/workflow-stage.test.mjs` uses ephemeral administrator trust, isolated Git and SQLite CP, real Client/Builder orchestration and a synthetic Provider. Synthetic PASS proves bounded implementation scenarios, not live GitHub business E2E. New Sandbox E2E, Mac, production cutover, independent product Review and formal Release remain NOTRUN until separately authorized and actually performed.

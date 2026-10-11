@@ -602,10 +602,16 @@ export class AwhClient {
     const c = this.context();
     return locked(c.path + '.lock', async () => {
       const s = this.load(c), projection = s.initial ? replayRun(s.initial, s.events) : null;
+      const interrupted = this.revisionPending(c);
+      // Phase 0 precedes the Handoff intent. Resume only the same immutable preparation.
+      const phaseZero = interrupted.length === 1 ? interrupted[0]!.phases() : [];
+      const preparedOnly = interrupted.length === 1 && phaseZero.length === 1 &&
+        phaseZero[0]!.value.run_id === options.run && phaseZero[0]!.value.new_head === options.head &&
+        phaseZero[0]!.value.pull_request?.number === options.pr && phaseZero[0]!.value.evidence?.comment?.number === options.evidenceComment;
       if (!s.initial || s.initial.id !== options.run || !s.task_binding || s.pending || s.outbox?.length ||
           !['awaiting_review','reviewing','review_passed'].includes(projection!.run.state) || projection!.publication?.publication !== 'confirmed' ||
           projection!.candidate?.pull_request.number !== options.pr || c.identity.dirty || c.identity.sha !== options.head ||
-          c.identity.ref !== s.initial.source.ref || this.revisionPending(c).length)
+          c.identity.ref !== s.initial.source.ref || interrupted.length && !preparedOnly)
         clientFail('revision_state', 'Revision requires the same clean awaiting-review delivery with no pending or interrupted attempt');
       const fixed = deliveryPolicy(c.manifest.profile.ref, s.initial.profile.version);
       if (!supportsRevision(fixed.profile, fixed.workflow) || c.config.profile_version !== s.initial.profile.version)
@@ -665,14 +671,18 @@ export class AwhClient {
         clientFail('revision_handoff', 'Previous Handoff must belong to the actual original Run and effective candidate');
       await exactPR(observer);
       const id = revisionId(s.initial.id, s.task_binding, previous, options.head, options.pr), receipt = new RevisionReceipt(dirname(c.path), id);
-      if (receipt.phases().length) clientFail('revision_receipt', 'Revision attempt is already consumed; no provider replay');
+      const retained = receipt.phases();
+      if (retained.length && (retained.length !== 1 || interrupted.length !== 1 || interrupted[0]!.id !== id))
+        clientFail('revision_receipt', 'Revision attempt is already consumed; no provider replay');
       const github = (number: number) => ({ provider: 'github' as const, repository: c.identity.repository, kind: 'issue_comment' as const, number });
       const prepared = { revision_id: id, run_id: s.initial.id, namespace_sha256: digest(dirname(c.path)), task: s.task_binding,
         session_sha256: digest(readFileSync(c.path)), journal_sha256: digest(readFileSync(journalPath)), cp_events_sha256: digest(JSON.stringify(s.events)),
         source_sha: s.initial.source.sha, previous_head: previous, new_head: options.head, base_sha: base,
         pull_request: projection!.candidate!.pull_request, previous_handoff: projection!.publication!.comment,
         evidence: { comment: github(evidence.id), sha256: digest(evidence.body) }, evidence_body: evidence.body, verified, diffs, actor };
-      receipt.append(prepared);
+      if (retained.length) {
+        if (!same(retained[0]!.value, prepared)) clientFail('revision_receipt', 'Frozen preparation changed; no provider replay');
+      } else receipt.append(prepared);
       const publisher = await connect({ cwd: () => c.identity.root }, fixed.selection, candidateBinding, 'revision');
       if (publisher.preflight().actor !== actor) clientFail('revision_provider', 'App identity changed before Handoff publication');
       await exactPR(publisher);

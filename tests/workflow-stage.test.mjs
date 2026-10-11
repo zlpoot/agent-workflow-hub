@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,readFileSync,readdirSync,writeFileSync,unlinkSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,rmSync,readFileSync,readdirSync,writeFileSync,unlinkSync} from 'node:fs';
 import {dirname,join} from 'node:path';
+import {tmpdir} from 'node:os';
 import {developToPR,prepareCodexStage,CodexExecutorAdapter} from '../dist/workflow/codex.js';
 import {executeStage} from '../dist/workflow/contract.js';
 import {managedHarness} from './managed-workflow-fixture.mjs';
 import {connectBuilder} from '../dist/builder.js';
 import {main} from '../dist/client/cli.js';
+import {RevisionReceipt} from '../dist/client/revision.js';
+import {safeData} from '../dist/shared/security.js';
 const options={title:'Synthetic code candidate',body:'Synthetic Provider only. Refs #90'};
 const published=r=>{assert.equal(r.status,'awaiting_review',JSON.stringify(r));assert.equal(r.facts.next_gate.disposition,'pending');return{run:r.facts.run.id,pr:Number(r.facts.outputs[0].id),head:r.facts.outputs[1].id};};
 const writes=h=>({...h.counts});
@@ -157,4 +160,34 @@ for(const fault of ['push','evidence'])test('revision '+fault+' interruption rej
 test('revision checks the clean exact HEAD after each actual command before any Provider write',{timeout:180000},async t=>{
  const {h,first}=await cacheRevision(t),before=providerWrites(h),deps={...h.deps,verify:async command=>{const log=await h.deps.verify(command);writeFileSync(join(h.repo,'code.ts'),'changed during verification\n');return log;}};
  const result=await developToPR(h.client,options,deps);assert.equal(result.status,'BLOCKED');assert.equal(result.code,'exact_head');assert.deepEqual(providerWrites(h),before);assert(!h.events(first.run).some(e=>e.type==='PR_REVISION_LINKED'));
+});
+
+test('bounded Revision Receipt keeps credential/complexity and 256KiB guards without expanding CP JSON',t=>{
+ const directory=mkdtempSync(join(tmpdir(),'awh-receipt-bounds-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));
+ const receipt=new RevisionReceipt(directory,'revision-'+ 'a'.repeat(64)),value={evidence_body:'x'.repeat(35000),verified:{stdout:'x'.repeat(35000)}};
+ assert.throws(()=>safeData(value),/byte limit/);receipt.append(value);const original=readFileSync(receipt.file(0));assert(original.length>64*1024);assert.deepEqual(receipt.phases()[0].value,value);
+ for(const bad of [{token:'forbidden'}, {output:'x'.repeat(70000),token:'forbidden'}, {output:'x'.repeat(257*1024)}, {nest:Array.from({length:10001},()=>null)}])assert.throws(()=>receipt.append(bad));
+ assert.equal(readdirSync(directory).length,1);assert.deepEqual(readFileSync(receipt.file(0)),original);
+ receipt.append({stage:'safe'});assert.equal(receipt.phases().length,2);writeFileSync(receipt.file(0),Buffer.concat([original,Buffer.from(' ')]));assert.throws(()=>receipt.phases(),/conflicting/);
+});
+
+for(const phase of [0,1])test('revision bounded large Receipt resumes only the exact pre-Handoff phase '+phase,{timeout:180000},async t=>{
+ const {h,first,directory}=await cacheRevision(t),session=readFileSync(h.session()),journal=join(dirname(h.session()),first.run+'.delivery.json'),journalBytes=readFileSync(journal),events=h.events(first.run);
+ const deps={...h.deps,verify:async command=>({...await h.deps.verify(command),stdout:command==='pnpm typecheck'?'Synthetic large check output '+ 'x'.repeat(35000):'Synthetic second check'})};
+ const append=RevisionReceipt.prototype.append;
+ RevisionReceipt.prototype.append=function(v){const n=this.phases().length;append.call(this,v);if(n===phase)throw Error('Synthetic interruption before Handoff POST');};
+ try {assert.equal((await developToPR(h.client,options,deps)).status,'BLOCKED');}finally{RevisionReceipt.prototype.append=append;}
+ const receiptFile=join(dirname(h.session()),readdirSync(dirname(h.session())).find(n=>n.endsWith('.revision.0.json'))),bytes=readFileSync(receiptFile);
+ assert(bytes.length>64*1024);assert(bytes.length<256*1024);await h.client.status();
+ if(phase===0){
+  const altered=JSON.parse(bytes);altered.value.journal_sha256='0'.repeat(64);writeFileSync(receiptFile,JSON.stringify(altered,null,2));const before=providerWrites(h);
+  const rejected=await developToPR(h.client,options,deps);assert.equal(rejected.status,'BLOCKED');assert.equal(rejected.code,'revision_receipt');assert.deepEqual(providerWrites(h),before);assert.deepEqual(h.events(first.run),events);
+  // Restore only the deliberately corrupted synthetic fixture; product recovery never rewrites it.
+  writeFileSync(receiptFile,bytes);
+ }
+ const before=providerWrites(h),calls=h.counts.verify,result=await developToPR(h.client,options,deps);assert.equal(h.counts.verify,calls+2);
+ if(phase===0){const next=published(result);assert.equal(next.pr,first.pr);assert.equal(next.run,first.run);assert.equal(h.counts.comment,before.comment+1);assert.equal(h.counts.patch,before.patch+1);assert.equal(h.events(first.run).at(-1).type,'PR_REVISION_LINKED');}
+ else {assert.equal(result.status,'BLOCKED');assert.equal(result.code,'revision_state');assert.deepEqual(providerWrites(h),before);assert.deepEqual(h.events(first.run),events);}
+ assert.equal(h.counts.push,before.push);assert.equal(h.counts.pr,before.pr);assert.deepEqual(readFileSync(receiptFile),bytes);assert.deepEqual(readFileSync(h.session()),session);assert.deepEqual(readFileSync(journal),journalBytes);
+ assert.deepEqual(h.events(first.run).slice(0,events.length),events);assert(readdirSync(directory).filter(n=>n.startsWith('verification-attempt-')).length>=2);
 });
