@@ -1,85 +1,78 @@
-# Windows project enrollment (R1-D)
+# Windows 0.4.8 项目接入与管理员审批
 
-This implementation adds a bounded local initialization flow to the installed Client and Viewer. It does not authorize deployment to an existing CP, production enrollment, business Runs/Events, Provider writes, Deliver, Mac changes or Release. Client/Viewer candidate version: 0.4.8. CP SQLite remains v2; historical ProfilePolicy contracts remain unchanged.
+普通用户入口和状态说明见 [Windows 快速指南](windows-product.md)。本机 Future UI / agent-desktop 的真实 Observe 验收已经完成；用户已反馈当前页面使用正常；新增简化接入与本机管理员按钮仍须独立代码 Review，不能外推业务开发交付全链路通过。R1-D 离线测试、R1-E 实机验收、独立代码 Review、Human UAT 和 Release 是分别记录的结果。
 
-## User flow
+## 一次性安装（管理员）
 
-Open Dashboard → Add project → choose Current machine / a Git directory → confirm the detected repository, branch, Project, Machine and Worktree → choose Observe or trusted development preparation → submit the request → obtain CP-owner approval → confirm connection. The Viewer invokes its pinned installed Client in a hidden child process; it does not manipulate another browser or mouse.
+当前设备已配置，无需重做。新设备的管理员先核验审核源码和实际包摘要，将 Client / Viewer 安装到新的 Git 外目录，保护 machine home 和外置配置。运行前提为 Node.js 24+、Git；npm 用于安装。
 
-Observe accepts local modifications and ordinary business branches. It requires no business Issue, GitHub credential or GitHub write permission. Development preparation selects an existing approved Work Item from the machine's pinned #34 catalog. No approved matching item means BLOCKED; history never fills in authorization. Even development enrollment grants only registration/presence. Dynamic task execution and Deliver remain outside this change and retain the old independent gates.
-
-The new project flow is separate from the retained existing-project/historical diagnosis wizard. An unmatched old-wizard worktree clears its previous project selection and cannot advance using another project's facts.
-
-## One-time installation / machine setup
-
-An administrator installs a verified standalone Client and Viewer outside Git, creates a private machine home outside Git, and supplies the trusted CP endpoint and any public CA. The installed `awh setup` hashes its own entry point; users do not calculate this hash for each project.
+以下全为占位模板，必须由管理员替换；本次收口不执行这些命令。
 
 ```powershell
-awh setup --machine-config C:\AWH\machine.json --home C:\AWH\machine-home --endpoint https://<trusted-private-CP>:8443 --ca C:\AWH\public-ca.pem --project-root E:\projects
+Get-FileHash -Algorithm SHA256 '<Client tarball>'
+Get-FileHash -Algorithm SHA256 '<Viewer tarball>'
+npm install --prefix '<新的外置 Client 目录>' --offline --ignore-scripts --no-audit --no-fund '<Client tarball>'
+npm install --prefix '<新的外置 Viewer 目录>' --offline --ignore-scripts --no-audit --no-fund '<Viewer tarball>'
+& '<Client 安装目录>/node_modules/.bin/awh.cmd' setup --machine-config '<外置 machine.json>' --home '<已建立的私有 machine home>' --endpoint 'https://<受信 CP>:8443' --ca '<公共 CA 文件>' --project-root '<获准的项目根目录>'
 ```
 
-`--policy-trust <absolute-external-anchor>` is optional and only needed for development preparation. The anchor, fixed sibling catalog and approvals must already be operator-approved and OS-protected; setup does not approve them. Home and parent directories must already exist. Setup creates one local Machine identity and refuses to overwrite existing setup. For an already initialized device, an administrator may explicitly choose `--reuse-machine-state <existing-external-state-directory>`: setup reads and preserves that Machine identity, copying only its metadata into the new home; it does not copy or mutate old Sessions/Journals. No identity is discovered or reused implicitly. Using this option on a production device remains an explicit installation/deployment gate.
+setup 自行核对安装入口摘要；普通用户不逐项目计算 SHA。它拒绝覆盖已有 setup。旧设备仅可经明确选择 `--reuse-machine-state <原外置 state 目录>` 复用 Machine 元数据，不能复制或重置业务 Session/Journal。开发准备另需受信 Policy anchor/catalog，setup 不批准这些权限。
 
-Add optional `machine_config_file` to the external Viewer configuration once. An enrollment-enabled local Viewer may begin with `viewer.project_ids: []`; it initially exposes no CP projects. Approved local bindings add only their own Project IDs, survive Viewer restart, and supply the Project/Executor association needed before any Run exists. Without machine setup, the Viewer stays in its previous read-only mode and explains the missing prerequisite.
+管理员在闭合外置 Viewer 配置中设置 `machine_config_file`，限定 Project scope、固定已安装 Client 和 IPv4 loopback 监听。配置字段见仓库原有 `local-viewer.schema.json`。Viewer 只读本机原 v2 DB；该方式不实现远程 SQLite 共享或公网 Dashboard。配置/数据库/credential 的真实路径只在本机私有交接保留。
 
-```json
-{
-  "schema_version": "1.0",
-  "mode": "local_browser_direct",
-  "database": "C:\\AWH\\cp\\runtime.sqlite",
-  "port": 4311,
-  "viewer": { "id": "windows-owner", "project_ids": [] },
-  "local_bindings": [],
-  "machine_config_file": "C:\\AWH\\machine.json"
-}
-```
+## 普通用户申请（后续经授权的新项目）
 
-The Viewer database is still local and read-only. This does not implement remote Dashboard hosting or share SQLite across machines. Directory browsing stays within explicit machine project roots, lists directories only, and rejects redirection. Browser inputs cannot select a Client executable, endpoint, CA, config file, command or permission set.
+点击“添加项目”，选择本机目录，再点“接入项目”。浏览目录只覆盖管理员批准的项目根，不扫描整盘。在确认框核对仓库、分支和目录，默认仅观察；点“确认接入”提交。取消不会提交申请。“高级选项”可选受信开发准备，但必须已有匹配的批准任务，空列表会显示说明并阻止提交。
 
-## CP-owner approval
+这一步只在机器 home 产生专用申请和 credential，不创建 Manifest、CP Project/Executor 或 Run/Event。界面提示等待管理员批准；已启用本机管理员入口时，可点“管理员批准并接入…”打开 Windows 原生确认框。用户不分享 credential。原项目已经接入时不重复申请或批准。
 
-Submitting a request creates a dedicated credential and a non-secret request under the machine home. It creates no Manifest, CP Project, Executor, Run or Event. Dashboard identifies the request file for the CP administrator; users never copy credentials or edit JSON.
+## CP-owner 预览与批准（每个新申请）
 
-On the **CP host**, the administrator previews the fixed approval operation:
+管理员在 **CP 宿主机** 对专用申请做预览，核对仓库、机器、执行器、模式及单 Project / 单 Executor scope，再确认：
 
 ```powershell
-node <CP-install>\dist\control-plane-cli.js approve-project --request <external-request.json> --database <existing-v2.sqlite> --config <CP-owner-trusted.json>
+node '<CP 安装目录>/dist/control-plane-cli.js' approve-project --request '<外置申请文件>' --database '<已有 v2 SQLite>' --config '<现有 CP-owner 信任配置>'
+# 预览核对无误后，由管理员明确执行：
+node '<CP 安装目录>/dist/control-plane-cli.js' approve-project --request '<同一外置申请文件>' --database '<同一已有 v2 SQLite>' --config '<同一信任配置>' --confirm
 ```
 
-After reviewing repository, Machine, Executor, mode and exact scope, repeat with `--confirm`. Development preparation additionally requires `--policy-trust <CP-owner-approved-anchor>` and the exact requested Work Item/version. There is no browser/network administrator endpoint or generic Operator platform.
+授权追加专用、不可变的 enrollment grant 和单仓库/执行器 Client scope；预览及批准命令不写 SQLite。已更新的 CP 验证管理员受控的新信任快照，所以批准无需重启 CP。不得借用旧 Client scope、放宽未知仓库或通过审批激活业务策略。
 
-Approval resolves an existing Project by canonical repository identity, or assigns an owner-qualified repository-derived ID. Local paths never become Project IDs. Multiple retained Project identities for one repository are BLOCKED for owner resolution. Existing Projects and immutable legacy Profile versions are preserved. New Projects use an observation Profile reference; the separately approved business Profile/Work Item stays development preparation, not a production workflow policy.
+本机按钮批准后自动继续接入；原 CLI 审批方式批准后，用户再点击“完成接入”并确认。Client 核对 grant/request/专用 credential 后，保留冲突身份、生成缺失的最小 Manifest 和外置项目配置、登记并发送心跳。Viewer 为新增项目启动 Resident。只有真实 Executor 在线才是接入可用；部分失败不能写 PASS。重复完成/审批有幂等边界，但本次体验无需重复执行。
 
-The approval command only appends a single-project, single-executor Client scope and an immutable enrollment record to the existing external trust configuration. Existing Client scopes cannot be expanded or borrowed. It uses an exclusive local approval lock and an atomic validated file replacement; it makes no SQLite writes. An updated CP revalidates this owner-controlled snapshot before authenticating requests, so approval does not require restarting CP. Legacy workflow policies cannot change through this activation path. Invalid snapshots fail closed. Deploying the updated CP binary itself remains a separate production authorization.
+## Doctor 是诊断，不是修复或执行授权
 
-Only then may Client complete: verify the returned grant against its dedicated credential/request, preserve conflicting Manifest/config, generate missing files, register Project/Executor and heartbeat. A recoverable partial failure is not online PASS. Repeating approval or completion is idempotent. Viewer starts only its new installed Resident; normal Viewer shutdown asks that Resident to stop, preserving other processes.
-
-## CLI and Doctor use the same flow
+已有项目：填入原工作树，点“接入项目”或“重新检查接入”核对后取消确认框，在“详情与诊断”点击“Doctor 检查”。默认本地检查只读；显式 CLI `--probe-cp` 才增加受信 HTTPS enrollment GET，且不发送心跳。两种检查范围不同。
 
 ```powershell
-awh init --machine-config <machine.json> --directory <Git-root>
-awh init --machine-config <machine.json> --directory <Git-root> --mode observe --confirm
-# After CP-owner approval:
-awh init --machine-config <machine.json> --directory <Git-root> --complete --confirm
-awh doctor --machine-config <machine.json> --directory <Git-root> --json
-awh doctor --machine-config <machine.json> --directory <Git-root> --repair
-awh doctor --machine-config <machine.json> --directory <Git-root> --repair --confirm
+& '<已安装 Client>/node_modules/.bin/awh.cmd' doctor --machine-config '<既有外置 machine.json>' --directory '<原 Git root>' --json
+& '<已安装 Client>/node_modules/.bin/awh.cmd' doctor --machine-config '<既有外置 machine.json>' --directory '<原 Git root>' --json --probe-cp
 ```
 
-Preview and ordinary Doctor are read-only. `--probe-cp` adds only the explicit authenticated GET of the enrollment record. Repair reuses completion and can restore missing Manifest/config; it never overwrites a mismatching identity, accepts an unknown CA, changes a credential/endpoint, clears a Session/Journal, retries pending Events, or switches branches. A development branch mismatch blocks development readiness while retaining Observe diagnostics. Retained history is shown as requiring separate inspection, not current-task approval or a new failure.
+当前已核验原件：agent-desktop CP probe 是 5 passed / history not_checked，整体 not_checked、exit 0；CLI 只有 blocked/错误才返回 exit 2。Future UI 旧业务 Doctor dirty/branch/journal blocked、exit 2 与 Observe online 可以同时成立。
 
-CLI completion registers and sends one heartbeat; use the existing `awh --config <generated-client.json> resident start` for continuing presence. Dashboard completion starts this foreground Resident on the user's behalf, bounded by the Viewer lifecycle. There is no automatic task execution or OS startup installation.
+“预览 Doctor 修复”先显示计划，再通过独立确认框“确认修复”；修复可能登记和发送心跳，本次人工体验只诊断，不确认修复。修复也不覆盖冲突身份、不改 endpoint/CA、清除 Journal、重试业务 Event 或切分支。
 
-## Reader, identity and session behavior
+## 身份、在线与会话
 
-Project is global; Machine is the installed device identity; Worktree is a local binding; Executor/Client are dedicated per binding. The same repository on two worktrees or machines reuses its CP Project and isolates Executor credentials/state namespaces. CP does not inspect the submitted machine's local path. Doctor and directory inspection execute on the Client machine. Remote machine transport and live Mac acceptance are still unimplemented/unverified.
+Project 按仓库全局关联；Machine 是已安装设备；Worktree 是本机绑定；Executor/Client scope 是每个绑定的专用身份。新 Observe Executor 无 Run 也能按 Project 筛选显示。未来同仓库多个机器/工作树要保留独立身份空间；当前 Windows 同机验证不外推跨机展示或 Mac 验收。
 
-Scoped approval bindings make new Executors visible without synthetic Runs. Optional `project_ids` and `worktrees` in Executor DTOs support project filters and local path display, without exposing Client owners, token hashes or config/credential paths. Online/offline is the server's Executor registration/heartbeat TTL; it is not proof that the whole physical Machine is reachable, nor a Project business-run status.
+会话期限仍为一小时。0.4.8 顶部“重新进入 Dashboard”做显式同源文档导航，可获得有效本机会话，不重启 Viewer。API 或跨源访问不能自行引导会话。R1-E 证据证明自然期限之后新浏览器资源/API 401 与显式再进入恢复；旧 cookie 拒绝的完整字节闭环和到期原页面同一按钮直接点击未保留，不能补称已验证。
 
-Viewer API cookies still expire after one hour. Explicit same-origin document navigation through “重新进入 Dashboard” renews an expired local session and invalidates the old cookie, without restarting Viewer. APIs and foreign origins cannot bootstrap a session. This is renewable local use, not an uninterrupted 24-hour live-session claim.
+## 当前停止点
 
-## Validation and remaining gates
+Grant 只有 register/presence，不授权业务 Run/Event、Provider/Deliver 或 GitHub 开发写入。已安装 Windows 可人工体验，用户报告页面可用；本次候选独立 Review 尚待完成。Mac、跨机器、Release、Ready/Merge 和新测试仓库须后续独立授权。现有 #59/#60 的已审查 HEAD/Draft 保留。
 
-Use existing tests, not a new test framework: enrollment tests cover installed Client/Viewer, CP approval/restart, run-free presence, business-write denial, two-worktree identity, development preparation, repair/conflicts, session renewal and headless UI. Targeted existing CP, startup, TLS, Client/Doctor, Viewer and Builder checks retain compatibility. Temporary resources are stopped and isolated; no mock result counts as a real second-project PASS.
+## 可选本机管理员按钮（一次性配置）
 
-Real agent-desktop enrollment remains a separate Human Live Gate with exact file/identity/heartbeat writes and Future UI reconciliation. Independent exact-head Review, deployment, Ready, merge and Release remain separate gates. A completed isolated installation test does not satisfy them.
+标准 Viewer 入口仍按原配置运行。管理员仅在 Windows CP 宿主机上显式启用旁置入口：
+
+```powershell
+node '<Viewer 安装目录>/dist/dashboard-owner-cli.js' --config '<原外置 Viewer 配置>' --owner-config '<受保护的外置 owner 配置>'
+```
+
+owner 配置的闭合字段为 schema_version=1.0、cp_entry、cp_entry_sha256、trusted_config_file、database、owner_sid、confirmation_script、confirmation_script_sha256；可选 policy_trust_file。所有文件均在 Git 外，database 必须与 Viewer 相同。管理员核验 CP 来源和两个入口摘要，并把 owner_sid 绑定到获准的 Windows 操作人；确认脚本位于 Viewer 安装的 dist/dashboard/owner-confirm.ps1。不得从项目、Issue 或浏览器接收这些配置。
+
+这不是 Windows UAC 提权或远程管理员登录。原生确认脚本核对当前 Windows 身份，回车默认取消，三分钟超时取消；取消不写审批。每次操作先预览原 CP approve-project，再明确确认；确认前后核对申请与入口摘要。浏览器只传已选本机目录，不能传命令、权限或凭据；已有同源与本机会话保护继续生效。
+
+旁置入口和中文确认脚本随 Viewer 候选打包；已有 0.4.8 原包不会自动获得这些文件。当前本机覆盖不等于正式新 Release。安装到新机器仍需核验独立审查和候选包摘要。

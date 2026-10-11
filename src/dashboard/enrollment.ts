@@ -6,7 +6,7 @@ import { CLIENT_PACKAGE, CLIENT_VERSION } from '../client/version.js';
 import { fail, safeData } from '../shared/security.js';
 import type { IncomingMessage } from 'node:http';
 
-export function createEnrollmentService(machinePath: string) {
+export function createEnrollmentService(machinePath: string, ownerApprove?: (directory:string)=>Promise<Record<string,unknown>>) {
   let busy = false;
   const residents = new Map<string,{child:ChildProcess;config_file:string;worktree:string}>();
   const config = () => {
@@ -40,12 +40,14 @@ export function createEnrollmentService(machinePath: string) {
     if (busy) fail(409,'enrollment_busy','Wait for the current local enrollment operation');
     busy = true;
     try {
-      if (!['browse','inspect','request','connect','doctor','repair','plan','policies','bindings'].includes(action) || Object.keys(data).some(k => !['directory','mode','work_item'].includes(k))) fail(400,'enrollment_input','Invalid local enrollment action');
+      if (!['browse','inspect','request','connect','doctor','repair','plan','policies','bindings','owner-capabilities','owner-approve'].includes(action) || Object.keys(data).some(k => !['directory','mode','work_item'].includes(k))) fail(400,'enrollment_input','Invalid local enrollment action');
+      if (action === 'owner-capabilities') {if(Object.keys(data).length)fail(400,'enrollment_input','Owner capabilities accept no overrides');return {enabled:!!ownerApprove,confirmation:'native_windows_owner'};}
       if (action === 'bindings') {if (Object.keys(data).length) fail(400,'enrollment_input','Bindings accept no override');return {items:enrollmentBindings(machinePath).map(({config_file:_config,client_id:_client,...binding}) => binding)};}
       if (data.directory !== undefined && (typeof data.directory !== 'string' || data.directory.length > 1024)) fail(400,'directory','Invalid directory selection');
       const directory = data.directory as string | undefined;
       if (action !== 'browse' && !directory) fail(400,'directory','Choose a local Git directory');
       if (action !== 'request' && (data.mode !== undefined || data.work_item !== undefined)) fail(400,'enrollment_input','Capability selection belongs to the request step');
+      if(action === 'owner-approve') {if(Object.keys(data).sort().join(',') !== 'directory')fail(400,'enrollment_input','Owner approval accepts only a selected local directory');if(!ownerApprove)fail(403,'owner_unavailable','Local owner approval is not configured');return await ownerApprove(directory!);}
       const common = ['--machine-config',machinePath,...(directory ? ['--directory',directory] : [])];
       if (action === 'browse') return run(['init',...common,'--browse']);
       if (action === 'inspect') return run(['init',...common]);
