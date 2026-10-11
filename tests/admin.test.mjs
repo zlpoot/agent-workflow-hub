@@ -138,20 +138,20 @@ test('proposal comparison, orphan diagnosis and inspect are read-only',t=>{
  writeFileSync(join(f.root,'orphan.policy.json'),'{}',{mode:0o600});assert.equal(diagnoseRegistry().status,'BLOCKED');assert(existsSync(join(f.root,'orphan.policy.json')));
 });
 function fakeBuilder(f,overrides={}) {
- const root=resolve('.'),{privateKey}=generateKeyPairSync('rsa',{modulusLength:2048}),task=f.task,app=f.policy.installation;let keyReads=0,requests=0,writeTokens=0,head=overrides.head??'a'.repeat(40),remote=null,commentBody='',mutations=0;const tokenRequests=[];
+ const root=resolve('.'),{privateKey}=generateKeyPairSync('rsa',{modulusLength:2048}),task=f.task,app=f.policy.installation;let keyReads=0,requests=0,writeTokens=0,head=overrides.head??'a'.repeat(40),remote=overrides.remote??null,commentBody='',mutations=0;const tokenRequests=[],transports=[];
  const response=value=>new Response(JSON.stringify(value));
  const pr=()=>({number:5,user:{login:app.app_slug+'[bot]',type:'Bot'},head:{sha:head,ref:task.branch,repo:{full_name:task.repository}},base:{sha:task.base_sha,ref:'main',repo:{full_name:task.repository}},draft:true,state:'open',node_id:'PR_synthetic'});
  const deps={env:{AWH_GITHUB_APP_ID:String(app.app_id),AWH_GITHUB_APP_PRIVATE_KEY_PATH:join(tmpdir(),'awh-ephemeral.pem')},cwd:()=>root,realpath:async p=>resolve(p),
   stat:async p=>{if(resolve(p)===join(root,'.git'))return {isDirectory:()=>true,isFile:()=>false};throw Object.assign(Error(),{code:'ENOENT'});},
   read:async()=>{keyReads++;return privateKey.export({type:'pkcs8',format:'pem'});},
-  spawn:(_file,args)=>{let stdout='';if(args[0]==='rev-parse')stdout=args[1]==='HEAD'?head:root;else if(args[0]==='config'&&!args.includes('--name-only'))stdout='https://github.com/'+task.repository+'.git';else if(args[0]==='branch')stdout=task.branch;else if(args[0]==='diff')stdout='README.md\0';else if(args.includes('push')&&!args.includes('--dry-run'))remote=head;return {status:0,stdout,stderr:''};},
+  spawn:(_file,args)=>{let stdout='';if(args.includes('ls-remote')||args.includes('push'))transports.push([...args]);if(args[0]==='rev-parse')stdout=args[1]==='HEAD'?head:root;else if(args[0]==='config'&&!args.includes('--name-only'))stdout='https://github.com/'+task.repository+'.git';else if(args[0]==='branch')stdout=task.branch;else if(args[0]==='diff')stdout='README.md\0';else if(args.includes('push')&&!args.includes('--dry-run')){remote=head;if(overrides.uncertainPush)return {status:1,stdout:'',stderr:'Synthetic response lost after remote accepted Push'};}return {status:0,stdout,stderr:''};},
   fetch:async(url,options)=>{requests++;let data;const body=options.body?JSON.parse(options.body):null;
    if(url.endsWith('/app'))data={id:app.app_id,slug:app.app_slug};
    else if(url.endsWith('/installation'))data={id:app.installation_id,app_id:app.app_id,account:{login:app.account_login},repository_selection:'selected',suspended_at:null,permissions:{contents:'write',issues:'write',pull_requests:'write',metadata:'read'}};
    else if(url.endsWith('/access_tokens')){tokenRequests.push(body);if(Object.values(body.permissions).includes('write'))writeTokens++;data={token:'synthetic-secret-'+requests,expires_at:new Date(Date.now()+3600000).toISOString(),permissions:{...body.permissions,metadata:'read'},repositories:(body.repositories?[task.repository]:app.selected_repository_sets[0]).map(full_name=>({full_name}))};}
    else if(url.includes('/installation/repositories'))data={total_count:app.selected_repository_sets[0].length,repositories:app.selected_repository_sets[0].map(full_name=>({full_name}))};
    else if(url.endsWith('/git/ref/heads/main'))data={object:{sha:overrides.base??task.base_sha}};
-   else if(url.includes('/git/ref/heads/codex/')){if(remote===null)return new Response('{}',{status:404});data={ref:'refs/heads/'+task.branch,url,object:{type:'commit',sha:remote,url:'https://api.github.com/repos/'+task.repository+'/git/commits/'+remote}};}
+   else if(url.includes('/git/ref/heads/codex/')){if(remote===null)return new Response('{}',{status:404});data={ref:'refs/heads/'+task.branch,url:url.replace('/git/ref/','/git/refs/'),object:{type:'commit',sha:remote,url:'https://api.github.com/repos/'+task.repository+'/git/commits/'+remote}};}
    else if(url.endsWith('/issues/'+task.issue))data={number:task.issue,state:'open',html_url:'https://github.com/'+task.repository+'/issues/'+task.issue};
    else if(url.includes('/compare/'))data={status:'ahead',files:[{filename:'README.md',status:'modified'}]};
    else if(url.endsWith('/pulls')||url.endsWith('/pulls/5')){if(options.method!=='GET'){mutations++;if(overrides.uncertainPR)throw Error('Response lost after Provider mutation');}data=pr();}
@@ -159,8 +159,39 @@ function fakeBuilder(f,overrides={}) {
    else throw Error('Unexpected synthetic request '+url);
    return response(data);
   }};
- return {deps,counts:()=>({keyReads,requests,writeTokens,mutations}),tokenRequests,setHead:v=>head=v};
+ return {deps,counts:()=>({keyReads,requests,writeTokens,mutations}),tokenRequests,transports,setHead:v=>head=v,remoteHead:()=>remote,setRemote:v=>remote=v};
 }
+
+test('managed repeat Push rejects same-instance H1 and fresh H1/H2 connections before write tokens or transport',async t=>{
+ const f=fixture(t);f.register();f.grant();assert.equal(loadTrustedPolicy().profiles[0].workflows[0].branch_mode,'fixed');assert.equal(managedContext().proposed.task.head_sha,null);
+ const h1='a'.repeat(40),h2='c'.repeat(40),first=fakeBuilder(f),builder=await connectBuilder(first.deps);
+ assert.equal(builder.preflight().task_binding,undefined);await builder.push();await builder.createPR('Draft','H1 candidate');assert.equal(first.remoteHead(),h1);
+ const writes=first.counts().writeTokens,transports=first.transports.length;
+ await assert.rejects(builder.push(),/already consumed/);assert.equal(first.counts().writeTokens,writes);assert.equal(first.transports.length,transports);assert.equal(first.remoteHead(),h1);
+ for(const head of [h1,h2]){
+  const fresh=fakeBuilder(f,{head,remote:first.remoteHead()}),next=await connectBuilder(fresh.deps);assert.equal(next.preflight().administrator_binding.head_sha,head);assert.equal(next.preflight().administrator_binding.authorization_version,'task-v1');
+  await assert.rejects(next.push(),/already consumed/);assert.equal(fresh.counts().writeTokens,0);assert.deepEqual(fresh.transports,[]);assert.equal(fresh.remoteHead(),h1);
+ }
+});
+
+test('managed repeat Push after a lost successful Push ACK permits only read-only ref reconciliation',async t=>{
+ const f=fixture(t);f.register();f.grant();const first=fakeBuilder(f,{uncertainPush:true}),builder=await connectBuilder(first.deps);
+ await assert.rejects(builder.push(),/App HTTPS Git push failed/);assert.equal(first.remoteHead(),'a'.repeat(40));
+ const writes=first.counts().writeTokens,transports=first.transports.length;await assert.rejects(builder.push(),/Journal reconciliation/);assert.equal(first.counts().writeTokens,writes);assert.equal(first.transports.length,transports);
+ const fresh=fakeBuilder(f,{head:'c'.repeat(40),remote:first.remoteHead()});await assert.rejects((await connectBuilder(fresh.deps)).push(),/already consumed/);assert.equal(fresh.counts().writeTokens,0);assert.deepEqual(fresh.transports,[]);assert.equal(fresh.remoteHead(),'a'.repeat(40));
+});
+
+for(const failure of ['network','malformed','foreign-head'])test('managed repeat Push fail-closed before write mint: '+failure,async t=>{
+ const f=fixture(t);f.register();f.grant();const fake=fakeBuilder(f,{remote:failure==='foreign-head'?'d'.repeat(40):null}),fetch=fake.deps.fetch;
+ fake.deps.fetch=async(url,options)=>{if(url.includes('/git/ref/heads/codex/')&&failure!=='foreign-head'){if(failure==='network')throw Error('Synthetic ref observation unavailable');return new Response(JSON.stringify({object:{sha:'invalid'}}));}return fetch(url,options);};
+ const builder=await connectBuilder(fake.deps);await assert.rejects(builder.push(),failure==='foreign-head'?/already consumed/:/fixed feature ref/i);assert.equal(fake.counts().writeTokens,0);assert.deepEqual(fake.transports,[]);assert.equal(fake.remoteHead(),failure==='foreign-head'?'d'.repeat(40):null);
+});
+
+test('managed repeat Push retains the post-dry-run ref race gate',async t=>{
+ const f=fixture(t);f.register();f.grant();const fake=fakeBuilder(f),spawn=fake.deps.spawn;
+ fake.deps.spawn=(file,args,options)=>{const result=spawn(file,args,options);if(args.includes('--dry-run'))fake.setRemote('d'.repeat(40));return result;};
+ await assert.rejects((await connectBuilder(fake.deps)).push(),/ref changed during receive-pack dry-run/);assert.equal(fake.counts().writeTokens,1);assert.equal(fake.transports.filter(args=>args.includes('push')&&!args.includes('--dry-run')).length,0);assert.equal(fake.remoteHead(),'d'.repeat(40));
+});
 test('existing Builder binds the actual final clean HEAD, uses minimum tokens, records identity and fails closed on changed candidate',async t=>{
  const f=fixture(t);f.register();f.grant();const fake=fakeBuilder(f),builder=await connectBuilder(fake.deps),binding=builder.preflight().administrator_binding;
  assert.equal(binding.head_sha,'a'.repeat(40));assert.equal(binding.authorization_version,'task-v1');assert.equal(fake.counts().writeTokens,0);

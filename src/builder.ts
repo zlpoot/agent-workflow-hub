@@ -499,6 +499,11 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       if (mode !== 'deliver') fail('Lifecycle observation cannot push');
       live();
       authorizeOperation('push');
+      // Managed Work Items materialize as fixed workflows without a TaskBinding.
+      // Inspect with the read-only token before minting writes: a present ref
+      // consumes this first-publication grant, including after a lost Push ACK.
+      const managedBefore = managed ? await readFeatureRefState() : null;
+      if (managed && managedBefore !== null) fail('Task branch is already consumed; provider writes cannot be repeated');
       const pushToken = await operationToken('push');
       const inspectEnv = gitEnvironment(d.env, root);
       const env = { ...inspectEnv };
@@ -582,7 +587,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
           category, stage, diagnostic.reasons.length ? diagnostic.reasons : undefined);
       };
       const url = `https://github.com/${REPO}.git`;
-      const before = await readFeatureRefState();
+      const before = managed ? managedBefore : await readFeatureRefState();
       if (binding && before !== null) fail('Task branch is already consumed; provider writes cannot be repeated');
       live();
       transport('authenticated_read_probe', ['ls-remote', '--exit-code', url, `refs/heads/${profile.base}`]);
