@@ -227,7 +227,7 @@ test('local package installs offline with bundled runtime and real bin; full CLI
   const installed = spawnSync(process.execPath,[npmEntry(),'install','--prefix',prefix,'--offline','--ignore-scripts','--no-audit','--no-fund',artifact.artifact],{cwd:prefix,env:npmEnv(join(h.base,'npm-cache')),encoding:'utf8',timeout:60000,windowsHide:true});
   assert.equal(installed.status,0,'Independent offline installation failed');
   const packageRoot = join(prefix,'node_modules/@zlpoot/awh-client'), cli = join(packageRoot,'dist/client/cli.js');
-  assert.equal(JSON.parse(readFileSync(join(packageRoot,'package.json'))).version,CLIENT_VERSION); assert(artifact.files.includes('dist/builder.js')); assert(!artifact.files.some(f => /builder-cli|control-plane\/(store|server)\.js/.test(f)));
+  assert.equal(JSON.parse(readFileSync(join(packageRoot,'package.json'))).version,CLIENT_VERSION); assert(artifact.files.includes('dist/builder.js')); assert(artifact.files.includes('dist/admin/registry.js')); assert(!artifact.files.some(f => /admin-cli|admin\/operations|builder-cli|control-plane\/(store|server)\.js/.test(f)));
   const shim = join(prefix,'node_modules/.bin/awh' + (process.platform === 'win32' ? '.cmd' : ''));
   const bin = process.platform === 'win32' ? spawnSync(process.env.ComSpec ?? 'cmd.exe',['/d','/s','/c',`""${shim}" --version"`],{cwd:h.repo,encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true}) : spawnSync(shim,['--version'],{cwd:h.repo,encoding:'utf8'});
   assert.equal(bin.status,0,bin.stderr); assert.equal(JSON.parse(bin.stdout).version,CLIENT_VERSION);
