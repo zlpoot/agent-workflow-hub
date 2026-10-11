@@ -56,7 +56,7 @@ export function loadTrustedPolicy(): ApprovedPolicy {
   } catch { return deny(); }
 }
 /** Structural validation of a proposal never confers administrator authority. */
-export function validateBuilderPolicy(v: any): ApprovedPolicy {
+export function validateBuilderPolicy(v: any, projectTemplate = false): ApprovedPolicy {
   try {
     safeData(v);
     if (!object(v, ['schema_version','kind','default_selection','installation','profiles']) || v.schema_version !== '1.0' || v.kind !== 'builder_policy' ||
@@ -75,7 +75,7 @@ export function validateBuilderPolicy(v: any): ApprovedPolicy {
           object(w.work_item, ['repo','issue']) && repo(w.work_item.repo) && (w.branch_mode === 'fixed' ? positive(w.work_item.issue) : w.work_item.issue === 0 && w.work_item.repo === p.repository) &&
           list(w.verification_commands, c => typeof c === 'string' && /^[\x20-\x7e]{1,512}$/.test(c) && !/[;&|`$<>\r\n]/.test(c), 32) &&
           (w.bootstrap_paths === null || list(w.bootstrap_paths, path => typeof path === 'string' && /^[A-Za-z0-9_.\/-]{1,256}$/.test(path) && !path.startsWith('/') && !path.split('/').some((s: string) => !s || s === '.' || s === '..'))) &&
-          (w.branch_mode === 'fixed' || w.bootstrap_paths !== null) &&
+          (w.branch_mode === 'fixed' || projectTemplate || w.bootstrap_paths !== null) &&
           object(w.executor_restrictions, ['executor_ids','machine_ids']) && list(w.executor_restrictions.executor_ids,id) && list(w.executor_restrictions.machine_ids,id))) return false;
       return new Set(p.workflows.map((w: Workflow) => w.id)).size === p.workflows.length;
     }, 64) || new Set(v.profiles.map((p: ProjectProfile) => p.id)).size !== v.profiles.length ||

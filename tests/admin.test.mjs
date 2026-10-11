@@ -53,6 +53,11 @@ test('project versions are immutable; work items never float to newer permission
  const path=f.prepare('task-v2',f.task,'project-v2');f.pin(path);approveProposal(path);f.activate('task-v2');assert.deepEqual(loadTrustedPolicy().profiles[0].workflows[0].verification_commands,['pnpm lint']);
  assert.equal(approveProposal(path).status,'ALREADY_COMMITTED');
 });
+test('a reusable general code template explicitly allows repository changes; legacy unbounded prefix Tasks stay rejected',t=>{
+ const f=fixture(t),general=structuredClone(f.project);general.builder_policy.profiles[0].workflows[0].bootstrap_paths=null;f.register('project-v1',general);f.grant();
+ const view=loadTrustedPolicy();assert.equal(view.profiles[0].workflows[0].branch_mode,'fixed');assert.equal(view.profiles[0].workflows[0].bootstrap_paths,null);
+ const legacy=f.file('unsafe-legacy.json');writeFileSync(legacy,encode(general.builder_policy),{mode:0o600});for(const key of ['AWH_ADMIN_TRUST_FILE','AWH_ADMIN_TRUST_SHA256','AWH_ADMIN_VERSION'])delete process.env[key];process.env.AWH_BUILDER_POLICY_FILE=legacy;process.env.AWH_BUILDER_POLICY_SHA256=digest(readFileSync(legacy));assert.throws(()=>loadTrustedPolicy(),/approved Builder policy/);
+});
 test('wrong repository, branch, machine, executor, future head schema and invalid stages are refused',t=>{
  const f=fixture(t);f.register();
  for(const changed of [{repository:'example-org/elsewhere'},{branch:'codex/task-91'},{machine_id:'wrong'},{executor_id:'wrong'},{head_sha:'not-produced'},{stages:['review']},{stages:['observe'],provider_operations:['push']}])

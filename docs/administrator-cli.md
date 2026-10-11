@@ -57,7 +57,7 @@ node $admin diagnose
 }
 ~~~
 
-占位必须替换成对象，不是字符串。issue_prefix 可连续复用：codex/task- + Issue 123 得到 codex/task-123，必须有路径 allowlist。fixed 仅绑定原分支/Issue，例如一次性 #65。只接受现有有界 pnpm script、node --test tests/<files>.mjs、git diff --check origin/<base>...HEAD，不执行任意 shell/API。
+占位必须替换成对象，不是字符串。issue_prefix 可连续复用：codex/task- + Issue 123 得到 codex/task-123。项目模板的 bootstrap_paths 可为文件 allowlist，或由管理员明确设为 null 允许一般仓库代码变更；运行时一定收窄为精确 fixed Work Item。旧 legacy issue_prefix Task 仍要求 docs/path allowlist，不因此扩大。fixed 模板只绑定原分支/Issue，例如一次性 #65。只接受现有有界 pnpm script、node --test tests/<files>.mjs、git diff --check origin/<base>...HEAD，不执行任意 shell/API。
 
 ~~~powershell
 node $admin register --policy C:\AWH-Admin\project.proposed.json --version project-v1 --out C:\AWH-Admin\project-v1.proposal.json
@@ -105,6 +105,8 @@ node $admin diagnose --version issue123-v1
 撤销任务只影响它，撤销项目使其所有任务的后续操作拒绝。旧版本、批准来源/摘要、历史 state、Run/Event/Journal/Receipt 保留。inspect 展示 scope、版本、审批人/时间、digest 与撤销/过期状态，不更改历史。
 
 approve 以排他锁写 immutable transaction/proposal/receipt/policy 与历史快照，fsync 后同目录原子 rename 切换 state.json，再读回。准确重复返回 ALREADY_COMMITTED；冲突版本/receipt/expected state 拒绝。
+
+第一版每个 registry 最多保留 128 次版本/撤销操作，单文件最大 64 KiB，selected set 最多 128 仓库。达到限制会拒绝，管理员另行规划受保护的新 registry 并保留旧完整历史；不会自动重置或迁移正在运行的任务。
 
 进程中断后先 diagnose，保留 lock/pending/orphan 原件。管理员用同一提议与独立 receipt pin：
 

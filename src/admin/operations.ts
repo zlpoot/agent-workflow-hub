@@ -11,7 +11,9 @@ export const verificationCommand = (command: string): boolean =>
   /^node --test(?: tests\/[A-Za-z0-9_.\/-]+\.mjs)+$/.test(command) && !command.includes('..') ||
   /^git diff --check origin\/[A-Za-z0-9_./-]+\.\.\.HEAD$/.test(command);
 export function checkedProject(value: unknown): ProjectPolicy {
-  const project = projectPolicy(value), policy = validateBuilderPolicy(project.builder_policy);
+  // Only an independently approved reusable template may explicitly allow all repository code paths.
+  // It is materialized to an exact fixed Work Item before the existing Builder consumes it.
+  const project = projectPolicy(value), policy = validateBuilderPolicy(project.builder_policy,true);
   if (policy.profiles.length !== 1 || policy.profiles.some(profile => profile.workflows.some(workflow =>
     !workflow.verification_commands.every(verificationCommand)))) deny('project_scope');
   return project;
