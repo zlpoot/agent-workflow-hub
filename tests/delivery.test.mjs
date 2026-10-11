@@ -96,6 +96,17 @@ for(const profile of ['project-beta','project-alpha','core'])test(`fixed ${profi
   await assert.rejects(h.client.finish(),e=>e.code==='review_gate');await assert.rejects(deliver(h.client,options,h.deps),e=>e.code==='delivery_state');assert.equal(h.counts.push,1);
 });
 test('hold Draft publishes confirmed Handoff but leaves acceptance and Review pending',async t=>{const h=await harness(t),r=await deliver(h.client,{...options,holdDraft:true},h.deps);assert.equal(h.counts.ready,0);assert(h.isDraft());assert.equal(h.events(r.run_id).at(-1).payload.extensions.builder_milestone,'waiting_for_human_acceptance');});
+test('managed candidate binding enters the existing Journal and Evidence; confirmed Draft Handoff preserves history',async t=>{
+  const h=await harness(t),binding={authorization_version:'synthetic-task-v1',policy_version:'synthetic-project-v1',repository:h.policy.repository,
+    issue:8,branch:h.policy.branch.ref,base_sha:'1'.repeat(40),head_sha:h.sha,executor_id:'delivery-executor',machine_id:'fixture-machine',
+    stages:['develop','deliver'],provider_operations:['push','draft_pr','evidence','handoff']};
+  h.builder.preflight=()=>({actor:'test-builder[bot]',administrator_binding:binding});
+  const r=await deliver(h.client,{...options,holdDraft:true},h.deps),journal=JSON.parse(readFileSync(join(dirname(h.sessionPath()),r.run_id+'.delivery.json')));
+  assert.deepEqual(journal.refs.administrator_binding,binding);assert.equal(journal.source_sha,h.sha);assert(h.isDraft());assert.equal(h.counts.ready,0);
+  const evidence=[...h.comments.values()].find(body=>body.startsWith('Builder evidence\n'));assert(evidence.includes('synthetic-task-v1'));assert(evidence.includes(h.sha));assert(!evidence.includes('AWH_ADMIN_TRUST'));
+  const handoff=JSON.parse(readFileSync(join(h.repo,'.handoff',r.run_id,'handoff.confirmed.json')));assert.equal(handoff.candidate.head_sha,h.sha);assert.equal(handoff.handoff.publication,'confirmed');
+  const before=readFileSync(join(dirname(h.sessionPath()),r.run_id+'.delivery.json'));await assert.rejects(deliver(h.client,options,h.deps));assert.equal(h.counts.push,1);assert.deepEqual(readFileSync(join(dirname(h.sessionPath()),r.run_id+'.delivery.json')),before);
+});
 for(const kind of ['lost','malformed'])test(`post-push ${kind} ACK retains identical Event plus failure; explicit retry never repeats GitHub`,async t=>{
   const h=await harness(t);h.fault('GITHUB_PUSH_COMPLETED',kind);let error;try{await deliver(h.client,options,h.deps);}catch(e){error=e;}
   assert(error instanceof DeliveryError);assert.equal(error.stage,'push');assert.equal(h.counts.push,1);assert.equal(h.counts.pr,0);

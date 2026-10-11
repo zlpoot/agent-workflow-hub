@@ -1,106 +1,122 @@
 # 本机管理员授权 CLI（M1-B0）
 
-此入口管理仓库外的版本化 Builder Profile / Workflow / 单项 Work Item，不调用 GitHub、不改 CP、不读取 PEM，也不作 Review。`pnpm admin --help` 或 `node dist/admin-cli.js --help` 显示完整参数。新增任务沿用模板与这套流程，不需要修改源码仓库名单。
+入口：node dist/admin-cli.js（或 pnpm admin）。完整参数见 --help。该入口不调用 GitHub、不读取 App PEM、不写 CP、不承担 Review。
 
-## 信任来源与边界
+## 两层授权
 
-管理员先以独立 OS 权限配置受保护的 registry 目录与 `admin-trust.json`，把文件绝对路径和**独立批准的 SHA-256**放进受保护 launcher：
+**Project / Workflow Policy** 是一个仓库的可复用不可变版本：既有 builder_policy、App/Installation/完整 selected set、分支规则、检查命令、路径范围、Executor/Machine 约束、允许阶段与权限上限。一个 Project 可含多个 Workflow；新增仓库登记新版本，无源码名单。
 
-```json
+**Work Item Authorization** 引用已批准的 Project 版本，绑定 Issue、Workflow、分支、准确 base、执行身份、有效期、阶段、Provider 操作。未经批准的 JSON 模板不能产生有效 Work Item。旧任务不自动迁移到新策略。
+
+Observe、Develop、Deliver 独立选择。任务默认仅 Develop、零 Provider 操作。Deliver 仅支持 push、draft_pr、evidence、handoff；不包含 Ready、Review、Merge、Release、Tag、Issue close、生产部署。
+
+head_sha 默认 null：开发前没有最终 HEAD，不能伪造。交付时由原 Builder 从真实 Git 检查干净分支/HEAD 并固定候选；此后变化必须重新验证并创建新的交付 Run。实际 HEAD/base、授权与策略版本、身份进入原 Client Journal 和 Builder Evidence。已存在的 #65 修复可用 --head-sha 限定原准确 HEAD；批准不声称该提交已验证或发布。
+
+## 独立管理员信任源
+
+管理员在仓库外保护 registry、trust、receipt 与 launcher。例子不会自动加载：
+
+~~~json
 {
   "schema_version": "1.0",
   "kind": "admin_trust",
   "registry_root": "C:/AWH-Admin/registry",
   "operator": { "login": "your-admin", "id": 12345 },
   "host": "YOUR-APPROVED-HOST",
-  "installation_sha256": "<已批准 Builder policy.installation 的 JSON.stringify(value,null,2)+换行之 SHA-256>"
+  "installation_sha256": "<独立批准的完整 installation 对象摘要>"
 }
-```
+~~~
 
-示例不能加载为授权。`installation_sha256` 固定整个现有 installation 对象：App/installation/account、完整 selected sets、Reviewer 与授权人的 login/数值 ID。扩大集合或换安装须管理员重新审查信任根，普通提议不能覆盖它。字段顺序也是批准字节的一部分。
+installation pin 覆盖 App/Installation/account、完整 selected sets、Reviewer 与管理员 login/数值 ID；编码为 JSON.stringify(value,null,2) 加 LF 换行。变化必须独立审查信任根，不能从提议或 Provider 响应自动扩大。host 必须等于真实 OS hostname。Executor/Machine 由受保护 launcher 提供，并核对任务与既有 CP/Client；第一版不声称硬件远程证明。
 
-`host` 必须等于独立批准的实际 OS hostname，复制 trust root 到另一主机不能凭 Client 的 machine 字段通过。Executor/Machine ID 仍是受保护 launcher 与现有 Client/CP 策略绑定的身份，不新增远程硬件证明服务。
+所有文件必须在任何 Git 仓库及 symlink/junction 之外。Windows ACL 将写权限给专用管理员/Administrators/SYSTEM；普通 Client/Agent 不应拥有写权。Unix 目录 0700，文件 0600。CLI 不创建正式 trust、改 ACL 或签发管理员凭据。Windows ACL 由部署管理员配置和检查，此文档不是已完成权限隔离的证据。
 
-Windows 应让 Administrators/SYSTEM 或专用管理员账户拥有写权，普通 Client/Agent 账户只读。Unix 目录 0700，授权文件 0600。文件、信任根、批准凭据和 launcher 都必须在所有 Git 仓库外，不经 symlink/junction；单份 JSON 最大 64 KiB。Windows ACL 是部署管理员的前置职责，CLI 不自动改 ACL。同一 OS 管理员身份运行的程序共享其权限；这些 pins 不是密码学签名，不能隔离拥有同等管理员文件写权的恶意程序。
+**Digest 是完整性 pin，不是数字签名。** 同一 OS 管理员账户中的程序共享其权限，CLI 无法识别一个 hash 是 Human 还是 Agent 计算的。独立批准必须由受保护管理员会话/launcher 提供；普通 Agent 不得把自生成 trust/receipt 摘要注入批准环境。Issue、示例、Client bearer、网页、manifest 均无此权限。
 
-受保护管理员会话配置：
+以下步骤在独立管理员会话执行，product 为经审查安装目录：
 
-```powershell
+~~~powershell
+$admin = 'C:\AWH-Admin\product\dist\admin-cli.js'
 $env:AWH_ADMIN_TRUST_FILE = 'C:\AWH-Admin\admin-trust.json'
-$env:AWH_ADMIN_TRUST_SHA256 = '<管理员独立核对并批准的 trust 文件摘要>'
-node <已审查安装目录>\dist\admin-cli.js inspect
-node <已审查安装目录>\dist\admin-cli.js diagnose
-```
+$env:AWH_ADMIN_TRUST_SHA256 = '<独立核对的 trust pin>'
+node $admin inspect
+node $admin diagnose
+~~~
 
-CLI 没有自批准、自动信任、从 Issue/CP/manifest 获取 pin、或下载权限的入口。下面准备出的 receipt **仍是提议**，Agent 不能把自己的输出自动设置为批准环境。管理员对具体提议审核后，独立存放并提供 receipt digest；`--confirm` 本身不构成授权。
+有效 trust/receipt 来源、pin、PEM/JWT/token 与批准环境只留在管理员/受保护 Builder launcher；不能进入普通 Client 配置、浏览器、CP响应、仓库或证据。launcher 命令仅输出脱敏任务状态，不导出路径、有效 pin 或可执行环境。Client/Viewer 包只带只读 loader，不带管理员 CLI/writer。
 
-## 一次登记模板，后续按任务准备
+## 首次登记项目
 
-模板沿用 [现有 builder_policy](builder-policy.md) 结构。可保存多仓库 Profile 和 Workflow、固定或 issue_prefix 分支、允许的检查与 path allowlist、Executor/Machine 列表。它只用于准备提议，没有运行权限。新任务从一个 Workflow 产生一个最小 fixed grant，并冻结明确的 Work Item、版本、base/head、机器和到期时间：
+项目文件包裹既有 [builder_policy 结构](builder-policy.md)：
 
-```powershell
-node <安装目录>\dist\admin-cli.js prepare `
-  --template C:\AWH-Admin\templates\reviewed-template.json `
-  --profile project-profile --workflow develop-to-pr `
-  --repo owner/repository --issue 123 --branch codex/task-123 `
-  --base-sha <40位mainSHA> --head-sha <40位最终cleanHEAD> `
-  --executor approved-executor --machine approved-machine `
-  --expires-at 2026-10-18T00:00:00.000Z `
-  --version task-123-v1 --out C:\AWH-Admin\proposals\task-123-v1.json
-node <安装目录>\dist\admin-cli.js inspect --proposal C:\AWH-Admin\proposals\task-123-v1.json
-```
+~~~json
+{
+  "builder_policy": "<替换成既有 builder_policy 对象；单一 repository，可含多个 Workflow>",
+  "stages": ["observe", "develop", "deliver"],
+  "permissions": { "contents": "write", "issues": "read", "pull_requests": "write" }
+}
+~~~
 
-issue_prefix 必须得到模板前缀加同一 Issue 数字的分支；fixed 模板只接受原有分支/Issue。Executor/Machine 必须在模板列表内。Profile 与 Workflow 来源可复用，但每个 grant 只有一个 Profile、一个 Workflow 和一项固定任务；CLI 为 Workflow 设置本次不可变版本。Source/head 更改须新提议和新批准。仅支持现有 Deliver 的有界 pnpm script、`node --test tests/*.mjs` 列表、`git diff --check origin/<base>...HEAD`，不提供 shell/API 转发。
+占位必须替换成对象，不是字符串。issue_prefix 可连续复用：codex/task- + Issue 123 得到 codex/task-123，必须有路径 allowlist。fixed 仅绑定原分支/Issue，例如一次性 #65。只接受现有有界 pnpm script、node --test tests/<files>.mjs、git diff --check origin/<base>...HEAD，不执行任意 shell/API。
 
-首次精确导入或不同模板登记使用 `register --policy <外置policy> --task <外置Task> --version <id> --out <新文件>`。Task 字段：repository、issue、branch、base_sha、head_sha、profile、workflow、executor_id、machine_id、expires_at。它也只生成提议，不登记有效权限。
+~~~powershell
+node $admin register --policy C:\AWH-Admin\project.proposed.json --version project-v1 --out C:\AWH-Admin\project-v1.proposal.json
+node $admin validate --proposal C:\AWH-Admin\project-v1.proposal.json
+node $admin approval-prepare --proposal C:\AWH-Admin\project-v1.proposal.json --receipt approve-project-v1 --reason 'Approve bounded project policy' --out C:\AWH-Admin\approve-project-v1.proposed.json
 
-`compare --left <提议1> --right <提议2>` 输出字段级差异；`inspect` 输出版本、批准人/时间、digest、目标任务及完整 installation/Profile/Workflow。两者只读且不构成远端 App preflight。
+# 管理员独立审核提议和 receipt 的字节、scope、operator、时间、expected state。
+# 下面只填写管理员独立批准并保存在受保护来源的文件与 pin。
+$env:AWH_ADMIN_APPROVAL_FILE = 'C:\AWH-Admin\approve-project-v1.approved.json'
+$env:AWH_ADMIN_APPROVAL_SHA256 = '<独立批准的 receipt pin>'
+node $admin approve --proposal C:\AWH-Admin\project-v1.proposal.json --confirm
+node $admin inspect
+~~~
 
-## 准备独立批准与原子生效
+approval-prepare 仍是提议，--confirm 不授予权限。批准窗口默认一小时，验证上限 24 小时；任务有效期独立。receipt 绑定准确提议摘要、当前 state pin、管理员与审计理由。并发改变 state 后旧提议失效，重新准备与批准。
 
-```powershell
-node <安装目录>\dist\admin-cli.js approval-prepare `
-  --proposal C:\AWH-Admin\proposals\task-123-v1.json `
-  --receipt admin-receipt-123-v1 --reason 'Approve this exact bounded candidate' `
-  --out C:\AWH-Admin\approvals\receipt-123-v1.proposed.json
-```
+## 后续任务无需改源码或拼大型 JSON
 
-管理员独立审核提议 scope 和批准文件：固定的 operator、proposal 字节摘要、当前 registry generation 摘要、时间、理由。准备的 receipt 有效期一小时；验证器上限 24 小时。这是完成一次原子批准的窗口，不是任务的有效期；任务以其 `expires_at` 单独到期。
+~~~powershell
+node $admin propose --policy-version project-v1 --profile my-project --workflow develop-to-pr --repo owner/repository --issue 123 --branch codex/task-123 --base-sha <准确远端mainSHA> --executor codex --machine APPROVED-HOST --stages develop,deliver --operations push,draft_pr,evidence,handoff --expires-at 2026-10-18T00:00:00.000Z --version issue123-v1 --out C:\AWH-Admin\issue123-v1.proposal.json
+node $admin validate --proposal C:\AWH-Admin\issue123-v1.proposal.json
+# 对该任务执行上述 approval-prepare → 独立批准 receipt pin → approve
+node $admin validate --version issue123-v1 --stage deliver
+node $admin preflight --version issue123-v1
+node $admin diagnose --version issue123-v1
+~~~
 
-确认后由独立管理员会话输入批准来源和 pin（不能直接从 Agent 返回值自动赋权）：
+下一 Issue 改任务参数/授权版本，引用同一项目版本。提议不能扩大模板的检查、权限、分支、身份。策略/身份/分支变化需新批准；最终 HEAD 在实际交付验证与 Journal 记录，不能复用旧 HEAD 的测试。prepare 是 propose 的同一入口别名。compare --left <提议> --right <提议> 只读输出差异。
 
-```powershell
-$env:AWH_ADMIN_APPROVAL_FILE = 'C:\AWH-Admin\approvals\receipt-123-v1.approved.json'
-$env:AWH_ADMIN_APPROVAL_SHA256 = '<管理员独立批准的receiptSHA256>'
-node <安装目录>\dist\admin-cli.js approve --proposal C:\AWH-Admin\proposals\task-123-v1.json --confirm
-node <安装目录>\dist\admin-cli.js inspect
-node <安装目录>\dist\admin-cli.js preflight --version task-123-v1
-node <安装目录>\dist\admin-cli.js launcher --version task-123-v1
-```
+受保护 Builder launcher 固定 trust source/pin、AWH_ADMIN_VERSION、AWH_ADMIN_EXECUTOR_ID、AWH_ADMIN_MACHINE_ID 和现有外置 App 配置，再调用同一 Builder/Client Deliver。登记不等于 CP Enrollment：CP Profile 与所选固定授权版本、命令、身份仍须一致，通过既有隔离管理员配置流程核对；不改生产 CP，不提升普通 bearer。
 
-`approve` 使用排他锁；在锁内重新检查 expected generation、receipt 重放和完整旧历史。它写入全新的 policy、proposal、approval、历史 state 文件并 fsync，最后在同目录原子 rename `state.json`。这个指针是 launcher 的 registry 引用；安装引用固定 trust 根和显式 `AWH_ADMIN_VERSION`，不会自动挑最新版本。现有批准文件不被覆盖，新版本不重写已开始任务。
+Builder 先检查 scope/身份/真实 HEAD，再读密钥；metadata-only Token 分页检查完整 selected set。真实 Issue/base 用单仓只读 Token核对，每个写操作才申请单仓最小 Token：push 为 contents:write，Draft PR/Evidence/Handoff 为 pull_requests:write。后续操作重读授权，撤销/到期/损坏 fail closed。非法 managed 输入不回退；未启用 managed 时保留旧外置 policy/pin。
 
-`launcher` 只输出获准的引用与身份环境；不能执行任意命令，不会自行向 GitHub 发布。管理员将输出的环境配置进已有受保护 Builder/Client launcher，另行配置现有 App ID/外置 PEM 路径。Builder 沿用原有发布功能与 Client Journal，而不是另一套发布器。安装的代码本身须经过独立审查；本地候选不能凭“digest 一致”宣称已审查。
+使用既有 --hold-draft / holdDraft 路径，托管授权禁止 Ready。交付沿用原 Journal/Outbox/Receipt，不确定副作用先只读 reconcile，不能重新运行来盲目重试。管理员 recover 只恢复本地授权事务。
 
-Managed 模式下 Builder 在读取密钥前检查任务选择、Executor/Machine 和准确 clean HEAD/分支，在取得写 token 前用单仓库只读 token 检查真实 Issue 和远端 base。每次网络操作或 Git 写前重读批准版本，撤销/到期/字节变化立即拒绝。启用 managed 环境后错误配置不会回退旧 Builder policy。未启用 managed 环境时仍沿用既有 `AWH_BUILDER_POLICY_FILE/SHA256` 机制，不加载示例。
+## 撤销、审计与中断恢复
 
-## 撤销与恢复
+~~~powershell
+node $admin revoke --target issue123-v1 --version revoke-issue123-v1 --out C:\AWH-Admin\revoke.proposal.json
+# 再独立 approval-prepare / receipt pin / approve
+node $admin inspect
+node $admin diagnose --version issue123-v1
+~~~
 
-```powershell
-node <安装目录>\dist\admin-cli.js revoke --version revoke-123-v1 `
-  --target task-123-v1 --out C:\AWH-Admin\proposals\revoke-123-v1.json
-# 同上准备并由管理员独立批准新的 receipt，再 approve 这份撤销提议。
-node <安装目录>\dist\admin-cli.js diagnose
-```
+撤销任务只影响它，撤销项目使其所有任务的后续操作拒绝。旧版本、批准来源/摘要、历史 state、Run/Event/Journal/Receipt 保留。inspect 展示 scope、版本、审批人/时间、digest 与撤销/过期状态，不更改历史。
 
-撤销准备不立即生效。已批准撤销保留旧 policy/receipt/history，旧任务不能自动迁移到新版本；也不能重放批准 receipt。停止任务后由管理员另批准新版本恢复。
+approve 以排他锁写 immutable transaction/proposal/receipt/policy 与历史快照，fsync 后同目录原子 rename 切换 state.json，再读回。准确重复返回 ALREADY_COMMITTED；冲突版本/receipt/expected state 拒绝。
 
-并发失败、锁、pending switch、孤立的不可变记录均保留。`diagnose` 给出 BLOCKED 和文件名，禁止自动删锁、覆盖记录、删历史或重新计算被改变文件的 pin 来“修复”。崩溃后的已成功原子切换可只读核验；切换前的孤立记录需要管理员检查并明确授权恢复。128 次批准是第一版有界容量；有权限迁移/备份须独立办理，不自动清理历史。
+进程中断后先 diagnose，保留 lock/pending/orphan 原件。管理员用同一提议与独立 receipt pin：
 
-历史完整性和重放防护依赖受保护 OS trust root；拥有该 root 写权的管理员恢复旧快照属于根授权管理，不是防恶意管理员的远端反回滚服务。
+~~~powershell
+node $admin recover --proposal C:\AWH-Admin\issue123-v1.proposal.json --confirm
+node $admin diagnose
+~~~
 
-## Observe、CP 与真实 Provider 的事实边界
+只有确认原 PID 已消失才归档同一事务 lock。活进程、PID 状态未知、不同事务或字节冲突拒绝。旧不可变文件只核对相同字节，不覆盖。切换前完成原事务；切换后仅确认与归档死锁，不重放 generation。截断/损坏字节不能自动重写，需要管理员调查原件/备份。恢复 Provider 写入数为零。
 
-Observe 的 CP Enrollment、Machine/Executor、Resident、Doctor 不需要 Deliver grant。这个 CLI 不改变 `trusted.json`、SQLite、Versioned Observe/Develop catalog 或 App 安装权限。CP/Client 的 Profile 版本仍需管理员通过现有独立流程配置并与 Builder 精确匹配；Builder 登记不会隐式提升 Client bearer。既有 [Versioned Profile](versioned-profile.md) trust anchor 不是这个 Deliver registry 的批准来源。
+## 验收状态
 
-本机 `preflight` 只检查本地授权，返回 `provider_scope: NOTRUN`。GitHub 真实 App 身份、完整 selected-set、单仓库 token 和 PR/Handoff 仍由现有 Builder 实测；独立 Review/Merge 是下一 Human Gate。合成测试只证明授权逻辑，不证明真实业务 E2E、Mac、Release 或部署。
+本地 preflight/validate 的 provider_scope:NOTRUN 不证明真实交付。Observe Enrollment/Resident/Doctor 与 Deliver 独立；CLI 不改变现有 Observe/Develop catalog、SQLite 或 App 安装权限。模拟 Provider 只证明本地逻辑；真实 PR/Evidence/confirmed Handoff、独立 Review、Mac、E2E、Release 按实际状态报告。
+
+[#65 精确授权](issue65-authorization.md) 保留原 HEAD、独立 PR。本候选尚须独立 Review；本地开发授权不构成其自身发布批准。

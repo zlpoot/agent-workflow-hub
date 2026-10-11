@@ -1,6 +1,6 @@
 # #65：原修复的最小一次性授权
 
-截至本候选准备时，已核实 main 为 `7c4a8ed0d83af15f4ca44e25102fadc62dfc4c87`。本地 `codex/issue65-windows-isolated` 保留原提交 **`6706316b44f7ed5ddd9a38b00ab65d871d74a909`**，只改 `src/client/client.ts`、`tests/client.test.mjs`。其原 exact-head 72/72 测试、干净安装与 Human Windows 验收保持有效。新 CLI 分支以该原提交为祖先，没有重做或改写修复。
+截至本候选准备时，已核实 main 为 `7c4a8ed0d83af15f4ca44e25102fadc62dfc4c87`。本地 `codex/issue65-windows-isolated` 保留原提交 **`6706316b44f7ed5ddd9a38b00ab65d871d74a909`**，只改 `src/client/client.ts`、`tests/client.test.mjs`。其原 exact-head 72/72 测试、干净安装与 Human Windows 验收保持有效。新 CLI 分支单独基于 main，不包含该 Session 修复；原修复工作树与提交未变。
 
 ## 管理员批准的范围
 
@@ -32,6 +32,6 @@
 
 ## CLI 经独立 Review 后的标准替代
 
-按 [管理员 CLI](administrator-cli.md) 的受保护 trust root 与模板流程，用 `prepare` / `register` 生成上述固定任务提议；`approval-prepare` 后由管理员独立核验并提供 receipt pin；`approve --confirm` 写入新版本；`inspect` / `preflight` / `launcher` 只读核验。随后继续调用同一现有 Builder/Client 交付链。不要将新 policy/receipt 摘要自动绑定为管理员批准，也不要把本地 preflight 的 `NOTRUN` 改写为 GitHub 交付已通过。
+按 [管理员 CLI](administrator-cli.md) 的受保护 trust root 流程，先 `register` 并独立批准项目策略版本（该任务 Workflow 为 fixed，并限制两个原文件），再 `propose --policy-version <已批准项目版本>` 准备精确 Work Item。该任务使用 `--head-sha 6706316b44f7ed5ddd9a38b00ab65d871d74a909`、`--stages develop,deliver`、`--operations push,draft_pr,evidence,handoff`，其余字段取上表。`approval-prepare` 后由管理员独立核验并提供 receipt pin；`approve --confirm` 写入新任务版本；`inspect` / `preflight` / `launcher` 只读核验。受保护 launcher 提供独立信任源及任务版本/身份，不从 CLI 状态输出自动安装权限。沿同一 Builder/Client 以 holdDraft 交付。不要将自生成摘要绑定为管理员批准，也不要把本地 `NOTRUN` 改写为 GitHub 已交付。
 
 本文件提供可办理的准确 scope 和顺序，不宣称外置批准、Push、PR、Evidence、confirmed Handoff 或 Review 已发生。

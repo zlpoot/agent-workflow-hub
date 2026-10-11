@@ -82,6 +82,10 @@ export async function deliver(client: AwhClient, options: DeliveryOptions, overr
       stage('preflight'); await o.emit('STEP_STARTED', { step_id: 'builder-preflight', name: 'GitHub App fixed-scope preflight' }); openStep = true;
       const builder = prepared ?? await deps.connect({ cwd: () => identity.root }, fixed.selection);
       const preflight = builder.preflight();
+      if (preflight.administrator_binding) {
+        if (preflight.administrator_binding.head_sha !== identity.sha) clientFail('exact_head', 'Administrator delivery candidate differs from the actual source');
+        refs({ administrator_binding: preflight.administrator_binding });
+      }
       await o.emit('STEP_COMPLETED', { step_id: 'builder-preflight', exit_code: 0 }); openStep = false;
       stage('verification'); exact(); await o.emit('VERIFICATION_STARTED', { subject_sha: identity.sha });
       const before = inspectRepository(client.cwd), startedAt = new Date().toISOString();
@@ -111,7 +115,8 @@ export async function deliver(client: AwhClient, options: DeliveryOptions, overr
       await o.emit('GITHUB_PR_CREATED', { pull_request: github('pull_request', pr.number), base_sha: pr.base, head_sha: pr.head });
       stage('evidence'); exact();
       const metadata = JSON.stringify({ ...(o.recovery ? { verification_recovery: o.recovery } : {}), environment: { platform: process.platform, arch: process.arch, node: process.version, client_version: CLIENT_VERSION },
-        ...(o.task_binding ? { task_binding: { ...o.task_binding, pull_request: pr.number } } : {}), command_order: fixed.workflow.verification_commands, before_sha: before.sha, after_sha: identity.sha, clean_before: !before.dirty, clean_after: true,
+          ...(preflight.administrator_binding ? { administrator_binding: preflight.administrator_binding } : {}),
+          ...(o.task_binding ? { task_binding: { ...o.task_binding, pull_request: pr.number } } : {}), command_order: fixed.workflow.verification_commands, before_sha: before.sha, after_sha: identity.sha, clean_before: !before.dirty, clean_after: true,
         started_at: startedAt, finished_at: new Date().toISOString(), run_id: o.run.id, actor: preflight.actor, checks,
         statistics: logs.map(log => ({ command: log.command, elapsed_ms: log.elapsed_ms, tests: statistic(log.stdout, 'tests'), pass: statistic(log.stdout, 'pass'), fail: statistic(log.stdout, 'fail') })) }, null, 2);
       const raw = JSON.stringify(logs, null, 2), parts = raw.match(/[\s\S]{1,48000}/g) ?? [];

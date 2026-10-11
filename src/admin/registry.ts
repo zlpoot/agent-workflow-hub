@@ -35,13 +35,20 @@ export interface Trust {
   installation_sha256: string; host: string;
 }
 export interface Task {
-  repository: string; issue: number; branch: string; base_sha: string; head_sha: string;
+  repository: string; issue: number; branch: string; base_sha: string; head_sha: string | null;
   profile: string; workflow: string; executor_id: string; machine_id: string; expires_at: string;
+  stages: Stage[]; provider_operations: ProviderOperation[];
+}
+export type Stage = 'observe' | 'develop' | 'deliver';
+export type ProviderOperation = 'push' | 'draft_pr' | 'evidence' | 'handoff';
+export interface ProjectPolicy {
+  builder_policy: any; stages: Stage[];
+  permissions: { contents: 'read' | 'write'; issues: 'read' | 'write'; pull_requests: 'read' | 'write' };
 }
 export interface Proposal {
-  schema_version: '1.0'; kind: 'admin_proposal'; version: string; action: 'grant' | 'revoke';
+  schema_version: '1.0'; kind: 'admin_proposal'; version: string; action: 'project' | 'grant' | 'revoke';
   expected_state_sha256: string | null; policy: unknown | null; task: Task | null;
-  target_version: string | null;
+  target_version: string | null; policy_version: string | null;
 }
 export interface Approval {
   schema_version: '1.0'; kind: 'admin_approval'; id: string; operator: Actor;
@@ -49,7 +56,7 @@ export interface Approval {
   approved_at: string; expires_at: string; reason: string;
 }
 export interface Entry {
-  version: string; action: 'grant' | 'revoke'; proposal_sha256: string;
+  version: string; action: 'project' | 'grant' | 'revoke'; proposal_sha256: string;
   approval_sha256: string; policy_sha256: string | null; target_version: string | null;
 }
 export interface State {
@@ -57,19 +64,45 @@ export interface State {
   previous_state_sha256: string | null; entries: Entry[]; receipt_ids: string[];
 }
 export function proposal(value: any): Proposal {
-  closed(value, ['schema_version','kind','version','action','expected_state_sha256','policy','task','target_version']);
+  closed(value, ['schema_version','kind','version','action','expected_state_sha256','policy','task','target_version','policy_version']);
   if (value.schema_version !== '1.0' || value.kind !== 'admin_proposal' || !id(value.version) ||
-      !['grant','revoke'].includes(value.action) || value.expected_state_sha256 !== null && !hash(value.expected_state_sha256)) deny('schema');
+      !['project','grant','revoke'].includes(value.action) || value.expected_state_sha256 !== null && !hash(value.expected_state_sha256)) deny('schema');
   if (value.action === 'revoke') {
-    if (value.policy !== null || value.task !== null || !id(value.target_version)) deny('schema');
+    if (value.policy !== null || value.task !== null || value.policy_version !== null || !id(value.target_version)) deny('schema');
+  } else if (value.action === 'project') {
+    if (value.task !== null || value.target_version !== null || value.policy_version !== null) deny('schema');
+    projectPolicy(value.policy);
   } else {
     const task = value.task;
-    closed(task, ['repository','issue','branch','base_sha','head_sha','profile','workflow','executor_id','machine_id','expires_at']);
-    if (!sha(task.base_sha) || !sha(task.head_sha) || task.base_sha === task.head_sha || !timestamp(task.expires_at) ||
+    closed(task, ['repository','issue','branch','base_sha','head_sha','profile','workflow','executor_id','machine_id','expires_at','stages','provider_operations']);
+    if (!sha(task.base_sha) || task.head_sha !== null && (!sha(task.head_sha) || task.base_sha === task.head_sha) || !timestamp(task.expires_at) ||
         ![task.profile,task.workflow,task.executor_id,task.machine_id].every(id) || !Number.isSafeInteger(task.issue) || task.issue < 1 ||
-        typeof task.repository !== 'string' || typeof task.branch !== 'string' || value.target_version !== null || !value.policy) deny('schema');
+        typeof task.repository !== 'string' || typeof task.branch !== 'string' || value.target_version !== null || value.policy !== null || !id(value.policy_version) ||
+        !subset(task.stages,['observe','develop','deliver'],false) || !subset(task.provider_operations,['push','draft_pr','evidence','handoff'],true) ||
+        !task.stages.includes('deliver') && task.provider_operations.length) deny('schema');
   }
   return value;
+}
+function subset(value: any, allowed: string[], empty: boolean): boolean {
+  return Array.isArray(value) && (empty || value.length > 0) && value.length <= allowed.length && new Set(value).size === value.length && value.every(v => allowed.includes(v));
+}
+export function projectPolicy(value: any): ProjectPolicy {
+  closed(value,['builder_policy','stages','permissions']); closed(value.permissions,['contents','issues','pull_requests']);
+  if (!value.builder_policy || !subset(value.stages,['observe','develop','deliver'],false) || !Object.values(value.permissions).every(v => ['read','write'].includes(v as string)) ||
+      !value.stages.includes('deliver') && Object.values(value.permissions).includes('write')) deny('project_scope');
+  return value;
+}
+/** Derive a bounded fixed Builder view from two independently approved records. No new authority. */
+export function materialize(project: ProjectPolicy, task: Task, version: string): any {
+  const template = project.builder_policy, selected = template.profiles.find((p: any) => p.id === task.profile), workflow = selected?.workflows.find((w: any) => w.id === task.workflow);
+  if (!selected || !workflow || selected.repository !== task.repository || workflow.work_item.repo !== task.repository ||
+      !workflow.executor_restrictions.executor_ids.includes(task.executor_id) || !workflow.executor_restrictions.machine_ids.includes(task.machine_id) ||
+      !task.stages.every(stage => project.stages.includes(stage)) ||
+      task.provider_operations.some(operation => project.permissions[operation === 'push' ? 'contents' : 'pull_requests'] !== 'write') ||
+      (workflow.branch_mode === 'issue_prefix' ? task.branch !== workflow.branch + task.issue : task.branch !== workflow.branch || task.issue !== workflow.work_item.issue)) deny('task_scope');
+  return { ...template, default_selection: { profile: task.profile, workflow: task.workflow }, profiles: [{ ...selected, workflows: [{ ...workflow,
+    version, branch: task.branch, branch_mode: 'fixed', work_item: { repo: task.repository, issue: task.issue },
+    executor_restrictions: { executor_ids: [task.executor_id], machine_ids: [task.machine_id] } }] }] };
 }
 export function approval(value: any, trust: Trust, expectedProposal: string, expectedState: string | null, now: string, requireFresh: boolean): Approval {
   closed(value, ['schema_version','kind','id','operator','proposal_sha256','expected_state_sha256','approved_at','expires_at','reason']);
@@ -105,8 +138,8 @@ export function snapshot(trust: Trust): { state: State; statePin: string | null 
   const versions = new Map<string, Entry>(), revoked = new Set<string>();
   for (const entry of state.entries) {
     closed(entry, ['version','action','proposal_sha256','approval_sha256','policy_sha256','target_version']);
-    if (!id(entry.version) || versions.has(entry.version) || !['grant','revoke'].includes(entry.action) || !hash(entry.proposal_sha256) || !hash(entry.approval_sha256) ||
-        (entry.action === 'grant' ? !hash(entry.policy_sha256) || entry.target_version !== null : entry.policy_sha256 !== null || !id(entry.target_version) || versions.get(entry.target_version)?.action !== 'grant' || revoked.has(entry.target_version))) deny('state');
+    if (!id(entry.version) || versions.has(entry.version) || !['project','grant','revoke'].includes(entry.action) || !hash(entry.proposal_sha256) || !hash(entry.approval_sha256) ||
+        (entry.action !== 'revoke' ? !hash(entry.policy_sha256) || entry.target_version !== null : entry.policy_sha256 !== null || !id(entry.target_version) || !versions.has(entry.target_version) || versions.get(entry.target_version)?.action === 'revoke' || revoked.has(entry.target_version))) deny('state');
     if (entry.action === 'revoke') revoked.add(entry.target_version!);
     versions.set(entry.version, entry);
   }
@@ -132,13 +165,18 @@ export function readEntry(trust: Trust, entry: Entry, receiptId: string, now: st
   const approved = approval(parse(approvalBytes), trust, entry.proposal_sha256, proposed.expected_state_sha256, now, false);
   if (approved.id !== receiptId) deny('receipt_identity');
   let policy: any = null;
-  if (entry.action === 'grant') {
+  if (entry.action !== 'revoke') {
     const policyBytes = read(prefix + '.policy.json');
-    if (digest(policyBytes) !== entry.policy_sha256 || encode(proposed.policy) !== policyBytes.toString('utf8')) deny('policy_digest');
+    if (digest(policyBytes) !== entry.policy_sha256 || entry.action === 'project' && encode(proposed.policy) !== policyBytes.toString('utf8')) deny('policy_digest');
     policy = parse(policyBytes);
-    if (digest(encode(policy.installation)) !== trust.installation_sha256) deny('installation_scope');
+    if (digest(encode(entry.action === 'project' ? projectPolicy(policy).builder_policy.installation : policy.installation)) !== trust.installation_sha256) deny('installation_scope');
   }
   return { proposed, approved, policy };
+}
+export function approvedProject(trust: Trust, state: State, version: string, now: string): ProjectPolicy {
+  const index = state.entries.findIndex(entry => entry.version === version && entry.action === 'project');
+  if (index < 0 || state.entries.some(entry => entry.target_version === version)) deny('project_unapproved_or_revoked');
+  return projectPolicy(readEntry(trust,state.entries[index]!,state.receipt_ids[index]!,now).policy);
 }
 export function managedContext(env: NodeJS.ProcessEnv = process.env, now = new Date().toISOString()) {
   if (!env.AWH_ADMIN_TRUST_FILE && !env.AWH_ADMIN_TRUST_SHA256 && !env.AWH_ADMIN_VERSION) return null;
@@ -149,5 +187,7 @@ export function managedContext(env: NodeJS.ProcessEnv = process.env, now = new D
   if (index < 0 || state.entries.some(entry => entry.action === 'revoke' && entry.target_version === version)) deny('unapproved_or_revoked');
   const record = readEntry(context.trust, state.entries[index]!, state.receipt_ids[index]!, now);
   if (record.proposed.task!.expires_at <= now) deny('task_expired');
-  return { ...context, version, ...record };
+  const project = approvedProject(context.trust,state,record.proposed.policy_version!,now);
+  if (encode(materialize(project,record.proposed.task!,version)) !== encode(record.policy)) deny('task_scope');
+  return { ...context, version, ...record, project };
 }

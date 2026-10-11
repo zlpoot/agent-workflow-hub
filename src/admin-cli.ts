@@ -1,29 +1,32 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { AdminError, deny } from './admin/registry.js';
-import { approveProposal, compareProposals, diagnoseRegistry, inspectProposal, inspectRegistry, launcherDescriptor, prepareApproval, prepareGrant, prepareRevoke, proposeGrant } from './admin/operations.js';
-import { parse, read, type Task } from './admin/registry.js';
+import { AdminError, deny, managedContext } from './admin/registry.js';
+import { approveProposal, compareProposals, diagnoseRegistry, inspectProposal, inspectRegistry, launcherDescriptor, prepareApproval, prepareGrant, prepareRevoke, proposeProject } from './admin/operations.js';
+import { parse, read, type Task, type Stage, type ProviderOperation } from './admin/registry.js';
 
 const usage = `AWH local administrator CLI (no Provider operations)
 inspect [--proposal <external-json>]
 compare --left <external-proposal> --right <external-proposal>
-register --policy <external-builder-policy> --task <external-task-json> --version <id> --out <new-external-proposal>
-prepare --template <external-policy> --profile <id> --workflow <id> --repo <owner/repo> --issue <number> --branch <ref> --base-sha <sha> --head-sha <sha> --executor <id> --machine <id> --expires-at <ISO> --version <id> --out <new-external-proposal>
+register --policy <external-project-policy> --version <id> --out <new-external-proposal>
+propose --policy-version <approved-project> --profile <id> --workflow <id> --repo <owner/repo> --issue <number> --branch <ref> --base-sha <sha> [--head-sha <existing-sha>] --executor <id> --machine <id> --expires-at <ISO> [--stages observe,develop,deliver] [--operations push,draft_pr,evidence,handoff] --version <id> --out <new-external-proposal>
 approval-prepare --proposal <external-proposal> --receipt <id> --reason <ASCII-text> --out <new-external-receipt>
 approve --proposal <external-proposal> --confirm
+recover --proposal <same-external-proposal> --confirm
 revoke --version <new-revocation-id> --target <approved-version> --out <new-external-proposal>
 preflight --version <approved-version>
 launcher --version <approved-version>
-diagnose
+validate --proposal <external-proposal> | --version <approved-work-item> --stage <observe|develop|deliver>
+diagnose [--version <approved-work-item>]
+Defaults: Develop only, zero Provider operations, no future HEAD. prepare aliases propose.
 Approve requires independently provisioned AWH_ADMIN_TRUST_FILE/SHA256 and AWH_ADMIN_APPROVAL_FILE/SHA256. Preparation and --confirm alone grant nothing.`;
 export function main(args: string[]): object | string {
   if (args.length === 1 && args[0] === '--help') return usage;
-  const command = args[0] ?? '', options = new Map<string,string>();
+  const command = args[0] === 'prepare' ? 'propose' : args[0] ?? '', options = new Map<string,string>();
   const keys: Record<string, string[]> = {
-    inspect: ['--proposal'], compare: ['--left','--right'], register: ['--policy','--task','--version','--out'],
-    prepare: ['--template','--profile','--workflow','--repo','--issue','--branch','--base-sha','--head-sha','--executor','--machine','--expires-at','--version','--out'],
-    'approval-prepare': ['--proposal','--receipt','--reason','--out'], approve: ['--proposal','--confirm'],
-    revoke: ['--version','--target','--out'], preflight: ['--version'], launcher: ['--version'], diagnose: []
+    inspect: ['--proposal'], compare: ['--left','--right'], register: ['--policy','--version','--out'],
+    propose: ['--policy-version','--profile','--workflow','--repo','--issue','--branch','--base-sha','--head-sha','--executor','--machine','--expires-at','--stages','--operations','--version','--out'],
+    'approval-prepare': ['--proposal','--receipt','--reason','--out'], approve: ['--proposal','--confirm'], recover: ['--proposal','--confirm'],
+    revoke: ['--version','--target','--out'], preflight: ['--version'], launcher: ['--version'], validate: ['--proposal','--version','--stage'], diagnose: ['--version']
   };
   if (!Object.hasOwn(keys,command)) deny('arguments');
   for (let index = 1; index < args.length; index++) {
@@ -32,20 +35,28 @@ export function main(args: string[]): object | string {
     if (key === '--confirm') { options.set(key,'true'); continue; }
     const value = args[++index]; if (!value || value.startsWith('--')) deny('arguments'); options.set(key,value);
   }
-  if (command !== 'inspect' && keys[command]!.some(key => !options.has(key))) deny('arguments');
+  if (!['inspect','diagnose','validate'].includes(command) && keys[command]!.some(key => !['--head-sha','--stages','--operations'].includes(key) && !options.has(key))) deny('arguments');
   const get = (key: string): string => options.get('--' + key)!;
   if (command === 'inspect') return options.has('--proposal') ? inspectProposal(get('proposal')) : inspectRegistry();
   if (command === 'compare') return compareProposals(get('left'),get('right'));
-  if (command === 'diagnose') return diagnoseRegistry();
+  if (command === 'diagnose') return diagnoseRegistry(get('version'));
+  if (command === 'validate') {
+    if (options.size === 1 && options.has('--proposal')) return inspectProposal(get('proposal'));
+    if (options.size !== 2 || !options.has('--version') || !['observe','develop','deliver'].includes(get('stage'))) deny('arguments');
+    const context = managedContext({ ...process.env, AWH_ADMIN_VERSION: get('version') });
+    if (!context || !context.proposed.task!.stages.includes(get('stage') as Stage)) deny('stage_not_authorized');
+    return { status: 'LOCAL_STAGE_VALID', version: context.version, stage: get('stage'), provider_scope: 'NOTRUN', authority_verified: false };
+  }
   if (command === 'preflight' || command === 'launcher') return launcherDescriptor(get('version'));
-  if (command === 'approve') return approveProposal(get('proposal'));
+  if (command === 'approve' || command === 'recover') return approveProposal(get('proposal'),command === 'recover');
   if (command === 'revoke') return prepareRevoke(get('version'),get('target'),get('out'));
   if (command === 'approval-prepare') return prepareApproval(get('proposal'),get('receipt'),get('reason'),get('out'));
-  if (command === 'register') return proposeGrant(parse(read(get('policy'))),get('version'),parse(read(get('task'))),get('out'));
+  if (command === 'register') return proposeProject(parse(read(get('policy'))),get('version'),get('out'));
   if (!/^[1-9]\d*$/.test(get('issue'))) deny('arguments');
-  const task: Task = { repository: get('repo'), issue: Number(get('issue')), branch: get('branch'), base_sha: get('base-sha'), head_sha: get('head-sha'),
-    profile: get('profile'), workflow: get('workflow'), executor_id: get('executor'), machine_id: get('machine'), expires_at: get('expires-at') };
-  return prepareGrant(get('template'),get('version'),task,get('out'));
+  const task: Task = { repository: get('repo'), issue: Number(get('issue')), branch: get('branch'), base_sha: get('base-sha'), head_sha: get('head-sha') ?? null,
+    profile: get('profile'), workflow: get('workflow'), executor_id: get('executor'), machine_id: get('machine'), expires_at: get('expires-at'),
+    stages: (get('stages') ?? 'develop').split(',') as Stage[], provider_operations: get('operations') ? get('operations').split(',') as ProviderOperation[] : [] };
+  return prepareGrant(get('policy-version'),get('version'),task,get('out'));
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {

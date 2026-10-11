@@ -27,7 +27,7 @@ The administrator explicitly provisions a protected external Builder policy and 
 
 The Builder verifies live App/Installation identity, the complete approved selected repository set and a single-target least-privilege token. It can publish a Draft PR, exact-head evidence and a confirmed Handoff. It cannot approve, review, merge, close an Issue, mutate workflows or administer repositories. A read-only Handoff check grants none of those rights.
 
-`pnpm admin` provides the [local administrator CLI](docs/administrator-cli.md): versioned task proposals, independently pinned approval, inspection, comparison, revocation and diagnosis. It retains the external administrator trust boundary and uses the existing Builder; proposal preparation never grants authority or performs Provider writes.
+`pnpm admin` provides the [local administrator CLI](docs/administrator-cli.md): reusable project/workflow policies, separately approved work items and stages, inspection, comparison, revocation and local interruption recovery. It uses the external administrator trust boundary and existing Builder/Journal. The actual final HEAD is bound at delivery; preparation never grants authority or performs Provider writes.
 
 ## Product boundaries
 

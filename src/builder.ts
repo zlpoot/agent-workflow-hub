@@ -76,10 +76,11 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
 
 // Returns only fixed Builder operations. Credentials and generic API requests stay in this closure.
 export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' | 'revision' = 'deliver', adoption?: CommentAdoption) {
-  if (!['deliver','observe','recover','revision'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Tasks support restricted Builder modes');
+  if (!['deliver','observe','recover','revision'].includes(mode)) fail('Only frozen Tasks support restricted Builder modes');
   const policy = loadTrustedPolicy();
   const { profile, workflow } = bindWorkflow(selection, binding, policy);
   const managedEnv = { ...process.env }, managed = managedContext(managedEnv);
+  if (mode !== 'deliver' && !binding && !(managed && mode === 'observe')) fail('Only frozen Tasks support restricted Builder modes');
   const checkManaged = () => {
     if (!managed) return;
     const current = managedContext(managedEnv), task = managed.proposed.task!;
@@ -88,7 +89,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         task.profile !== profile.id || task.workflow !== workflow.id || task.repository !== profile.repository ||
         task.branch !== workflow.branch || workflow.work_item.repo !== task.repository || workflow.work_item.issue !== task.issue ||
         managedEnv.AWH_ADMIN_EXECUTOR_ID !== task.executor_id || managedEnv.AWH_ADMIN_MACHINE_ID !== task.machine_id ||
-        binding && binding.source_sha !== task.head_sha) fail('Managed administrator version or task binding differs; obtain a new approval');
+        binding && task.head_sha !== null && binding.source_sha !== task.head_sha) fail('Managed administrator version or task binding differs; obtain a new approval');
+    if (!task.stages.includes(mode === 'observe' || mode === 'recover' ? 'observe' : 'deliver')) fail('Managed stage is not authorized');
   };
   checkManaged();
   if (mode === 'revision' && !supportsRevision(profile, workflow)) fail('Revision requires the approved main diff-check policy');
@@ -133,6 +135,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       `https://github.com/${REPO}`, `https://github.com/${REPO}.git`, `git@github.com:${REPO}`, `git@github.com:${REPO}.git`,
     ].includes(origin.stdout.trim())) fail('Worktree repository does not match selected Profile');
   } catch { return fail('Cannot verify repository worktree root (details suppressed)'); }
+  let managedHead: string | undefined;
   const checkManagedCandidate = () => {
     checkManaged();
     if (!managed) return;
@@ -140,8 +143,12 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     const head = d.spawn('git', ['rev-parse','HEAD'], { cwd: root, env, encoding: 'utf8', timeout: 10000 });
     const branch = d.spawn('git', ['branch','--show-current'], { cwd: root, env, encoding: 'utf8', timeout: 10000 });
     const clean = d.spawn('git', ['status','--porcelain=v1'], { cwd: root, env, encoding: 'utf8', timeout: 10000 });
-    if (head.status !== 0 || branch.status !== 0 || clean.status !== 0 || head.stdout.trim() !== task.head_sha || branch.stdout.trim() !== task.branch || clean.stdout.trim())
+    const actualHead = head.stdout.trim();
+    if (head.status !== 0 || branch.status !== 0 || clean.status !== 0 || !sha(actualHead) ||
+        task.head_sha !== null && actualHead !== task.head_sha || managedHead !== undefined && actualHead !== managedHead ||
+        branch.stdout.trim() !== task.branch || clean.stdout.trim() || actualHead === task.base_sha)
       fail('Managed task requires its exact clean approved local HEAD and branch');
+    managedHead ??= actualHead; // Record the real candidate only after Git inspection, never as a prior approval fact.
     checkManaged();
   };
   checkManagedCandidate();
@@ -211,6 +218,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     return { text: safe ? sanitized : null, reasons: [...reasons].sort() };
   };
   const responses = new WeakMap<object, Partial<PublicationDiagnostic>>();
+  let managedMutationUncertain = false;
   const hasNextPage = new WeakSet<object>();
   const responseMetadata = (r: Response): Partial<PublicationDiagnostic> => {
     const requestId = r.headers.get('x-github-request-id'), permissions = r.headers.get('x-accepted-github-permissions');
@@ -223,6 +231,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   };
   const request = async (path: string, credential: string, method = 'GET', body?: unknown, stage?: PublicationStage): Promise<Json> => {
     checkManaged();
+    const managedMutation = !!managed && method !== 'GET' && !path.endsWith('/access_tokens');
+    if (managedMutation && managedMutationUncertain) fail('Uncertain managed Provider operation must be reconciled through the existing Journal; retry refused');
     let r: Response | undefined;
     let value: unknown;
     try {
@@ -238,12 +248,14 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       }
       value = await r.json();
     } catch (e) {
+      if (managedMutation) managedMutationUncertain = true;
       if (e instanceof BuilderError) throw e;
       if (stage) diagnosticFailure(r ? stage === 'revision.comment-post' || stage === 'revision.comment-confirm-patch' ? 'revision.comment-parse' : stage : stage,
         r ? 'invalid_response' : 'network_or_timeout', r ? responseMetadata(r) : {});
       return fail('GitHub request failed (network, timeout, redirect or invalid JSON; details suppressed)');
     }
     if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && (mode === 'recover' && path === `${ROOT}/pulls?state=all&head=${encodeURIComponent(REPO.split('/')[0] + ':' + BRANCH)}&per_page=100&page=1` || path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length)) || /^\/issues\/[1-9]\d*\/comments\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length))))) {
+      if (managedMutation) managedMutationUncertain = true;
       if (stage) diagnosticFailure(stage === 'revision.comment-post' || stage === 'revision.comment-confirm-patch' ? 'revision.comment-parse' : stage, 'invalid_response', responseMetadata(r!));
       fail('Invalid GitHub response');
     }
@@ -279,6 +291,12 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   // Metadata-only inspection covers the *actual* installation scope without granting writes to extra repositories.
   const scopeToken = await mint(false);
   const repositories = await request('/installation/repositories?per_page=100', scopeToken.token);
+  if (!positive(repositories.total_count) || repositories.total_count > 128 || !Array.isArray(repositories.repositories)) fail('Installation selected repository set is not allowed');
+  for (let page = 2; repositories.repositories.length < repositories.total_count; page++) {
+    const batch = await request('/installation/repositories?per_page=100&page=' + page,scopeToken.token);
+    if (batch.total_count !== repositories.total_count || !Array.isArray(batch.repositories) || !batch.repositories.length) fail('Incomplete installation repository set');
+    repositories.repositories.push(...batch.repositories);
+  }
   if (!allowedInstallation(repositories.repositories, repositories.total_count, policy))
     fail('Installation selected repository set is not allowed');
   const repositoryNames = (repositories.repositories as { full_name: string }[]).map(r => r.full_name);
@@ -334,6 +352,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         !Array.isArray(observed.repositories) || observed.repositories.length !== 1 || observed.repositories[0]?.full_name !== REPO ||
         !Number.isFinite(Date.parse(observed.expires_at)) || Date.parse(observed.expires_at) <= d.now() || Date.parse(observed.expires_at) > d.now() + 3660000) fail('Managed read token scope or expiry mismatch');
     secrets.push(observed.token);
+    observer = { token: observed.token, expiry: Date.parse(observed.expires_at) };
     knownSecrets.push({ value: observed.token, reason: 'known_installation_token' },
       { value: Buffer.from(`x-access-token:${observed.token}`).toString('base64'), reason: 'known_basic_credential' });
     const task = managed.proposed.task!;
@@ -342,11 +361,29 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     if (issue.number !== task.issue || issue.pull_request || issue.state !== 'open' || issue.html_url !== `https://github.com/${REPO}/issues/${task.issue}` ||
         base.object?.sha !== task.base_sha) fail('Managed Issue or remote base differs; obtain a new approval');
   }
-  const { token, expiry } = mode === 'revision' ? await revisionToken() : mode !== 'deliver' ? observer! : await mint(true);
+  const { token, expiry } = managed ? observer! : mode === 'revision' ? await revisionToken() : mode !== 'deliver' ? observer! : await mint(true);
   const live = () => { checkManaged(); if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
+  const authorizeOperation = (operation: 'push' | 'draft_pr' | 'evidence' | 'handoff') => {
+    live(); if (managed && !managed.proposed.task!.provider_operations.includes(operation)) fail('Managed Provider operation is not authorized');
+    if (managed && managedMutationUncertain) fail('Uncertain managed Provider operation requires Journal reconciliation');
+    checkManagedCandidate();
+  };
+  const operationToken = async (operation: 'push' | 'draft_pr' | 'evidence' | 'handoff') => {
+    if (!managed) return token;
+    authorizeOperation(operation);
+    const permissions: Record<string,string> = operation === 'push' ? { contents: 'write' } : { pull_requests: 'write' };
+    const v = await request(`/app/installations/${inst.id}/access_tokens`,jwt,'POST',{ repositories: [REPO.split('/')[1]], permissions });
+    if (!v.token || !equalPermissions(v.permissions,{ ...permissions, metadata: 'read' }) || !Array.isArray(v.repositories) ||
+        v.repositories.length !== 1 || v.repositories[0]?.full_name !== REPO || !Number.isFinite(Date.parse(v.expires_at)) ||
+        Date.parse(v.expires_at) <= d.now() || Date.parse(v.expires_at) > d.now() + 3660000) fail('Managed operation-minimum token scope mismatch');
+    secrets.push(v.token,Buffer.from(`x-access-token:${v.token}`).toString('base64'));
+    knownSecrets.push({ value: v.token, reason: 'known_installation_token' },
+      { value: Buffer.from(`x-access-token:${v.token}`).toString('base64'), reason: 'known_basic_credential' });
+    authorizeOperation(operation); return v.token as string;
+  };
   const writable = () => { if (mode !== 'deliver' && mode !== 'revision') fail('Lifecycle observation cannot mutate GitHub'); };
   let fixedRevisionPR: number | undefined = adoption?.pr;
-  const call = (path: string, method = 'GET', body?: unknown, diagnosticStage?: PublicationStage) => {
+  const call = async (path: string, method = 'GET', body?: unknown, diagnosticStage?: PublicationStage) => {
     live();
     const commentOnly = mode === 'revision' && (method === 'POST' && new RegExp('^' + rootPattern + '/issues/[1-9]\\d*/comments$').test(path) ||
       method === 'PATCH' && new RegExp('^' + rootPattern + '/issues/comments/[1-9]\\d*$').test(path));
@@ -354,7 +391,17 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     const stage = diagnosticStage ?? (mode === 'revision' ? path.includes('/compare/') ? 'revision.compare-read' :
       method === 'POST' ? 'revision.comment-post' : method === 'PATCH' ? 'revision.comment-confirm-patch' :
       /\/pulls\/[1-9]\d*$/.test(path) ? 'revision.pr-read' : 'revision.readback' : undefined);
-    return request(path, token, method, body, stage);
+    let credential = token;
+    if (managed && method !== 'GET') {
+      const data = body as Json;
+      const operation = path === ROOT + '/pulls' && method === 'POST' && data?.draft === true ? 'draft_pr' :
+        /\/issues\/(?:comments\/)?[1-9]\d*(?:\/comments)?$/.test(path) && ['POST','PATCH'].includes(method) &&
+          typeof data?.body === 'string' ? data.body.startsWith('Builder evidence\n') ? 'evidence' : data.body.startsWith('AWH-HANDOFF v0.1\n') ? 'handoff' : null :
+        path === '/graphql' && typeof data?.query === 'string' && data.query.includes('convertPullRequestToDraft') ? 'draft_pr' : null;
+      if (!operation) fail('Managed mutation is outside Draft/Evidence/Handoff scope');
+      credential = await operationToken(operation);
+    }
+    return request(path,credential,method,body,stage);
   };
   // No caller ref/path: independently read only this workflow's feature branch.
   // null means controlled ABSENT; PRESENT is a validated commit SHA.
@@ -384,7 +431,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   };
   const id = (v: number) => { if (!positive(v)) fail('Invalid GitHub object number'); return v; };
   const prSummary = (p: Json) => {
-    if (managed && (p.head?.sha !== managed.proposed.task!.head_sha || p.base?.sha !== managed.proposed.task!.base_sha)) fail('Managed PR exact base/head differs');
+    if (managed && (p.head?.sha !== managedHead || p.base?.sha !== managed.proposed.task!.base_sha)) fail('Managed PR exact base/head differs');
     if (!positive(p.number) || p.user?.login !== actor || p.user?.type !== 'Bot' || !sha(p.head?.sha) ||
       !sha(p.base?.sha) || p.head?.ref !== BRANCH || p.base?.ref !== profile.base ||
       p.head?.repo?.full_name !== REPO || p.base?.repo?.full_name !== REPO ||
@@ -442,14 +489,21 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return readFeatureRefState();
     },
     preflight: () => { live(); return ({ repo: REPO, app_id: Number(appId), installation_id: inst.id as number, actor,
-      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: mode === 'revision' ? { ...revisionPermissions } : mode !== 'deliver' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : { ...PERMISSIONS }, ...(binding ? { task_binding: binding, issue_state: issueState } : {}), ...(mode === 'recover' ? { recovery_inspection: { remote_branch_absent: true as const, same_branch_pr_absent: true as const } } : {}) }); },
+      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: managed || mode !== 'deliver' && mode !== 'revision' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : mode === 'revision' ? { ...revisionPermissions } : { ...PERMISSIONS },
+      ...(managed ? { administrator_binding: { authorization_version: managed.version, policy_version: managed.proposed.policy_version!,
+        repository: REPO, issue: managed.proposed.task!.issue, branch: BRANCH, base_sha: managed.proposed.task!.base_sha,
+        head_sha: managedHead!, executor_id: managed.proposed.task!.executor_id, machine_id: managed.proposed.task!.machine_id,
+        stages: [...managed.proposed.task!.stages], provider_operations: [...managed.proposed.task!.provider_operations] } } : {}),
+      ...(binding ? { task_binding: binding, issue_state: issueState } : {}), ...(mode === 'recover' ? { recovery_inspection: { remote_branch_absent: true as const, same_branch_pr_absent: true as const } } : {}) }); },
     push: async () => {
       if (mode !== 'deliver') fail('Lifecycle observation cannot push');
       live();
+      authorizeOperation('push');
+      const pushToken = await operationToken('push');
       const inspectEnv = gitEnvironment(d.env, root);
       const env = { ...inspectEnv };
       const config = [
-        ['http.https://github.com/.extraheader', `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`],
+        ['http.https://github.com/.extraheader', `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${pushToken}`).toString('base64')}`],
         ['credential.helper', ''], ['credential.https://github.com.helper', ''],
         ['safe.directory', root.replaceAll('\\', '/')],
       ];
@@ -470,7 +524,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         if (managed) {
           const head = d.spawn('git', ['rev-parse','HEAD'], { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
           const clean = d.spawn('git', ['status','--porcelain=v1'], { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
-          if (head.status !== 0 || clean.status !== 0 || head.stdout.trim() !== managed.proposed.task!.head_sha || clean.stdout.trim()) fail('Managed push requires exact clean approved HEAD');
+          if (head.status !== 0 || clean.status !== 0 || head.stdout.trim() !== managedHead || clean.stdout.trim()) fail('Managed push requires exact clean approved HEAD');
         }
         if (workflow.bootstrap_paths) {
           const baseline = await call(`${ROOT}/git/ref/heads/${profile.base}`);
@@ -538,7 +592,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       if (before !== after) fail('Fixed feature ref changed during receive-pack dry-run; push refused');
       live();
       checkManagedCandidate();
-      transport('push', ['push', url, `HEAD:refs/heads/${BRANCH}`]);
+      try { transport('push', ['push', url, `HEAD:refs/heads/${BRANCH}`]); }
+      catch (error) { if (managed) managedMutationUncertain = true; throw error; }
       return { pushed: BRANCH, actor };
     },
     createPR: async (title: string, body: string) => {
@@ -680,6 +735,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       return final;
     },
     ready: async (number: number, expectedHead: string, record: unknown, comment: number) => {
+      if (managed) fail('Managed authorization stops at independent Review; Ready is not authorized');
       if (mode === 'revision') fail('Revision publication cannot change Draft state');
       writable();
       const validation = validateHandoff(record, expectedHead);
