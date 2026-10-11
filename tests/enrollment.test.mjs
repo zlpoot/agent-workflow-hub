@@ -1,3 +1,6 @@
+import {runtimeArgs} from './cp-fixture.mjs';
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, randomBytes } from 'node:crypto';
@@ -27,16 +30,16 @@ import { createEnrollmentService } from '../dist/dashboard/enrollment.js';
 const hash = v => createHash('sha256').update(v).digest('hex');
 const resources = new WeakMap();
 const env = {...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform === 'win32' ? 'NUL' : '/dev/null',GIT_TERMINAL_PROMPT:'0'};
-const policy = JSON.parse(readFileSync(new URL('../examples/protocol/webskill.json',import.meta.url))).profile_policy;
+const policy = JSON.parse(readFileSync(new URL('../examples/protocol/project-beta.json',import.meta.url))).profile_policy;
 function git(root,args){const r=spawnSync('git',['-c','core.hooksPath='+(process.platform==='win32'?'NUL':'/dev/null'),'-c','commit.gpgsign=false',...args],{cwd:root,env,encoding:'utf8',windowsHide:true});assert.equal(r.status,0,r.stderr);}
 function repo(base,name,origin='sample/second-project') {const root=join(base,name);mkdirSync(root);git(root,['init','-b','feature/customer-work']);git(root,['config','user.name','Fixture']);git(root,['config','user.email','fixture@example.invalid']);git(root,['remote','add','origin','https://github.com/'+origin+'.git']);writeFileSync(join(root,'unchanged.txt'),'retain');git(root,['add','.']);git(root,['commit','-m','fixture']);writeFileSync(join(root,'untracked.txt'),'local work');return root;}
 async function port(){const s=createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;}
-async function start(t,args){const child=spawn(process.execPath,['dist/control-plane-cli.js',...args],{windowsHide:true,stdio:['ignore','pipe','pipe']});const exit=once(child,'exit');resources.get(t).children.push({child,exit});let output='',errors='';child.stderr.on('data',c=>errors+=c);let timer;try{await Promise.race([new Promise(r=>child.stdout.on('data',c=>{output+=c;if(output.includes('listening'))r();})),exit.then(()=>{throw new Error(errors);}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('CP startup timeout')),10000);})]);}finally{clearTimeout(timer);}return {child,exit};}
+async function start(t,args){const child=spawn(process.execPath,['dist/control-plane-cli.js',...runtimeArgs(args)],{windowsHide:true,stdio:['ignore','pipe','pipe']});const exit=once(child,'exit');resources.get(t).children.push({child,exit});let output='',errors='';child.stderr.on('data',c=>errors+=c);let timer;try{await Promise.race([new Promise(r=>child.stdout.on('data',c=>{output+=c;if(output.includes('listening'))r();})),exit.then(()=>{throw new Error(errors);}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('CP startup timeout')),10000);})]);}finally{clearTimeout(timer);}return {child,exit};}
 async function fixture(t){
  const base=mkdtempSync(join(tmpdir(),'awh-enrollment-'));const owned={children:[],readers:[],stops:[]};resources.set(t,owned);t.after(async()=>{await Promise.allSettled(owned.stops.map(stop=>stop()));for(const {child,exit} of owned.children){if(child.exitCode===null){child.kill();await exit;}}for(const reader of owned.readers)reader.close();assert.equal(dirname(base),tmpdir());assert(base.startsWith(join(tmpdir(),'awh-enrollment-')));rmSync(base,{recursive:true,force:true});});
  const database=join(base,'cp.sqlite'),trusted=join(base,'trusted.json'),token='awh_cp_'+randomBytes(32).toString('base64url');
- const oldClient={id:'old-client',project_ids:['legacy'],executor_ids:['old-executor'],token_sha256:hash(token)};
- writeFileSync(trusted,JSON.stringify({clients:[oldClient],profiles:[policy]}));const store=new ControlPlaneStore(database,[policy]);store.close();
+ const oldClient={id:'old-client',project_ids:['seeded-project'],executor_ids:['old-executor'],token_sha256:hash(token)};
+ writeFileSync(trusted,JSON.stringify({clients:[oldClient],profiles:[policy]}));const store=fixtureStore(database,[policy]);store.close();
  const endpoint='http://127.0.0.1:'+await port();const cp=await start(t,['serve','--database',database,'--config',trusted,'--port',new URL(endpoint).port]);
  const installed=join(base,'installed');mkdirSync(installed);
  const install=spawnSync(process.execPath,[npmEntry(),'install','--prefix',installed,'--offline','--ignore-scripts','--no-audit','--no-fund',resolve('.handoff/packages/zlpoot-awh-client-'+CLIENT_VERSION+'.tgz')],{env:npmEnv(join(base,'cache')),encoding:'utf8',windowsHide:true,timeout:60000});assert.equal(install.status,0,'Standalone fixture install failed');
@@ -74,12 +77,9 @@ test('one logical repository on two worktrees shares Project and Machine but iso
  const enrolled=[];
  for(const root of [a,b]){const request=submitEnrollment(h.machinePath,root,'observe');approveEnrollment({request:request.request_file,trustedConfig:h.trusted,database:h.database,confirm:true});enrolled.push(await finishEnrollment(h.machinePath,root));}
  assert.equal(enrolled[0].project_id,enrolled[1].project_id);assert.equal(enrolled[0].machine.id,enrolled[1].machine.id);assert.notEqual(enrolled[0].executor_id,enrolled[1].executor_id);assert.notEqual(enrolled[0].config_file,enrolled[1].config_file);
- const originalMachine=readFileSync(join(h.home,'state','machine.json')),newHome=join(h.base,'new-installation');mkdirSync(newHome);const nextMachinePath=join(h.base,'reuse-machine.json');
- setupMachine({path:nextMachinePath,home:newHome,endpoint:h.endpoint,projectRoot:h.base,clientEntry:h.entry,existingMachineState:join(h.home,'state')});
- assert.equal(enrollmentPreview(nextMachinePath,a).machine.id,enrolled[0].machine.id);assert(readFileSync(join(h.home,'state','machine.json')).equals(originalMachine));
  assert.throws(()=>submitEnrollment(h.machinePath,a,'develop',{id:'unapproved',version:'v1'}));
  const other=repo(h.base,'different-owner','other-owner/second-project');assert.notEqual(enrollmentPreview(h.machinePath,other).project_id,enrolled[0].project_id);
- const grants=readTrustedConfig(h.trusted);const changed=structuredClone(grants.clients);changed[1].project_ids.push('legacy');assert.throws(()=>createAuthenticator(changed,grants.enrollments));
+ const grants=readTrustedConfig(h.trusted);const changed=structuredClone(grants.clients);changed[1].project_ids.push('unapproved');assert.throws(()=>createAuthenticator(changed,grants.enrollments));
 });
 
 test('expired local Viewer renews on explicit document navigation; stale cookie and API bootstrap stay denied',()=>{
@@ -91,7 +91,7 @@ test('expired local Viewer renews on explicit document navigation; stale cookie 
 });
 
 test('trusted development preparation requires current approved Work Item and never enables business execution',async t=>{
- const h=await fixture(t),root=repo(h.base,'development','zlpoot/agent-workflow-hub');git(root,['checkout','-b','codex/new-business-901']);
+ const h=await fixture(t),root=repo(h.base,'development','example-org/workflow-core');git(root,['checkout','-b','codex/new-business-901']);
  const trust=trustedFixture(h.base),config=JSON.parse(readFileSync(h.machinePath));config.policy_trust_file=trust.path;writeFileSync(h.machinePath,JSON.stringify(config));
  const request=submitEnrollment(h.machinePath,root,'develop',trust.selection);
  assert.throws(()=>approveEnrollment({request:request.request_file,trustedConfig:h.trusted,database:h.database,confirm:true}));
@@ -100,7 +100,7 @@ test('trusted development preparation requires current approved Work Item and ne
 });
 
 test('installed Viewer selects the exact approved Work Item version, connects and displays a run-free Executor',async t=>{
- const h=await fixture(t),root=repo(h.base,'browser-project','zlpoot/agent-workflow-hub');git(root,['checkout','-b','codex/new-business-901']);
+ const h=await fixture(t),root=repo(h.base,'browser-project','example-org/workflow-core');git(root,['checkout','-b','codex/new-business-901']);
  const trust=trustedFixture(h.base,({catalog,approvals,approval})=>{const next={...catalog.work_items[0],work_item_version:'v2'};catalog.work_items.push(next);approvals.entries.push(approval('work_item',next.id,next.work_item_version,next));});
  const machine=JSON.parse(readFileSync(h.machinePath));machine.policy_trust_file=trust.path;writeFileSync(h.machinePath,JSON.stringify(machine));
  const viewerInstall=join(h.base,'viewer-install');mkdirSync(viewerInstall);
@@ -110,7 +110,7 @@ test('installed Viewer selects the exact approved Work Item version, connects an
  try{await Promise.race([new Promise(r=>child.stdout.on('data',x=>{if(x.toString().includes('explicit_local_os_user'))r();})),exit.then(()=>{throw new Error(errors);}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Viewer startup timeout')),10000);})]);}finally{clearTimeout(timer);}
  const browser=await chromium.launch({channel:'msedge',headless:true});resources.get(t).stops.push(()=>browser.close());const page=await browser.newPage({viewport:{width:1280,height:1000}});const failures=[];page.on('pageerror',e=>failures.push(e.message));
  await page.goto('http://127.0.0.1:'+viewerPort+'/dashboard');await page.getByRole('button',{name:'添加项目',exact:true}).click();
- assert.equal(await page.getByText('Future UI · #35 历史离线样本',{exact:true}).count(),0);
+ assert.equal(await page.getByText('历史离线样本',{exact:true}).count(),0);
  assert.equal(await page.getByRole('navigation',{name:'接入步骤'}).count(),0);
  await page.getByRole('button',{name:h.base,exact:true}).click();await page.getByRole('button',{name:'browser-project',exact:true}).click();await page.getByRole('button',{name:'接入项目',exact:true}).click();
  const dialog=page.getByRole('dialog');await dialog.waitFor();await dialog.getByRole('button',{name:'取消',exact:true}).click();assert.equal(enrollmentPreview(h.machinePath,root).request_file,null);

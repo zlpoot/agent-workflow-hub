@@ -1,3 +1,4 @@
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -7,7 +8,7 @@ import { fullFormats } from 'ajv-formats/dist/formats.js';
 import { validateEntity, validateBindings, replayRun, appendEvent, mapHandoffV01, RUN_STATES, ProtocolError } from '../dist/protocol/index.js';
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../examples/protocol/${name}.json`, import.meta.url)));
-const sample = fixture('webskill'), initial = sample.run;
+const sample = fixture('project-beta'), initial = sample.run;
 const sha = 'a'.repeat(40), base = 'b'.repeat(40);
 const pr = { provider: 'github', repository: initial.source.repository, kind: 'pull_request', number: 200 };
 const comment = { provider: 'github', repository: initial.source.repository, kind: 'issue_comment', number: 300 };
@@ -22,7 +23,7 @@ const data = {
   VERIFICATION_STARTED: { subject_sha: sha },
   VERIFICATION_PASSED: { subject_sha: sha, checks: [{ command: 'pnpm check', exit_code: 0 }] },
   VERIFICATION_FAILED: { subject_sha: sha, checks: [{ command: 'pnpm check', exit_code: 1 }], reason: 'Check failed' },
-  GITHUB_PUSH_COMPLETED: { commit: { ...initial.source, sha, ref: 'codex/awh-c07-webskill-bootstrap' } },
+  GITHUB_PUSH_COMPLETED: { commit: { ...initial.source, sha, ref: 'codex/awh-flow-03-project-beta-bootstrap' } },
   GITHUB_PR_CREATED: { pull_request: pr, base_sha: base, head_sha: sha },
   HANDOFF_PUBLISHED: { handoff_version: '0.1', publication: 'confirmed', pull_request: pr, comment, base_sha: base, head_sha: sha, subject_sha: sha },
   REVIEW_STARTED: { pull_request: pr, subject_sha: sha, reviewer_executor_id: 'fixture-reviewer' },
@@ -42,7 +43,7 @@ test('standalone draft 2020-12 schema compiles without network and matches entit
   const validate = ajv.compile(schema);
   assert.equal(schema.$id, 'urn:awh:protocol:1.0');
   assert.deepEqual(schema.$defs.run.properties.state.enum, RUN_STATES);
-  for (const name of ['webskill', 'future-ui']) {
+  for (const name of ['project-beta', 'project-alpha']) {
     const records = fixture(name);
     for (const [kind, value] of Object.entries(records)) {
       assert(validate(value), JSON.stringify(validate.errors));
@@ -220,10 +221,10 @@ test('a new verification cycle invalidates old candidate, publication and review
   rejects(() => appendEvent(initial, history, event('REVIEW_STARTED', { ...data.REVIEW_STARTED, subject_sha: base }, 12)), 'state');
 });
 
-const handoff = publication => ({ schema_version: '0.1', kind: 'builder_handoff', work_item: { repo: 'zlpoot/agent-workflow-hub', issue: 8 },
+const handoff = publication => ({ schema_version: '0.1', kind: 'builder_handoff', work_item: { repo: 'example-org/workflow-core', issue: 8 },
   candidate: { pr: pr.number, base_sha: base, head_sha: sha.toUpperCase() }, producer: { executor: 'Fixture Builder', run_id: initial.id },
   verification: { subject_sha: sha.toUpperCase(), lifecycle: 'completed', outcome: 'pass', checks: [{ command: 'pnpm check', exit_code: 0 }],
-    evidence_refs: ['https://github.com/zlpoot/webskill/pull/200#issuecomment-299'] }, handoff: { next_step: 'review', publication } });
+    evidence_refs: ['https://github.com/example-org/project-beta/pull/200#issuecomment-299'] }, handoff: { next_step: 'review', publication } });
 const context = { id: 'handoff-event', run_id: initial.id, sequence: 8, occurred_at: timestamp(8), repository: pr.repository, comment_number: comment.number };
 test('v0.1 mapping retains validation semantics and emits only HANDOFF_PUBLISHED references', () => {
   for (const publication of ['pending', 'confirmed', 'failed']) {

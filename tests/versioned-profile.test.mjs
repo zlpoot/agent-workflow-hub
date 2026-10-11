@@ -1,3 +1,4 @@
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, symlinkSync } from 'node:fs';
@@ -14,23 +15,23 @@ const load=(f,time=now)=>loadApprovedWorkItem(f.path,f.selection,time);
 const refused=(fn,code)=>assert.throws(fn,e=>e.code===code);
 test('new approved business Work Item has no fixed source mapping; immutable Observe and Develop declarations grant no delivery',t=>{
   const f=trustedFixture(temp(t)),a=load(f),p=versionedPreflight(a,facts);assert.equal(p.status,'passed');assert.equal(p.provider_scope,'not_checked');assert.equal(p.deliver,'blocked');assert.equal(p.authority_verified,false);assert(formatPreflight(p).includes('issue: approved=901'));
-  assert.throws(()=>selectWorkflow({profile:'hub',workflow:'fixture-business'}));assert.throws(()=>deliveryPolicy(facts.profile_ref,'v1'));assert.deepEqual(DEFAULT_SELECTION,{profile:'hub',workflow:'c05'});
+  assert.throws(()=>selectWorkflow({profile:'core',workflow:'fixture-business'}));assert.throws(()=>deliveryPolicy(facts.profile_ref,'v1'));assert.deepEqual(DEFAULT_SELECTION,{profile:'core',workflow:'flow-01'});
   assert(Object.isFrozen(a.work_item.checks));assert.throws(()=>{a.work_item.issue=902;});
   const r=declareDevelop(a,facts,{id:'run-fixture',source_sha:'a'.repeat(40)},now);
   const s=reportDevelop(a,r,{sequence:1,type:'started',checks:[]},now);
   const c=reportDevelop(a,s,{sequence:2,type:'checks_reported',checks:facts.checks.map(command=>({command,exit_code:0}))},now);
   const done=reportDevelop(a,c,{sequence:3,type:'completed',checks:[]},now);assert.equal(done.events.length,3);assert.equal(r.events.length,0);assert.equal(done.execution,'declarations_only');
 });
-test('one-time c1k code publication remains fixed Hub scope; historical defaults and profiles retain bindings',()=>{
-  const chosen=selectWorkflow({profile:'hub',workflow:'c1k'});assert.equal(chosen.profile.repository,'zlpoot/agent-workflow-hub');assert.equal(chosen.profile.base,'main');
-  assert.deepEqual(chosen.workflow,{id:'c1k',branch:'codex/c1k-versioned-profile-prototype',work_item:{repo:'zlpoot/agent-workflow-hub',issue:34},verification_commands:['pnpm build','node --test tests/versioned-profile.test.mjs','node --test tests/doctor.test.mjs'],bootstrap_paths:null});
-  for(const [workflow,issue] of [['c1h',31],['c1h-b0',31],['c1i',32]])assert.equal(selectWorkflow({profile:'hub',workflow}).workflow.work_item.issue,issue);
-  assert.equal(selectWorkflow().workflow.id,'c05');assert.equal(selectWorkflow({profile:'future-ui',workflow:'bootstrap'}).workflow.branch,'codex/awh-c06-bootstrap');assert.equal(selectWorkflow({profile:'webskill',workflow:'bootstrap'}).workflow.branch,'codex/awh-c07-webskill-bootstrap');
-  assert.throws(()=>selectWorkflow({profile:'hub',workflow:'c1k',repo:'zlpoot/other'}));assert.throws(()=>deliveryPolicy('hub/c1k'));
+test('one-time flow-15 code publication remains fixed Hub scope; historical defaults and profiles retain bindings',()=>{
+  const chosen=selectWorkflow({profile:'core',workflow:'flow-15'});assert.equal(chosen.profile.repository,'example-org/workflow-core');assert.equal(chosen.profile.base,'main');
+  assert.deepEqual(chosen.workflow,{id:'flow-15',branch:'codex/flow-15-versioned-profile-prototype',work_item:{repo:'example-org/workflow-core',issue:34},verification_commands:['pnpm build','node --test tests/versioned-profile.test.mjs','node --test tests/doctor.test.mjs'],bootstrap_paths:null});
+  for(const [workflow,issue] of [['flow-12',31],['flow-13',31],['flow-14',32]])assert.equal(selectWorkflow({profile:'core',workflow}).workflow.work_item.issue,issue);
+  assert.equal(selectWorkflow().workflow.id,'flow-01');assert.equal(selectWorkflow({profile:'project-alpha',workflow:'bootstrap'}).workflow.branch,'codex/awh-flow-02-bootstrap');assert.equal(selectWorkflow({profile:'project-beta',workflow:'bootstrap'}).workflow.branch,'codex/awh-flow-03-project-beta-bootstrap');
+  assert.throws(()=>selectWorkflow({profile:'core',workflow:'flow-15',repo:'example-org/other'}));assert.throws(()=>deliveryPolicy('core/flow-15'));
 });
 test('every binding difference is visible and Develop refuses all wrong or incomplete declarations',t=>{
   const a=load(trustedFixture(temp(t)));
-  const wrong={repository:'zlpoot/other',issue_repository:'zlpoot/other',issue:902,base:'release',branch:'codex/wrong',executor:'other-executor',checks:[...facts.checks].reverse(),profile_ref:'hub/other',profile_version:'v2',work_item_version:'v2'};
+  const wrong={repository:'example-org/other',issue_repository:'example-org/other',issue:902,base:'release',branch:'codex/wrong',executor:'other-executor',checks:[...facts.checks].reverse(),profile_ref:'core/other',profile_version:'v2',work_item_version:'v2'};
   for(const [field,value] of Object.entries(wrong)){const observed={...facts,[field]:value},p=versionedPreflight(a,observed);assert.equal(p.status,'blocked');assert.equal(p.differences.find(d=>d.field===field).status,'blocked');refused(()=>declareDevelop(a,observed,{id:'run',source_sha:'a'.repeat(40)},now),'binding');}
   assert.equal(versionedPreflight(a,{}).status,'not_checked');refused(()=>declareDevelop(a,{}, {id:'run',source_sha:'a'.repeat(40)},now),'binding');refused(()=>versionedPreflight(a,facts,'deliver',now),'stage');
 });
@@ -48,7 +49,7 @@ test('duplicate/conflicting versions and wrong approval actor/source are closed 
 });
 test('Work Item is narrowed by template; expanded branch/repo/executor/check/stage cannot use work-item approval alone',t=>{
   const dir=temp(t);
-  for(const patch of [{repository:'zlpoot/other'},{base:'other'},{branch:'feature/other'},{executor:'other'},{checks:['pnpm arbitrary']}]){
+  for(const patch of [{repository:'example-org/other'},{base:'other'},{branch:'feature/other'},{executor:'other'},{checks:['pnpm arbitrary']}]){
     refused(()=>load(trustedFixture(dir,({catalog,approvals})=>{Object.assign(catalog.work_items[0],patch);approvals.entries[1].fingerprint=policyFingerprint(catalog.work_items[0]);})),'template_scope');
   }
   refused(()=>load(trustedFixture(dir,({catalog,approvals})=>{catalog.profiles[0].stages=['observe'];approvals.entries[0].fingerprint=policyFingerprint(catalog.profiles[0]);})),'template_scope');

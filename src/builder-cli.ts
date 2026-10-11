@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { BuilderError, connectBuilder } from './builder.js';
-import { DEFAULT_SELECTION, ProfileError, selectWorkflow, type BuilderSelection } from './profiles.js';
+import { ProfileError, selectWorkflow, type BuilderSelection } from './profiles.js';
 
 // Validate the entire command before reading a key or making any request.
 const args = process.argv.slice(2);
-let selection: BuilderSelection = DEFAULT_SELECTION;
+let selection: BuilderSelection | undefined;
 if (args[0] === '--profile' && args[2] === '--workflow') {
   selection = { profile: args[1] ?? '', workflow: args[3] ?? '' };
   args.splice(0, 4);
@@ -21,8 +21,8 @@ const file = async (path: string | undefined) => {
   try { return await readFile(path, 'utf8'); } catch { throw new BuilderError('Body file unavailable'); }
 };
 try {
-  selectWorkflow(selection);
   if (!Object.hasOwn(sizes, op) || args.length !== sizes[op]) throw new BuilderError('Unsupported Builder operation or arguments');
+  selectWorkflow(selection);
   const pr = ['pr-update', 'pr-read', 'comment-create', 'comment-edit', 'comment-read', 'pr-ready'].includes(op) ? number(args[1]) : 0;
   const comment = ['comment-edit', 'comment-read'].includes(op) ? number(args[2]) : op === 'pr-ready' ? number(args[4]) : 0;
   if (op === 'pr-ready' && !/^[a-f0-9]{40}$/i.test(args[2] ?? '')) throw new BuilderError('Invalid expected head');

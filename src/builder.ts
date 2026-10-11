@@ -3,10 +3,8 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { relative, isAbsolute, dirname, join } from 'node:path';
 import { validateHandoff } from './validator.js';
-import { allowedInstallation, selectWorkflow, bindWorkflow, HUB_REPO, type TaskBinding, type BuilderSelection } from './profiles.js';
+import { allowedInstallation, loadTrustedPolicy, bindWorkflow, type TaskBinding, type BuilderSelection } from './profiles.js';
 
-export const REPO = HUB_REPO;
-export const BRANCH = selectWorkflow().workflow.branch;
 const API = 'https://api.github.com';
 const PERMISSIONS = { contents: 'write', issues: 'write', metadata: 'read', pull_requests: 'write' };
 const WRITE_PERMISSIONS = { contents: 'write', issues: 'write', pull_requests: 'write' };
@@ -78,11 +76,13 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
 // Returns only fixed Builder operations. Credentials and generic API requests stay in this closure.
 export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' | 'revision' = 'deliver', adoption?: CommentAdoption) {
   if (!['deliver','observe','recover','revision'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Tasks support restricted Builder modes');
-  const { profile, workflow } = bindWorkflow(selection, binding);
-  if (mode === 'revision' && workflow.id !== 'repeatable-docs') fail('Revision publication requires the trusted docs-only Task policy');
+  const policy = loadTrustedPolicy();
+  const { profile, workflow } = bindWorkflow(selection, binding, policy);
+  if (mode === 'revision' && workflow.branch_mode !== 'issue_prefix') fail('Revision publication requires the trusted docs-only Task policy');
   if (adoption && (mode !== 'revision' || !positive(adoption.pr) || !positive(adoption.comment) || !/^[a-f0-9]{64}$/.test(adoption.body_sha256) ||
       Object.keys(adoption).sort().join(',') !== 'body_sha256,comment,pr')) fail('Invalid receipt-bound comment adoption');
   const REPO = profile.repository, BRANCH = workflow.branch, ROOT = `/repos/${REPO}`;
+  const repoPattern = REPO.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), rootPattern = `/repos/${repoPattern}`;
   const d = { ...defaults, ...overrides };
   const appId = d.env.AWH_GITHUB_APP_ID;
   const keyPath = d.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH;
@@ -217,7 +217,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         r ? 'invalid_response' : 'network_or_timeout', r ? responseMetadata(r) : {});
       return fail('GitHub request failed (network, timeout, redirect or invalid JSON; details suppressed)');
     }
-    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && (mode === 'recover' && path === `${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1` || path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length)) || /^\/issues\/[1-9]\d*\/comments\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length))))) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) && !(method === 'GET' && (mode === 'recover' && path === `${ROOT}/pulls?state=all&head=${encodeURIComponent(REPO.split('/')[0] + ':' + BRANCH)}&per_page=100&page=1` || path.startsWith(ROOT + '/pulls/') && /^\/pulls\/[1-9]\d*\/reviews\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length)) || /^\/issues\/[1-9]\d*\/comments\?per_page=100&page=[1-9]\d*$/.test(path.slice(ROOT.length))))) {
       if (stage) diagnosticFailure(stage === 'revision.comment-post' || stage === 'revision.comment-confirm-patch' ? 'revision.comment-parse' : stage, 'invalid_response', responseMetadata(r!));
       fail('Invalid GitHub response');
     }
@@ -226,10 +226,10 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     return value as Json;
   };
   const app = await request('/app', jwt);
-  if (app.id !== Number(appId) || typeof app.slug !== 'string' || !/^[a-z0-9-]+$/.test(app.slug)) fail('App identity mismatch');
+  if (app.id !== policy.installation.app_id || app.slug !== policy.installation.app_slug || app.id !== Number(appId) || typeof app.slug !== 'string' || !/^[a-z0-9-]+$/.test(app.slug)) fail('App identity mismatch');
   const actor = `${app.slug}[bot]`;
   const inst = await request(`${ROOT}/installation`, jwt);
-  if (!positive(inst.id) || inst.app_id !== Number(appId) || inst.account?.login !== 'zlpoot' ||
+  if (inst.id !== policy.installation.installation_id || !positive(inst.id) || inst.app_id !== Number(appId) || inst.account?.login !== policy.installation.account_login ||
     inst.repository_selection !== 'selected' || inst.suspended_at !== null || !equalPermissions(inst.permissions) ||
     (override !== undefined && Number(override) !== inst.id)) fail('Installation identity, scope or permissions mismatch');
   const mint = async (restricted: boolean) => {
@@ -253,7 +253,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   // Metadata-only inspection covers the *actual* installation scope without granting writes to extra repositories.
   const scopeToken = await mint(false);
   const repositories = await request('/installation/repositories?per_page=100', scopeToken.token);
-  if (!allowedInstallation(repositories.repositories, repositories.total_count))
+  if (!allowedInstallation(repositories.repositories, repositories.total_count, policy))
     fail('Installation selected repository set is not allowed');
   const repositoryNames = (repositories.repositories as { full_name: string }[]).map(r => r.full_name);
   if (!repositoryNames.includes(REPO)) fail('Selected Profile repository is not installed; stop at Human Gate');
@@ -306,8 +306,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   let fixedRevisionPR: number | undefined = adoption?.pr;
   const call = (path: string, method = 'GET', body?: unknown, diagnosticStage?: PublicationStage) => {
     live();
-    const commentOnly = mode === 'revision' && (method === 'POST' && new RegExp('^' + ROOT + '/issues/[1-9]\\d*/comments$').test(path) ||
-      method === 'PATCH' && new RegExp('^' + ROOT + '/issues/comments/[1-9]\\d*$').test(path));
+    const commentOnly = mode === 'revision' && (method === 'POST' && new RegExp('^' + rootPattern + '/issues/[1-9]\\d*/comments$').test(path) ||
+      method === 'PATCH' && new RegExp('^' + rootPattern + '/issues/comments/[1-9]\\d*$').test(path));
     if (mode !== 'deliver' && method !== 'GET' && !commentOnly) fail('Restricted Builder mode cannot perform this mutation');
     const stage = diagnosticStage ?? (mode === 'revision' ? path.includes('/compare/') ? 'revision.compare-read' :
       method === 'POST' ? 'revision.comment-post' : method === 'PATCH' ? 'revision.comment-confirm-patch' :
@@ -390,7 +390,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   };
   if (mode === 'recover') {
     if (await readFeatureRefState() !== null) fail('Recovery Task branch already exists remotely');
-    const prs = await call(`${ROOT}/pulls?state=all&head=${encodeURIComponent('zlpoot:' + BRANCH)}&per_page=100&page=1`);
+    const prs = await call(`${ROOT}/pulls?state=all&head=${encodeURIComponent(REPO.split('/')[0] + ':' + BRANCH)}&per_page=100&page=1`);
     if (!Array.isArray(prs) || prs.length !== 0) fail('Recovery requires no PR on the canonical Task branch');
   }
   return Object.freeze({
@@ -513,7 +513,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     },
     readPR,
     listComments: async (number: number) => {
-      if (!binding || workflow.id !== 'repeatable-docs') fail('Publication reconciliation requires a frozen docs Task');
+      if (!binding || workflow.branch_mode !== 'issue_prefix') fail('Publication reconciliation requires a frozen docs Task');
       await readPR(number, true);
       const result: { id: number; actor: string; actor_type: string; body: string; url: string }[] = [];
       for (let page = 1; page <= 10; page++) {
@@ -535,12 +535,12 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       fail('Publication comment pagination limit reached; negative observation unavailable');
     },
     readAuthorization: async (number: number, comment: number) => {
-      if (!binding || workflow.id !== 'repeatable-docs') fail('Publication authorization requires a frozen docs Task');
+      if (!binding || workflow.branch_mode !== 'issue_prefix') fail('Publication authorization requires a frozen docs Task');
       await readPR(number, true);
       const c = await call(`${ROOT}/issues/comments/${id(comment)}`, 'GET', undefined, 'revision.authorization-read');
-      if (c.id !== comment || c.user?.login !== 'zlpoot' || c.user?.type !== 'User' || c.user?.id !== 36036483 || c.issue_url !== `${API}${ROOT}/issues/${id(number)}`)
+      if (c.id !== comment || c.user?.type !== 'User' || !policy.installation.authorization_actors.some(a => a.login === c.user?.login && a.id === c.user?.id) || c.issue_url !== `${API}${ROOT}/issues/${id(number)}`)
         diagnosticFailure('revision.authorization-read', 'invalid_response', responses.get(c));
-      return { id: comment, actor: 'zlpoot', body: safeText(c.body), url: `https://github.com/${REPO}/pull/${number}#issuecomment-${comment}` };
+      return { id: comment, actor: c.user.login as string, body: safeText(c.body), url: `https://github.com/${REPO}/pull/${number}#issuecomment-${comment}` };
     },
     adoptComment: async () => {
       if (!adoption || mode !== 'revision') fail('Comment adoption requires explicit receipt-bound recovery');
@@ -572,7 +572,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
               !['APPROVED','CHANGES_REQUESTED','COMMENTED','DISMISSED','PENDING'].includes(review.state))
             fail('Invalid native Review record');
           // Comments do not supersede an effective decision. Dismissals do.
-          if (review.user.type === 'User' && review.user.login !== actor && review.state !== 'COMMENTED' && review.state !== 'PENDING')
+          if (review.user.type === 'User' && policy.installation.reviewers.some(a => a.login === review.user.login && a.id === review.user.id) && review.user.login !== actor && review.state !== 'COMMENTED' && review.state !== 'PENDING')
             latest.set(review.user.login, review);
         }
         if (rows.length < 100) break;
@@ -652,7 +652,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         !c.body.includes(JSON.stringify(validation))) fail('Published Handoff or CLI result mismatch');
       if (binding && !c.body.includes('AWH Task Binding v0.2\n' + JSON.stringify({ ...binding, pull_request: number }))) fail('Published Task binding mismatch');
       for (const ref of handoff.verification.evidence_refs) {
-        const match = ref.match(new RegExp(`^https://github\\.com/${REPO}/pull/${number}#issuecomment-(\\d+)$`));
+        const match = ref.match(new RegExp(`^https://github\\.com/${repoPattern}/pull/${number}#issuecomment-(\\d+)$`));
         if (!match || Number(match[1]) === comment) fail('Evidence must reference a separate Builder comment on this PR');
         const evidence = await readComment(number, Number(match[1]));
         if (!evidence.body.startsWith('Builder evidence\n') || !evidence.body.includes(expectedHead)) fail('Builder evidence version mismatch');

@@ -1,0 +1,106 @@
+{
+  "manifest": {
+    "apiVersion": "awh/v1",
+    "project": {
+      "id": "project-alpha",
+      "repository": "example-org/project-alpha"
+    },
+    "profile": {
+      "ref": "project-alpha/bootstrap"
+    }
+  },
+  "project": {
+    "schema_version": "1.0",
+    "kind": "project",
+    "id": "project-alpha",
+    "repository": "example-org/project-alpha",
+    "profile_ref": "project-alpha/bootstrap"
+  },
+  "profile_policy": {
+    "schema_version": "1.0",
+    "kind": "profile_policy",
+    "ref": "project-alpha/bootstrap",
+    "version": "fixture-v1",
+    "repository": "example-org/project-alpha",
+    "base": "main",
+    "branch": {
+      "mode": "fixed",
+      "ref": "codex/awh-flow-02-bootstrap"
+    },
+    "verification": {
+      "commands": [
+        "pnpm lint",
+        "pnpm typecheck",
+        "pnpm test"
+      ]
+    },
+    "github_app": {
+      "identity": "installation",
+      "repository_scope": "single",
+      "selected_set_policy": "exact",
+      "permissions": {
+        "contents": "write",
+        "issues": "write",
+        "metadata": "read",
+        "pull_requests": "write"
+      }
+    },
+    "review": {
+      "mode": "independent_exact_head",
+      "builder_is_reviewer": false
+    },
+    "delivery": {
+      "draft_pr": true,
+      "handoff_version": "0.1",
+      "confirmed_publication_required": true,
+      "exact_head_required": true
+    },
+    "executor_restrictions": null
+  },
+  "executor": {
+    "schema_version": "1.0",
+    "kind": "executor",
+    "id": "fixture-windows-builder",
+    "display_name": "Fixture Builder",
+    "machine": {
+      "id": "fixture-windows",
+      "platform": "windows"
+    }
+  },
+  "work_item": {
+    "schema_version": "1.0",
+    "kind": "work_item",
+    "id": "fixture-project-alpha-bootstrap",
+    "project_id": "project-alpha",
+    "reference": {
+      "provider": "github",
+      "repository": "example-org/workflow-core",
+      "kind": "issue",
+      "number": 6
+    }
+  },
+  "run": {
+    "schema_version": "1.0",
+    "kind": "run",
+    "id": "fixture-project-alpha-run",
+    "project_id": "project-alpha",
+    "work_item_id": "fixture-project-alpha-bootstrap",
+    "executor_id": "fixture-windows-builder",
+    "machine_id": "fixture-windows",
+    "source": {
+      "provider": "github",
+      "repository": "example-org/project-alpha",
+      "sha": "1111111111111111111111111111111111111111",
+      "ref": "main"
+    },
+    "profile": {
+      "ref": "project-alpha/bootstrap",
+      "version": "fixture-v1"
+    },
+    "state": "created",
+    "created_at": "2026-10-07T00:00:00.000Z",
+    "started_at": null,
+    "updated_at": "2026-10-07T00:00:00.000Z",
+    "completed_at": null
+  }
+}

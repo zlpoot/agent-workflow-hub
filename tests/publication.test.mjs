@@ -1,3 +1,5 @@
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -14,21 +16,21 @@ import { publicationBodies, publicationObservation, publicationScope, parsePubli
 import { harness } from './fixtures/revision-harness.mjs';
 import { main } from '../dist/client/cli.js';
 
-const windows={timeout:60000,skip:process.platform!=='win32'&&'Original Windows policy'};
+const windows={timeout:60000,skip:process.platform!=='win32'&&'synthetic Windows environment'};
 test('publication CLI is closed; typed Builder diagnostics survive real executable error handling',async()=>{
  for(const args of [['reconcile-publication'],['resume-publication','--revision','revision-'+'a'.repeat(64)],['resume-publication','--retry'],['reconcile-publication','--revision','revision-'+'a'.repeat(64),'--repo','other/repo'],['resume-publication','--revision','revision-'+'a'.repeat(64),'--authorization-comment','0']])await assert.rejects(main(['--config','ignored',...args]),e=>e.code==='arguments');
  const cli=fileURLToPath(new URL('../dist/client/cli.js',import.meta.url)),code=`import{AwhClient}from${JSON.stringify(new URL('../dist/client/client.js',import.meta.url).href)};import{BuilderError}from${JSON.stringify(new URL('../dist/builder.js',import.meta.url).href)};AwhClient.prototype.reconcilePublication=async()=>{throw new BuilderError('sensitive raw body',undefined,undefined,undefined,{stage:'revision.comment-post',category:'permission_or_policy',http_status:403,github_request_id:'ABC:123'});};process.argv=['node',${JSON.stringify(cli)},'--config','ignored','reconcile-publication','revision'];process.argv[5]='--revision';process.argv.push('revision-'+'a'.repeat(64));await import(${JSON.stringify(new URL('../dist/client/cli.js',import.meta.url).href)});`;
  const r=spawnSync(process.execPath,['--input-type=module','--eval',code],{encoding:'utf8',windowsHide:true,env:Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^(AWH_|GH_|GITHUB_|NODE_OPTIONS$)/i.test(k)))});
  assert.equal(r.status,2);assert.equal(r.stdout,'');assert.deepEqual(JSON.parse(r.stderr),{error:{code:'github_revision',message:'Revision GitHub operation failed',diagnostic:{stage:'revision.comment-post',category:'permission_or_policy',http_status:403,github_request_id:'ABC:123'}},authority_verified:false});
 });
-test('original PR92 phase 0/1 bytes reconcile offline against actual 9/52 history; controlled publication links same ID at cursor 53',t=>{
- const fixture=JSON.parse(readFileSync(new URL('./fixtures/revision-pr92-history.json',import.meta.url),'utf8').replace(/^\uFEFF/,'')),frozen=JSON.parse(readFileSync(new URL('./fixtures/publication-pr92-phases.json',import.meta.url),'utf8'));
+test('synthetic candidate phase 0/1 bytes reconcile offline against synthetic multi-run history; controlled publication links same ID at cursor 53',t=>{
+ const fixture=JSON.parse(readFileSync(new URL('./fixtures/revision-history.json',import.meta.url),'utf8').replace(/^\uFEFF/,'')),frozen=JSON.parse(readFileSync(new URL('./fixtures/publication-phases.json',import.meta.url),'utf8'));
  const directory=mkdtempSync(join(tmpdir(),'awh-publication-history-')),receipt=new RevisionReceipt(directory,frozen.provenance.revision_id);
- const path=join(directory,'fixture.sqlite'),store=new ControlPlaneStore(path,fixture.tables.profiles.map(p=>JSON.parse(p.record))),db=new DatabaseSync(path);t.after(()=>{db.close();store.close();rmSync(directory,{recursive:true,force:true});});
+ const path=join(directory,'fixture.sqlite'),store=fixtureStore(path,fixture.tables.profiles.map(p=>JSON.parse(p.record))),db=new DatabaseSync(path);t.after(()=>{db.close();store.close();rmSync(directory,{recursive:true,force:true});});
  frozen.bytes.forEach((body,i)=>{assert.equal(digest(body),frozen.provenance.sha256[i]);writeFileSync(receipt.file(i),body,{flag:'wx'});});
  const phases=receipt.phases(),p=phases[0].value,bodies=publicationBodies(p,phases[1].value.body),row=fixture.tables.runs.find(r=>r.id===p.run_id),initial=JSON.parse(row.initial),events=fixture.tables.events.filter(e=>e.run_id===p.run_id).map(e=>JSON.parse(e.record)),projection=replayRun(initial,events);
  assert.equal(p.cp_events_sha256,digest(JSON.stringify(events)));assert.equal(p.source_sha,initial.source.sha);assert.equal(p.previous_head,projection.effective_candidate_head);assert.equal(p.new_head,fixture.provenance.head);assert.equal(p.pull_request.number,92);
- const comments=JSON.parse(readFileSync(new URL('./fixtures/revision-pr92-comments.json',import.meta.url),'utf8').replace(/^\uFEFF/,'' )).map(c=>({...c,actor_type:'Bot'}));
+ const comments=JSON.parse(readFileSync(new URL('./fixtures/revision-comments.json',import.meta.url),'utf8').replace(/^\uFEFF/,'' )).map(c=>({...c,actor_type:'Bot'}));
  const docs=comments.find(c=>c.id===6071714260);assert(docs.body.includes(p.run_id)&&docs.body.includes(p.new_head));assert(!docs.body.includes(p.revision_id));
  const observation=publicationObservation(p,bodies,comments),oldBody=comments.find(c=>c.id===p.previous_handoff.number).body,scope=publicationScope(receipt,p,'a'.repeat(64),oldBody,observation);
  assert.equal(observation.kind,'negative_observation');assert.equal(observation.first_post_not_submitted_proven,false);
@@ -46,17 +48,17 @@ test('original PR92 phase 0/1 bytes reconcile offline against actual 9/52 histor
  for(const [table,rows]of Object.entries(before)){if(table==='events')continue;if(table==='runs'){for(const r of rows){const next=after.runs.find(x=>x.id===r.id);assert.equal(next.initial,r.initial);if(r.id!==p.run_id)assert.deepEqual(next,r);}}else assert.deepEqual(after[table],rows);}
  frozen.bytes.forEach((body,i)=>assert.equal(readFileSync(receipt.file(i),'utf8'),body));assert.equal(posts,1);assert.equal(patches,1);assert.equal(store.append(principal,p.run_id,event).disposition,'idempotent');assert.equal(db.prepare('PRAGMA user_version').get().user_version,2);
 });
-function realPublication() {
- const frozen=JSON.parse(readFileSync(new URL('./fixtures/publication-pr92-phases.json',import.meta.url),'utf8'));
+function fixturePublication() {
+ const frozen=JSON.parse(readFileSync(new URL('./fixtures/publication-phases.json',import.meta.url),'utf8'));
  const p=JSON.parse(frozen.bytes[0]).value,bodies=publicationBodies(p,JSON.parse(frozen.bytes[1]).value.body);
- const comments=JSON.parse(readFileSync(new URL('./fixtures/revision-pr92-comments.json',import.meta.url),'utf8').replace(/^\uFEFF/,'')).map(c=>({...c,actor_type:'Bot'}));
+ const comments=JSON.parse(readFileSync(new URL('./fixtures/revision-comments.json',import.meta.url),'utf8').replace(/^\uFEFF/,'')).map(c=>({...c,actor_type:'Bot'}));
  const comment=body=>({id:800002,actor:p.actor,actor_type:'Bot',body});
  const encode=(h,r)=>'AWH-HANDOFF v0.1\n```json\n'+JSON.stringify(h,null,2)+'\n```'+(r?'\nAWH-REVISION v0.2.1\n```json\n'+JSON.stringify(r,null,2)+'\n```':'');
  const sections=body=>[...body.matchAll(/```json\n([\s\S]*?)\n```/g)].map(m=>JSON.parse(m[1]));
  return {p,bodies,comments,comment,encode,sections};
 }
-for(const publication of ['pending','confirmed'])test('real PR92 prose-only document Handoff stays separate from exact '+publication+' revision',()=>{
- const {p,bodies,comments,comment}=realPublication(),before=JSON.stringify(comments);
+for(const publication of ['pending','confirmed'])test('synthetic candidate prose-only document Handoff stays separate from exact '+publication+' revision',()=>{
+ const {p,bodies,comments,comment}=fixturePublication(),before=JSON.stringify(comments);
  const q=publicationObservation(p,bodies,[...comments,comment(bodies[publication])]);assert.equal(q.kind,'existing');assert.equal(q.publication,publication);assert.equal(q.comment_id,800002);assert.equal(JSON.stringify(comments),before);
  assert.throws(()=>publicationObservation(p,bodies,[...comments,comment(bodies[publication]),{...comment(bodies[publication]),id:800003}]),e=>e.code==='publication_conflict');
 });
@@ -81,29 +83,29 @@ const corruptions={
  'unbounded protocol body':({bodies})=>bodies.pending+' '.repeat(65536),
 };
 for(const[name,mutate]of Object.entries(corruptions))test('bounded publication classification fails closed: '+name,()=>{
- const f=realPublication();assert.throws(()=>publicationObservation(f.p,f.bodies,[...f.comments,f.comment(mutate(f))]),e=>e.code==='publication_conflict');
+ const f=fixturePublication();assert.throws(()=>publicationObservation(f.p,f.bodies,[...f.comments,f.comment(mutate(f))]),e=>e.code==='publication_conflict');
 });
 test('only a complete consistent other revision is separated; malformed metadata and wrong actor remain conflicts',()=>{
- const f=realPublication(),[h,r]=f.sections(f.bodies.confirmed);h.candidate.head_sha='a'.repeat(40);h.verification.subject_sha=h.candidate.head_sha;r.new_head=h.candidate.head_sha;r.revision_id='revision-'+'f'.repeat(64);
+ const f=fixturePublication(),[h,r]=f.sections(f.bodies.confirmed);h.candidate.head_sha='a'.repeat(40);h.verification.subject_sha=h.candidate.head_sha;r.new_head=h.candidate.head_sha;r.revision_id='revision-'+'f'.repeat(64);
  const other=f.comment(f.encode(h,r));assert.equal(publicationObservation(f.p,f.bodies,[...f.comments,other]).kind,'negative_observation');
  assert.throws(()=>publicationObservation(f.p,f.bodies,[{...other,actor:'other[bot]'}]),e=>e.code==='publication_conflict');
  delete r.evidence_sha256;assert.throws(()=>publicationObservation(f.p,f.bodies,[f.comment(f.encode(h,r))]),e=>e.code==='publication_conflict');
 });
 test('ordinary Run/HEAD prose and structured Human resume proposal confer no publication authority',()=>{
- const f=realPublication(),a={schema_version:'1.0',kind:'revision_publication_resume',revision_id:f.p.revision_id};
+ const f=fixturePublication(),a={schema_version:'1.0',kind:'revision_publication_resume',revision_id:f.p.revision_id};
  const comments=[...f.comments,f.comment('References '+f.p.run_id+' '+f.p.new_head),f.comment('AWH-PUBLICATION-RESUME v0.2.1-R1\n```json\n'+JSON.stringify(a)+'\n```')];
  const q=publicationObservation(f.p,f.bodies,comments);assert.equal(q.kind,'negative_observation');assert.equal(q.first_post_not_submitted_proven,false);assert.equal(q.automatic_repost_authorized,false);
  assert.throws(()=>parsePublicationAuthorization(comments.at(-1).body,{revision_id:f.p.revision_id,observation:q}));
 });
 async function failed(t,{existing=null,recovered=false}={}) {
  const h=await harness(t),route=h.client.request;
- h.client.request=async(c,path,...args)=>path==='/v1/capabilities'?{revision_linking:'v021-docs-v1',database_version:2,authority_verified:false}:route(c,path,...args);
+ h.client.request=async(c,path,...args)=>path==='/v1/capabilities'?{revision_linking:'revision-link-v1',database_version:2,authority_verified:false}:route(c,path,...args);
  let predecessor;
- if(recovered){await assert.rejects(deliver(h.client,{title:'Fixture',body:'Refs #90',holdDraft:true,issue:90},{...h.deps,verify:async command=>({command,exit_code:2,stdout:'known offline failure',stderr:'',elapsed_ms:1})}));predecessor=JSON.parse(readFileSync(h.session())).initial.id;writeFileSync(join(h.repo,'docs/management/awh-repeatable-workflow.md'),'recovery fix\n');h.git(h.repo,['add','.']);h.git(h.repo,['commit','-m','recovery fixture']);}
+ if(recovered){await assert.rejects(deliver(h.client,{title:'Fixture',body:'Refs #90',holdDraft:true,issue:90},{...h.deps,verify:async command=>({command,exit_code:2,stdout:'known offline failure',stderr:'',elapsed_ms:1})}));predecessor=JSON.parse(readFileSync(h.session())).initial.id;writeFileSync(join(h.repo,'docs/management/task-document.md'),'recovery fix\n');h.git(h.repo,['add','.']);h.git(h.repo,['commit','-m','recovery fixture']);}
  const result=await deliver(h.client,{title:'Fixture',body:'Refs #90',holdDraft:true,issue:90,...(predecessor?{recoverFromRun:predecessor}:{})},h.deps);
  const sessionBytes=readFileSync(h.session()),journal=join(dirname(h.session()),result.run_id+'.delivery.json'),journalBytes=readFileSync(journal),oldEvents=h.events(result.run_id);
- writeFileSync(join(h.repo,'docs/management/awh-repeatable-workflow.md'),'revision\n');h.git(h.repo,['add','.']);h.git(h.repo,['commit','-m','docs revision']);
- const head=h.git(h.repo,['rev-parse','HEAD']),data={actor:'zlpoot-awh-builder[bot]',verification:{command:REVISION_COMMAND,command_runs:1,exit_code:0,before_sha:head,after_sha:head,base_sha:h.baseline,clean_before:true,clean_after:true,environment:{platform:'win32',arch:'x64',node:'fixture',git:'fixture'},started_at:'2026-10-09T00:00:00.000Z',finished_at:'2026-10-09T00:00:01.000Z',stdout:'',stderr:''}};
+ writeFileSync(join(h.repo,'docs/management/task-document.md'),'revision\n');h.git(h.repo,['add','.']);h.git(h.repo,['commit','-m','docs revision']);
+ const head=h.git(h.repo,['rev-parse','HEAD']),data={actor:'test-builder[bot]',verification:{command:REVISION_COMMAND,command_runs:1,exit_code:0,before_sha:head,after_sha:head,base_sha:h.baseline,clean_before:true,clean_after:true,environment:{platform:'win32',arch:'x64',node:'fixture',git:'fixture'},started_at:'2026-10-09T00:00:00.000Z',finished_at:'2026-10-09T00:00:01.000Z',stdout:'',stderr:''}};
  h.comments.set(10000,'Builder evidence — documentation review correction\n```json\n'+JSON.stringify(data)+'\n```\nRaw stdout: ""\nRaw stderr: ""');
  const create=h.builder.createComment,edit=h.builder.editComment;let posts=0,patches=0;
  h.builder.createComment=async(...args)=>{if(existing){await create(...args);}throw Error('Original result unknown');};
@@ -133,7 +135,7 @@ test('phase 0/1 reconciliation is read-only: missing comment is not no-submit pr
  await assert.rejects(h.client.retryRevision());await assert.rejects(h.resume());assert(!existsSync(h.intent));
 });
 test('complete offline Client excludes public docs-review prose, preserves the comment, and still requires explicit one-shot authorization',windows,async t=>{
- const h=await failed(t),f=realPublication(),docs=f.comments.find(c=>c.id===6071714260).body.replaceAll(f.p.run_id,h.result.run_id).replaceAll(f.p.new_head,h.head);h.comments.set(30000,docs);
+ const h=await failed(t),f=fixturePublication(),docs=f.comments.find(c=>c.id===6071714260).body.replaceAll(f.p.run_id,h.result.run_id).replaceAll(f.p.new_head,h.head);h.comments.set(30000,docs);
  const before=readdirSync(dirname(h.session())),q=await h.reconcile();assert.equal(q.observation.kind,'negative_observation');assert.equal(q.provider_writes,0);assert.equal(q.human_authorization_required,true);assert.equal(q.first_post_not_submitted_proven,false);assert.deepEqual(readdirSync(dirname(h.session())),before);assert.equal(h.posts(),0);await assert.rejects(h.resume());assert(!existsSync(h.intent));
  await h.authorize();await h.resume();assert.equal(h.posts(),1);assert.equal(h.events(h.result.run_id).length,11);assert.equal(h.comments.get(30000),docs);h.preserved();
 });

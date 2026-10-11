@@ -8,6 +8,7 @@ import { DashboardReadStore } from './control-plane/store.js';
 import { createDashboardGateway } from './dashboard/gateway.js';
 import { createLocalOnboarding, type LocalBinding } from './dashboard/onboarding.js';
 import { createEnrollmentService } from './dashboard/enrollment.js';
+import { createOwnerApproval } from './dashboard/owner-approval.js';
 import { readMachineConfig } from './client/enrollment.js';
 
 interface ViewerConfig { schema_version: '1.0'; mode: 'local_browser_direct'; database: string; port: number; viewer: { id: string; project_ids: string[] }; local_bindings: LocalBinding[]; machine_config_file?: string }
@@ -23,9 +24,12 @@ export function readViewerConfig(path: string): ViewerConfig {
   externalFilePath(c.database); createLocalOnboarding(c.local_bindings); return c;
 }
 export async function main(args: string[]) {
-  if (args.length === 1 && args[0] === '--help') return console.log('awh-viewer --config <absolute-external-json-file>\nExplicit IPv4 loopback OS-user viewer, existing CP v2 read-only database, scoped browser cookie and opt-in offline installed-Client diagnosis. Ctrl+C stops the viewer.');
-  if (args.length !== 2 || args[0] !== '--config') fail(500, 'configuration', 'Viewer requires exactly one explicit external configuration');
-  const c = readViewerConfig(args[1]!), enrollment = c.machine_config_file ? createEnrollmentService(c.machine_config_file) : undefined;
+  if (args.length === 1 && args[0] === '--help') return console.log('awh-viewer --config <absolute-external-json-file>\nExplicit IPv4 loopback OS-user viewer, existing CP v2 read-only database, scoped browser cookie and opt-in offline installed-Client diagnosis. Optional --owner-config <absolute-external-json-file> enables local administrator confirmation. Ctrl+C stops the viewer.');
+  if (![2,4].includes(args.length) || args[0] !== '--config' || args.length === 4 && args[2] !== '--owner-config') fail(500, 'configuration', 'Viewer requires exactly one explicit external configuration');
+  const c = readViewerConfig(args[1]!);
+  if(args.length === 4 && !c.machine_config_file)fail(500,'owner_configuration','Machine setup required');
+  const ownerApprove=args.length === 4 ? createOwnerApproval(c.machine_config_file!,args[3]!,c.database) : undefined;
+  const enrollment = c.machine_config_file ? createEnrollmentService(c.machine_config_file,ownerApprove) : undefined;
   for (const b of enrollment?.bindings() ?? []) if (!c.viewer.project_ids.includes(b.project_id)) c.viewer.project_ids.push(b.project_id);
   const store = new DashboardReadStore(c.database, () => enrollment?.bindings() ?? []);
   // Assets are relative to the installed product, never an editable config path.

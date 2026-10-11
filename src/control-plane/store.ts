@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { existsSync, lstatSync } from 'node:fs';
 import { externalFilePath } from '../shared/external-files.js';
 import { appendEvent, assertEntity, assertClientMetadata, validateBindings, type ClientMetadata } from '../protocol/index.js';
 import type { Event, Executor, ProfilePolicy, Project, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
@@ -6,6 +7,27 @@ import { executorAccess, fail, MAX_PAYLOAD_BYTES, projectAccess, safeData, type 
 import type { EnrollmentGrant } from '../shared/enrollment.js';
 
 export const DATABASE_VERSION = 2;
+const INIT_SCHEMA_SQL = `
+          CREATE TABLE profiles (ref TEXT NOT NULL, version TEXT NOT NULL, record TEXT NOT NULL CHECK(json_valid(record)), PRIMARY KEY(ref, version)) STRICT;
+          CREATE TABLE projects (id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          CREATE TABLE executors (id TEXT PRIMARY KEY, client_id TEXT NOT NULL, last_seen TEXT NOT NULL, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          CREATE TABLE work_items (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          CREATE TABLE runs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), executor_id TEXT NOT NULL REFERENCES executors(id),
+            work_item_id TEXT NOT NULL REFERENCES work_items(id), client_id TEXT NOT NULL, initial TEXT NOT NULL CHECK(json_valid(initial)), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          CREATE TABLE events (cursor INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id), event_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL CHECK(sequence > 0), record TEXT NOT NULL CHECK(json_valid(record)), UNIQUE(run_id, event_id), UNIQUE(run_id, sequence)) STRICT;
+          CREATE INDEX runs_project ON runs(project_id);
+          CREATE INDEX events_run ON events(run_id, sequence);
+          CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'Events are append-only'); END;
+          CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'Events are append-only'); END;
+          CREATE TRIGGER runs_identity_no_update BEFORE UPDATE OF id, project_id, executor_id, work_item_id, client_id, initial ON runs BEGIN SELECT RAISE(ABORT, 'Run identity is immutable'); END;
+          CREATE TRIGGER profiles_no_update BEFORE UPDATE ON profiles BEGIN SELECT RAISE(ABORT, 'Profile versions are immutable'); END;
+          CREATE TRIGGER profiles_no_delete BEFORE DELETE ON profiles BEGIN SELECT RAISE(ABORT, 'Profile versions are immutable'); END;
+          CREATE TABLE executor_clients (executor_id TEXT PRIMARY KEY REFERENCES executors(id), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
+          PRAGMA user_version = 2;
+        `;
+const schemaRecords = (db: DatabaseSync) => db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all().map(row => ({...row,sql:String(row.sql).replace(/\s+/g,' ').trim()}));
+const expectedSchema = (() => {const db=new DatabaseSync(':memory:');try{db.exec(INIT_SCHEMA_SQL);return JSON.stringify(schemaRecords(db));}finally{db.close();}})();
 type Row = Record<string, string | number | bigint | Uint8Array | null>;
 export interface StoredEvent { cursor: number; event: Event }
 export interface DashboardReadView {
@@ -36,6 +58,7 @@ export function validateExistingDatabase(path: string, policies: readonly Profil
   try {
     if (Number(db.prepare('PRAGMA user_version').get()!.user_version) !== DATABASE_VERSION)
       fail(500, 'database_version', 'Normal startup requires an existing CP v2 database');
+    if (JSON.stringify(schemaRecords(db)) !== expectedSchema) fail(500, 'database_identity', 'Database schema differs from the supported CP schema');
     const columns: Record<string, string[]> = {
       profiles: ['ref','version','record'], projects: ['id','record'],
       executors: ['id','client_id','last_seen','record'], work_items: ['id','project_id','record'],
@@ -69,10 +92,12 @@ export function validateExistingDatabase(path: string, policies: readonly Profil
 export class ControlPlaneStore {
   readonly #db: DatabaseSync;
   #revision = 0;
-  constructor(path: string, policies: readonly ProfilePolicy[], readonly now = () => new Date().toISOString(), mode: 'legacy' | 'existing' = 'legacy', readonly enrollmentGrants: () => readonly EnrollmentGrant[] = () => []) {
+  constructor(path: string, policies: readonly ProfilePolicy[], readonly now = () => new Date().toISOString(), mode: 'initialize' | 'existing' = 'existing', readonly enrollmentGrants: () => readonly EnrollmentGrant[] = () => []) {
     if (!Array.isArray(policies) || policies.length === 0 || policies.length > 256) fail(500, 'configuration', 'Trusted Profile policies are required');
     policies.forEach(policy => entity('profile_policy', policy));
-    if (mode !== 'legacy' && mode !== 'existing') fail(500, 'configuration', 'Invalid store startup mode');
+    if (mode !== 'initialize' && mode !== 'existing') fail(500, 'configuration', 'Invalid store startup mode');
+    if (mode === 'initialize' && path !== ':memory:' && existsSync(path) && lstatSync(path).size !== 0)
+      fail(500, 'database_version', 'Initialization requires a new empty database');
     if (mode === 'existing') path = validateExistingDatabase(path, policies, enrollmentGrants());
     this.#db = new DatabaseSync(path, { timeout: 5000, enableForeignKeyConstraints: true, allowExtension: false });
     try {
@@ -81,29 +106,9 @@ export class ControlPlaneStore {
         const version = Number(this.#db.prepare('PRAGMA user_version').get()!.user_version);
         if (mode === 'existing' && version !== DATABASE_VERSION) fail(500, 'database_version', 'Existing CP version changed during startup');
         if (version > DATABASE_VERSION) fail(500, 'database_version', 'Database schema is newer than this server');
-        if (version !== 0 && version !== 1 && version !== DATABASE_VERSION) fail(500, 'database_version', 'Unsupported database schema');
-        if (version === 0) this.#db.exec(`
-          CREATE TABLE profiles (ref TEXT NOT NULL, version TEXT NOT NULL, record TEXT NOT NULL CHECK(json_valid(record)), PRIMARY KEY(ref, version)) STRICT;
-          CREATE TABLE projects (id TEXT PRIMARY KEY, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
-          CREATE TABLE executors (id TEXT PRIMARY KEY, client_id TEXT NOT NULL, last_seen TEXT NOT NULL, record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
-          CREATE TABLE work_items (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
-          CREATE TABLE runs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), executor_id TEXT NOT NULL REFERENCES executors(id),
-            work_item_id TEXT NOT NULL REFERENCES work_items(id), client_id TEXT NOT NULL, initial TEXT NOT NULL CHECK(json_valid(initial)), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
-          CREATE TABLE events (cursor INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id), event_id TEXT NOT NULL,
-            sequence INTEGER NOT NULL CHECK(sequence > 0), record TEXT NOT NULL CHECK(json_valid(record)), UNIQUE(run_id, event_id), UNIQUE(run_id, sequence)) STRICT;
-          CREATE INDEX runs_project ON runs(project_id);
-          CREATE INDEX events_run ON events(run_id, sequence);
-          CREATE TRIGGER events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'Events are append-only'); END;
-          CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'Events are append-only'); END;
-          CREATE TRIGGER runs_identity_no_update BEFORE UPDATE OF id, project_id, executor_id, work_item_id, client_id, initial ON runs BEGIN SELECT RAISE(ABORT, 'Run identity is immutable'); END;
-          CREATE TRIGGER profiles_no_update BEFORE UPDATE ON profiles BEGIN SELECT RAISE(ABORT, 'Profile versions are immutable'); END;
-          CREATE TRIGGER profiles_no_delete BEFORE DELETE ON profiles BEGIN SELECT RAISE(ABORT, 'Profile versions are immutable'); END;
-          PRAGMA user_version = 1;
-        `);
-        if (version < 2) this.#db.exec(`
-          CREATE TABLE executor_clients (executor_id TEXT PRIMARY KEY REFERENCES executors(id), record TEXT NOT NULL CHECK(json_valid(record))) STRICT;
-          PRAGMA user_version = 2;
-        `);
+        if (mode === 'initialize' && (version !== 0 || this.#db.prepare("SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all().length !== 0))
+          fail(500, 'database_version', 'Initialization requires a new empty database');
+        if (version === 0) this.#db.exec(INIT_SCHEMA_SQL);
         for (const policy of policies) {
           const versions = this.#db.prepare('SELECT record FROM profiles WHERE ref = ?').all(policy.ref);
           if (versions.some(row => decode<ProfilePolicy>(row).repository !== policy.repository))

@@ -1,3 +1,5 @@
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -7,9 +9,9 @@ import { assertEntity } from '../dist/protocol/index.js';
 import { DashboardReader, assertContract, mergeEvents, safeGitHubUrl, safeSourceUrl } from '../dashboard/adapter.mjs';
 
 function fixture(t) {
-  const f = JSON.parse(readFileSync(new URL('../examples/protocol/webskill.json', import.meta.url)));
+  const f = JSON.parse(readFileSync(new URL('../examples/protocol/project-beta.json', import.meta.url)));
   const p = { id: 'fixture-client', project_ids: [f.project.id], executor_ids: [f.executor.id] };
-  const store = new ControlPlaneStore(':memory:', [f.profile_policy], () => '2026-10-08T00:00:00.000Z'); t.after(() => store.close());
+  const store = fixtureStore(':memory:', [f.profile_policy], () => '2026-10-08T00:00:00.000Z'); t.after(() => store.close());
   store.registerProject(p, f.manifest); store.registerExecutor(p, f.executor); store.registerWorkItem(p, f.work_item); store.createRun(p, f.run);
   const append = (sequence, type, data) => store.append(p, f.run.id, { schema_version: '1.0', kind: 'event', id: 'fixture-event-' + sequence, run_id: f.run.id,
     sequence, type, occurred_at: '2026-10-08T00:00:00.000Z', payload: { schema_version: '1.0', data, extensions: {} } });
@@ -40,10 +42,10 @@ test('browser DTO validation rejects changed authority, extra secret fields and 
   assert.equal(snapshot.projects[0].enabled, null); assert.equal(snapshot.executors[0].type, null);
 });
 test('links reconstruct typed GitHub identities and refuse untrusted URLs, malformed references and non-issues', () => {
-  const ref = { provider: 'github', repository: 'zlpoot/agent-workflow-hub', kind: 'issue', number: 30, authority_verified: false, url: 'https://evil.invalid/?secret=x' };
-  assert.equal(safeGitHubUrl(ref), 'https://github.com/zlpoot/agent-workflow-hub/issues/30');
+  const ref = { provider: 'github', repository: 'example-org/workflow-core', kind: 'issue', number: 30, authority_verified: false, url: 'https://evil.invalid/?secret=x' };
+  assert.equal(safeGitHubUrl(ref), 'https://github.com/example-org/workflow-core/issues/30');
   for (const patch of [{ kind: 'review' }, { provider: 'other' }, { authority_verified: true }, { number: 0 }, { repository: 'x/../evil' }]) assert.equal(safeGitHubUrl({ ...ref, ...patch }), null);
-  assert.equal(safeSourceUrl({ repository: 'zlpoot/future-ui', sha: '1'.repeat(40), url: 'javascript:alert(1)' }), 'https://github.com/zlpoot/future-ui/commit/' + '1'.repeat(40));
+  assert.equal(safeSourceUrl({ repository: 'example-org/project-alpha', sha: '1'.repeat(40), url: 'javascript:alert(1)' }), 'https://github.com/example-org/project-alpha/commit/' + '1'.repeat(40));
   assert.equal(safeSourceUrl({ repository: 'x/y?redirect=evil', sha: '1'.repeat(40) }), null);
 });
 test('Timeline dedup uses persistent global cursors, preserves gaps/order and rejects conflicting replay', t => {

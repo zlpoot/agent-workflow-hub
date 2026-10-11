@@ -1,3 +1,4 @@
+import { fixtureStore } from '../tests/store-fixture.mjs';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
@@ -36,35 +37,33 @@ try{
   }
   const entry=join(base,'client-install/node_modules/@zlpoot/awh-client/dist/client/cli.js'),viewerEntry=join(base,'viewer-install/node_modules/@zlpoot/awh-viewer/dist/dashboard-cli.js');
   const clientVersion=(await command(entry,['--version'],base)).value;assert.equal(clientVersion.version,CLIENT_VERSION);
-  const repo=repository('webskill','zlpoot/webskill','webskill/bootstrap'),other=repository('second','zlpoot/unapproved-example','unapproved/example');
-  const f=JSON.parse(readFileSync('examples/protocol/webskill.json'));store=new ControlPlaneStore(join(base,'scratch.sqlite'),[{...f.profile_policy,ref:'webskill/bootstrap'}]);
-  const token='awh_cp_'+randomBytes(32).toString('base64url'),principal={id:'scratch-client',project_ids:['webskill'],executor_ids:['scratch-executor']};
+  const repo=repository('project-beta','example-org/project-beta','project-beta/bootstrap'),other=repository('second','example-org/unapproved-example','unapproved/example');
+  const f=JSON.parse(readFileSync('examples/protocol/project-beta.json'));store=fixtureStore(join(base,'scratch.sqlite'),[{...f.profile_policy,ref:'project-beta/bootstrap'}]);
+  const token='awh_cp_'+randomBytes(32).toString('base64url'),principal={id:'scratch-client',project_ids:['project-beta'],executor_ids:['scratch-executor']};
   cp=createControlPlaneServer({store,authenticate:createAuthenticator([{...principal,token_sha256:sha(token)}])});await new Promise(r=>cp.server.listen(0,'127.0.0.1',r));
   const config={schema_version:'1.0',endpoint:'http://127.0.0.1:'+cp.server.address().port,credential_file:join(base,'original.credential'),state_directory:join(base,'original-state'),executor_id:'scratch-executor',executor_type:'codex'};
   writeFileSync(config.credential_file,token,{mode:0o600});const configPath=join(base,'original-client.json');writeFileSync(configPath,JSON.stringify(config));
   const registered=(await command(entry,['--config',configPath,'register'],repo)).value;
-  store.registerWorkItem(principal,f.work_item);store.createRun(principal,{...f.run,executor_id:registered.executor.id,machine_id:registered.executor.machine.id,profile:{...f.run.profile,ref:'webskill/bootstrap'}});
+  store.registerWorkItem(principal,f.work_item);store.createRun(principal,{...f.run,executor_id:registered.executor.id,machine_id:registered.executor.machine.id,profile:{...f.run.profile,ref:'project-beta/bootstrap'}});
   // These are retained synthetic records seeded before the measurement window.
-  const beforeView=store.dashboardReadView({project_ids:['webskill']}),beforeState=bytes(config.state_directory),beforeRepo=bytes(repo),beforeOther=bytes(other),writes=[];
+  const beforeView=store.dashboardReadView({project_ids:['project-beta']}),beforeState=bytes(config.state_directory),beforeRepo=bytes(repo),beforeOther=bytes(other),writes=[];
   cp.server.on('request',request=>{if(request.method!=='GET')writes.push(request.url);});
-  const viewerConfig=join(base,'viewer.json'),port=await freePort(),binding={id:'scratch-webskill',project_id:'webskill',repository:'zlpoot/webskill',worktree:repo,client_entry:entry,client_entry_sha256:sha(readFileSync(entry)),config_file:configPath};
-  writeFileSync(viewerConfig,JSON.stringify({schema_version:'1.0',mode:'local_browser_direct',database:join(base,'scratch.sqlite'),port,viewer:{id:'scratch-viewer',project_ids:['webskill','second']},local_bindings:[binding,{...binding,id:'scratch-second',project_id:'second',repository:'zlpoot/unapproved-example',worktree:other,config_file:undefined}]}));
+  const viewerConfig=join(base,'viewer.json'),port=await freePort(),binding={id:'scratch-project-beta',project_id:'project-beta',repository:'example-org/project-beta',worktree:repo,client_entry:entry,client_entry_sha256:sha(readFileSync(entry)),config_file:configPath};
+  writeFileSync(viewerConfig,JSON.stringify({schema_version:'1.0',mode:'local_browser_direct',database:join(base,'scratch.sqlite'),port,viewer:{id:'scratch-viewer',project_ids:['project-beta','second']},local_bindings:[binding,{...binding,id:'scratch-second',project_id:'second',repository:'example-org/unapproved-example',worktree:other,config_file:undefined}]}));
   viewer=child(viewerEntry,['--config',viewerConfig],base);await until(()=>{if(viewer.exitCode!==null){writeFileSync(join(output,'viewer-start.stderr.log'),viewer.diagnostic);throw new Error('Installed Viewer exited; see private fixture startup log');}return viewer.output.includes('/dashboard');});
   browser=await chromium.launch({headless:true,executablePath:process.env.AWH_DASHBOARD_TEST_BROWSER||undefined});const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[],requests=[];
-  const origin='http://127.0.0.1:'+port;page.on('pageerror',error=>errors.push(error.message));page.on('request',r=>requests.push({method:r.method(),origin:new URL(r.url()).origin}));await page.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
+  const origin='http://127.0.0.1:'+port;page.on('pageerror',error=>errors.push(error.message));page.on('request',r=>requests.push({method:r.method(),origin:new URL(r.url()).origin,path:new URL(r.url()).pathname}));await page.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
   await page.goto(origin+'/dashboard');await page.getByRole('heading',{name:'最近运行'}).waitFor();
-  await page.getByRole('button',{name:'添加项目向导',exact:true}).click();await page.getByRole('heading',{name:'第 1 步 · 选择项目'}).waitFor();
-  assert(!(await page.locator('.wizard-source').innerText()).includes('#35'));await page.getByRole('button',{name:'下一步',exact:true}).click();
-  await page.getByRole('button',{name:'检测当前安装与配置',exact:true}).click();await page.getByText('当前安装：'+CLIENT_VERSION+' · 配置：passed',{exact:true}).waitFor();
-  await page.screenshot({path:join(output,'installed-current.png'),fullPage:true});await page.getByRole('button',{name:'下一步',exact:true}).click();
-  await page.getByText('当前已安装 Client 离线 Doctor · 观测时间',{exact:false}).waitFor();assert(await page.getByText('branch_profile_conflict',{exact:true}).isVisible());
-  await page.screenshot({path:join(output,'installed-doctor.png'),fullPage:true});
-  const current=await page.evaluate(()=>fetch('/dashboard/onboarding/v1/doctor/scratch-webskill').then(r=>r.json()));assert.equal(current.item.client_version,CLIENT_VERSION);assert.equal(current.item.status,'blocked');assert.equal(current.item.approved_version,null);
-  const second=await page.evaluate(()=>fetch('/dashboard/onboarding/v1/doctor/scratch-second').then(r=>r.json()));assert.equal(second.item.status,'blocked');assert(second.item.checks.some(c=>c.code==='repository_not_in_static_profiles'));
-  await page.getByRole('button',{name:'1选择项目',exact:false}).click().catch(()=>{});
-  await page.getByRole('button',{name:'上一步',exact:true}).click();await page.getByRole('button',{name:'上一步',exact:true}).click();
-  await page.getByText('输入本机实际 Git 工作树与仓库',{exact:true}).click();await page.getByRole('textbox',{name:'本机仓库',exact:true}).fill('evil/unregistered');await page.getByRole('textbox',{name:'本机工作树',exact:true}).fill(repo);
-  await page.getByRole('button',{name:'核对本机登记',exact:true}).click();assert(await page.getByText('BLOCKED：此工作树未在当前 Viewer 范围登记。',{exact:false}).isVisible());
+  await page.getByRole('button',{name:'添加项目',exact:true}).click();
+  await page.getByRole('heading',{name:'新增本机项目',exact:true}).waitFor();
+  assert(await page.getByText('当前设备尚未完成接入设置。',{exact:false}).isVisible());
+  await page.screenshot({path:join(output,'installed-current.png'),fullPage:true});
+  const current=await page.evaluate(()=>fetch('/dashboard/onboarding/v1/doctor/scratch-project-beta').then(r=>r.json()));
+  assert.equal(current.item.client_version,CLIENT_VERSION);assert.equal(current.item.status,'blocked');assert.equal(current.item.approved_version,null);
+  const second=await page.evaluate(()=>fetch('/dashboard/onboarding/v1/doctor/scratch-second').then(r=>r.json()));
+  assert.equal(second.item.status,'blocked');assert(second.item.checks.some(c=>c.code==='repository_not_in_approved_profiles'));
+  const unknown=await page.evaluate(()=>fetch('/dashboard/onboarding/v1/doctor/unknown').then(r=>r.status));assert.equal(unknown,404);
+  await page.getByRole('tab',{name:'总览',exact:true}).click();
   const first=await page.evaluate(()=>fetch('/dashboard/v1/snapshot').then(r=>r.json()));
   // Force only the temporary fixture's last_seen to the past; never a real DB.
   const {DatabaseSync}=await import('node:sqlite');const fixtureDb=new DatabaseSync(join(base,'scratch.sqlite'));fixtureDb.prepare('UPDATE executors SET last_seen = ? WHERE id = ?').run(new Date(Date.now()-61000).toISOString(),registered.executor.id);fixtureDb.close();
@@ -80,10 +79,10 @@ try{
   const stopped=await command(entry,['--config',configPath,'resident','status'],repo);assert.equal(stopped.value.running,false);
   resident=child(entry,['--config',configPath,'resident','start'],repo);await until(()=>resident.output.includes('started'));await until(async()=> (await command(entry,['--config',configPath,'resident','status'],repo)).value.online===true);
   assert.equal((await command(entry,['--config',configPath,'resident','stop'],repo)).value.stopping,true);await until(()=>resident.exitCode!==null);resident=null;
-  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'添加项目向导',exact:true}).click();await page.screenshot({path:join(output,'installed-mobile.png'),fullPage:true});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'添加项目',exact:true}).click();await page.screenshot({path:join(output,'installed-mobile.png'),fullPage:true});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
   const cookies=await context.cookies();assert(cookies.every(c=>c.name==='awh_viewer'&&c.httpOnly&&c.sameSite==='Strict'&&c.path==='/dashboard'));assert.deepEqual(await page.evaluate(()=>({cookie:document.cookie,local:localStorage.length,session:sessionStorage.length})),{cookie:'',local:0,session:0});
-  const afterView=store.dashboardReadView({project_ids:['webskill']});assert.deepEqual(afterView.projects,beforeView.projects);assert.deepEqual(afterView.runs,beforeView.runs);assert.deepEqual(afterView.events,beforeView.events);assert.deepEqual(bytes(config.state_directory),beforeState);assert.deepEqual(bytes(repo),beforeRepo);assert.deepEqual(bytes(other),beforeOther);
-  assert(writes.length>=2&&writes.every(path=>path==='/v1/executors/scratch-executor/heartbeat'));assert.equal(errors.length,0);assert(requests.every(r=>r.method==='GET'&&r.origin===origin));
-  const evidence={status:'INSTALLED_WINDOWS_OFFLINE_FIXTURE_PASS',environment:{platform:process.platform,arch:process.arch,node:process.version,browser:await browser.version()},source_before:sourceBefore,source_after:sync('git',['rev-parse','HEAD'],process.cwd()),packages:packages.map(({component,version,artifact,sha256})=>({component,version,artifact,sha256})),checks:['clean external offline install without source imports','ordinary browser bootstrap','default current source','installed Client offline Doctor/config/version','unapproved second Git project blocked','unknown input blocked','Client start/status/stop/restart','browser REST/SSE cursor-constant heartbeat refresh','existing identity/project/state/Run/Event bytes preserved','scoped HttpOnly cookie','390px viewport'],heartbeat_writes:writes.length,new_business_writes:0,production_operations:0,scope:'synthetic scratch CP and Git projects only; real Future UI/second project/RC/Mac/review NOTRUN',authority_verified:false};
+  const afterView=store.dashboardReadView({project_ids:['project-beta']});assert.deepEqual(afterView.projects,beforeView.projects);assert.deepEqual(afterView.runs,beforeView.runs);assert.deepEqual(afterView.events,beforeView.events);assert.deepEqual(bytes(config.state_directory),beforeState);assert.deepEqual(bytes(repo),beforeRepo);assert.deepEqual(bytes(other),beforeOther);
+  assert(writes.length>=2&&writes.every(path=>path==='/v1/executors/scratch-executor/heartbeat'));assert.equal(errors.length,0);assert(requests.every(r=>(r.method==='GET'||r.method==='POST'&&/^\/dashboard\/enrollment\/v1\/(browse|bindings|owner-capabilities)$/.test(r.path))&&r.origin===origin));
+  const evidence={status:'INSTALLED_WINDOWS_OFFLINE_FIXTURE_PASS',environment:{platform:process.platform,arch:process.arch,node:process.version,browser:await browser.version()},source_before:sourceBefore,source_after:sync('git',['rev-parse','HEAD'],process.cwd()),packages:packages.map(({component,version,artifact,sha256})=>({component,version,artifact,sha256})),checks:['clean external offline install without source imports','ordinary browser bootstrap','default current source','installed Client offline Doctor/config/version','unapproved second Git project blocked','unknown input blocked','Client start/status/stop/restart','browser REST/SSE cursor-constant heartbeat refresh','existing identity/project/state/Run/Event bytes preserved','scoped HttpOnly cookie','390px viewport'],heartbeat_writes:writes.length,new_business_writes:0,production_operations:0,scope:'synthetic scratch CP and Git projects only; production projects, macOS and independent Review NOTRUN',authority_verified:false};
   assert.equal(evidence.source_before,evidence.source_after);writeFileSync(join(output,'evidence.json'),JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify(evidence));
 }finally{await browser?.close();resident?.kill();viewer?.kill();if(viewer?.exitCode===null)await new Promise(r=>viewer.once('exit',r));await cp?.close();store?.close();assert.equal(dirname(base),tmpdir());assert(base.startsWith(join(tmpdir(),'awh-installed-windows-')));rmSync(base,{recursive:true,force:true});}

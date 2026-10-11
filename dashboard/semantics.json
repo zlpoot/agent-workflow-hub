@@ -4,11 +4,6 @@
     "name": "@radix-ui/themes",
     "version": "3.3.0"
   },
-  "future_ui": {
-    "role": "semantic_adapter",
-    "integration": "local_declaration",
-    "runtime_dependency": false
-  },
   "authority_verified": false,
   "components": {
     "navigation": {
@@ -57,7 +52,7 @@
     "locale": "zh-CN"
   },
   "limitations": [
-    "Local mapping is not an upstream Future UI adapter conformance claim",
+    "Local component mapping describes this UI only",
     "Runtime declarations never imply GitHub approval",
     "No runtime capability or WebMCP binding"
   ]

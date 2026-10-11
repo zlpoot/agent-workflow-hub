@@ -1,3 +1,4 @@
+import { fixtureStore } from '../tests/store-fixture.mjs';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
@@ -8,8 +9,8 @@ import { dashboardHeaders } from '../dist/dashboard/gateway.js';
 
 // Fixture-only loopback preview. No DB/config/path/credential/provider inputs are accepted.
 if (process.argv.length !== 2) throw new Error('Fixture preview takes no arguments');
-const fixtures = ['future-ui', 'webskill'].map(name => JSON.parse(readFileSync(`examples/protocol/${name}.json`, 'utf8')));
-const store = new ControlPlaneStore(':memory:', fixtures.map(f => f.profile_policy));
+const fixtures = ['project-alpha', 'project-beta'].map(name => JSON.parse(readFileSync(`examples/protocol/${name}.json`, 'utf8')));
+const store = fixtureStore(':memory:', fixtures.map(f => f.profile_policy));
 for (const [i, f] of fixtures.entries()) {
   const principal = { id: 'fixture-' + i, project_ids: [f.project.id], executor_ids: [f.executor.id] };
   store.registerProject(principal, f.manifest); store.registerExecutor(principal, f.executor,

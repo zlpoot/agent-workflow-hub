@@ -5,7 +5,7 @@ import { appendEvent, assertEntity, assertClientMetadata, replayRun, validateBin
 import type { ClientMetadata, Event, EventType, Executor, ProjectManifest, ProfilePolicy, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
 import { safeData, MAX_PAYLOAD_BYTES } from '../shared/security.js';
 import { connectBuilder } from '../builder.js';
-import { taskBinding, bindWorkflow, REPEATABLE_VERSION, type TaskBinding } from '../profiles.js';
+import { taskBinding, bindWorkflow, type TaskBinding } from '../profiles.js';
 import { qualifyRecovery, assertRecoveryInspection, exclusiveRecoveryFile, type RecoveryRecord, type RecoveryLink, type RecoveryInspection, type RecoveryJournal } from './recovery.js';
 import { CLIENT_VERSION } from './version.js';
 import { atomicJson, clientFail, inspectRepository, locked, machine, readConfig, readCredential, readCaCertificate, readJson, readManifest, same, type Machine, type RepositoryIdentity, type ClientConfig } from './local.js';
@@ -82,7 +82,7 @@ export class AwhClient {
             initial.source.ref !== bound.branch || initial.profile.ref !== bound.profile_ref || initial.profile.version !== bound.profile_version ||
             initial.executor_id !== bound.executor_id || initial.machine_id !== bound.machine_id || item.reference.number !== bound.issue || item.reference.repository !== bound.repository)
           clientFail('state', 'Frozen Task binding differs from the Run');
-      } else if (initial.profile.version === REPEATABLE_VERSION) clientFail('state', 'Repeatable Run has no frozen Task binding');
+      }
       if (s.previous_run !== undefined && (typeof s.previous_run !== 'string' || !/^run-[a-f0-9-]{36}$/.test(s.previous_run))) clientFail('state', 'Invalid previous Run reference');
       if (s.recovery && (Object.keys(s.recovery).sort().join(',') !== 'attempt_id,new_sha,old_sha,predecessor_run_id' ||
           !/^recovery-[a-f0-9-]{36}$/.test(s.recovery.attempt_id) || !/^run-[a-f0-9-]{36}$/.test(s.recovery.predecessor_run_id) ||
@@ -279,7 +279,7 @@ export class AwhClient {
       if (deliveryRef) {
         const currentJournal = s.initial?.id + '.delivery.json';
         const ended = s.initial && terminal(replayRun(s.initial, s.events).run);
-        // Check all retained journals before archival: ordinary C1-C start may have
+        // Check all retained journals before archival: ordinary observation start may have
         // archived a delivery Run, but cannot authorize repeating provider writes.
         const journals = readdirSync(dirname(c.path)).filter(name => name.endsWith('.delivery.json') && (name !== currentJournal || ended));
         if (binding) await this.completedJournals(c, s, binding, journals);
@@ -364,12 +364,12 @@ export class AwhClient {
     const matches = policies.profiles.map(v => checked('profile_policy', v)).filter(p => p.ref === c.manifest.profile.ref && (!c.config.profile_version || p.version === c.config.profile_version));
     if (matches.length !== 1) clientFail('profile', 'One exact trusted Profile version is required');
     const policy = matches[0]!; matchDeliveryPolicy(policy, c.manifest.profile.ref);
-    const fixed = deliveryPolicy(c.manifest.profile.ref, policy.version), repeatable = fixed.workflow.id === 'repeatable-docs';
+    const fixed = deliveryPolicy(c.manifest.profile.ref, policy.version), repeatable = fixed.workflow.branch_mode === 'issue_prefix';
     if (repeatable && (!Number.isSafeInteger(issue) || issue! < 1)) clientFail('arguments', 'Repeatable deliver requires --issue');
     if (!repeatable && issue !== undefined && issue !== fixed.workflow.work_item.issue) clientFail('arguments', 'Fixed delivery Issue cannot be changed');
     const binding = repeatable ? taskBinding({ repository: c.identity.repository, issue: issue!, branch: c.identity.ref, source_sha: c.identity.sha,
       profile_ref: policy.ref, profile_version: policy.version, executor_id: c.executor.id, machine_id: c.machine.id }) : undefined;
-    if (binding && (!policy.executor_restrictions!.machine_ids.includes(c.machine.id) || c.machine.platform !== 'windows')) clientFail('binding', 'Untrusted repeatable delivery machine');
+    if (!policy.executor_restrictions?.executor_ids.includes(c.executor.id) || !policy.executor_restrictions.machine_ids.includes(c.machine.id)) clientFail('binding', 'Untrusted repeatable delivery machine');
     const resolved = bindWorkflow(fixed.selection, binding);
     if (c.identity.repository !== resolved.profile.repository || c.identity.ref !== resolved.workflow.branch || c.identity.dirty)
       clientFail('delivery_source', 'Delivery requires the controlled feature branch at an exact clean HEAD');
@@ -472,7 +472,7 @@ export class AwhClient {
         journal.refs?.base_sha !== p.base_sha || journal.refs?.repository !== c.identity.repository || !['draft_waiting_for_acceptance','waiting_for_independent_review'].includes(journal.disposition))
       clientFail('publication_receipt', 'Frozen receipt, Run, Session or Journal identity changed');
     const fixed = deliveryPolicy(c.manifest.profile.ref, s.initial.profile.version);
-    if (fixed.workflow.id !== 'repeatable-docs' || c.config.profile_version !== s.initial.profile.version) clientFail('publication_policy', 'Recovery requires the original docs-only Profile');
+    if (fixed.workflow.branch_mode !== 'issue_prefix' || c.config.profile_version !== s.initial.profile.version) clientFail('publication_policy', 'Recovery requires the original docs-only Profile');
     await this.project(c); await this.executor(c);
     const policies = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(c.manifest.project.id)); keys(policies, ['profiles']);
     if (!Array.isArray(policies.profiles)) clientFail('publication_policy', 'Invalid Profile response');
@@ -482,7 +482,7 @@ export class AwhClient {
     if (!validateBindings({ manifest: c.manifest, project: await this.project(c), profile_policy: policy[0], executor: c.executor, work_item: s.work_item, run: s.initial }).valid)
       clientFail('publication_binding', 'Original lifecycle binding changed');
     const capability = await this.request(c, '/v1/capabilities'); keys(capability, ['revision_linking','database_version']);
-    if (capability.revision_linking !== 'v021-docs-v1' || capability.database_version !== 2) clientFail('publication_upgrade', 'Compatible reviewed CP is required');
+    if (capability.revision_linking !== 'revision-link-v1' || capability.database_version !== 2) clientFail('publication_upgrade', 'Compatible reviewed CP is required');
     const timeline = await this.timeline(s.initial.id);
     if (!same(timeline.events.map(e => e.event), s.events) || !same(timeline.run, projection.run)) clientFail('publication_history', 'CP history differs from original receipt');
     if (!same(inspectRevision(c.identity.root, p.source_sha, p.previous_head, p.new_head, p.base_sha, fixed.workflow.bootstrap_paths!), p.diffs) ||
@@ -584,8 +584,8 @@ export class AwhClient {
           c.identity.ref !== s.initial.source.ref || this.revisionPending(c).length)
         clientFail('revision_state', 'Revision requires the same clean awaiting-review delivery with no pending or interrupted attempt');
       const fixed = deliveryPolicy(c.manifest.profile.ref, s.initial.profile.version);
-      if (fixed.workflow.id !== 'repeatable-docs' || c.config.profile_version !== s.initial.profile.version)
-        clientFail('revision_policy', 'First revision MVP supports only the trusted repeatable docs Profile');
+      if (fixed.workflow.branch_mode !== 'issue_prefix' || c.config.profile_version !== s.initial.profile.version)
+        clientFail('revision_policy', 'Revision supports only the trusted repeatable docs Profile');
       await this.project(c); await this.executor(c);
       const policies = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(c.manifest.project.id)); keys(policies, ['profiles']);
       if (!Array.isArray(policies.profiles)) clientFail('response_schema', 'Invalid Profile response');
@@ -595,7 +595,7 @@ export class AwhClient {
       if (!validateBindings({ manifest: c.manifest, project: await this.project(c), profile_policy: policy[0], executor: c.executor, work_item: s.work_item, run: s.initial }).valid)
         clientFail('revision_binding', 'Original Run identity no longer matches its trusted bindings');
       const capability = await this.request(c, '/v1/capabilities'); keys(capability, ['revision_linking','database_version']);
-      if (capability.revision_linking !== 'v021-docs-v1' || capability.database_version !== 2)
+      if (capability.revision_linking !== 'revision-link-v1' || capability.database_version !== 2)
         clientFail('revision_upgrade', 'CP revision runtime must be independently reviewed and explicitly deployed first');
       const timeline = await this.timeline(s.initial.id);
       if (!same(timeline.events.map(e => e.event), s.events) || !same(timeline.run, projection!.run))

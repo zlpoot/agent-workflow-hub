@@ -1,13 +1,6 @@
-# AWH Protocol 1.0 (C1-A)
+# AWH Protocol 1.0 (Protocol)
 
-Issue [#19](https://github.com/zlpoot/agent-workflow-hub/issues/19), under
-[#18](https://github.com/zlpoot/agent-workflow-hub/issues/18), defines data shared by
-future Client, Control Plane and Dashboard consumers. This module has no HTTP
-service, database, scheduler, project checkout discovery or UI. It remains part of
-the existing Node.js/TypeScript/pnpm single package. Import `dist/protocol/index.js`
-after `pnpm build`; standalone schema is `src/protocol/schema.json` (copied to
-`dist/protocol/schema.json`). The module does not import fixed Builder Profiles,
-machine paths, credentials or specific projects.
+Protocol 1.0 defines closed data contracts shared by Client, Control Plane and Viewer. Import dist/protocol/index.js after pnpm build. The standalone schema is src/protocol/schema.json. This module validates and replays data; it grants no execution or provider authority.
 
 ## Versioning and Entities
 
@@ -42,31 +35,29 @@ A project manifest is an identity binding, for example:
 ```yaml
 apiVersion: awh/v1
 project:
-  id: webskill
-  repository: zlpoot/webskill
+  id: project-beta
+  repository: example-org/project-beta
 profile:
-  ref: webskill/default
+  ref: project-beta/default
 ```
 
 `validateEntity('manifest', parsedValue)` operates on parsed JSON-compatible data.
-YAML loading and installation of project files belong to C1-C. Policy fields,
+Client owns YAML loading and project enrollment. Policy fields,
 commands, credentials and embedded Policy objects are rejected in the manifest.
 The Control Plane must resolve the Profile reference from its trusted Registry;
 accepting a caller's Policy as trusted would defeat this boundary.
 
 `validateBindings` checks the manifest against Project and Profile identity, the
 exact Run Profile version, Project/Work Item/Run links, executor/machine links and
-optional restrictions. A Work Item can reference Hub #8 while its Project is
-WebSkill. Policy has no default machine or Agent binding. A non-null restriction
+optional restrictions. A Work Item may reference an approved tracking Issue in a different repository. Policy has no default machine or Agent binding. A non-null restriction
 requires membership in both non-empty executor and machine lists.
 
 These functions check data consistency; they do not authorize execution. Profile
-commands are declaration data and are never executed. In C1-A they cannot replace
-or extend the existing Builder's fixed Profiles/workflows. App identity,
+commands are declaration data and are never executed. In Protocol they cannot replace
+or extend the administrator-approved Builder Profiles/workflows. App identity,
 metadata-only selected-set inspection, one-repository write tokens, exact-head
 evidence, independently verified Review and Human gates remain external gates.
 The Policy describes single-repository installation identity, exact selected-set
-checking, independent exact-head Review, Draft delivery and confirmed v0.1
 Handoff; it contains neither credentials nor a dynamic permission-grant API.
 
 ## Run States and Events
@@ -101,7 +92,7 @@ Clock-skewed input must be corrected by its producer, not silently reordered.
 
 Builder delivery ends at `awaiting_review`, not `completed`. Reverification
 before Review clears old candidate/publication claims. A changed candidate after
-Review starts needs a new Run. This MVP defines no remote pause/resume/cancel or
+Review starts needs a new Run. This protocol defines no remote pause/resume/cancel or
 merge state. A runtime `review_passed`/`completed` projection does not authorize
 GitHub approval, merge, Issue closure or the next task.
 
@@ -121,7 +112,7 @@ invalid transitions are rejected. Event ID uniqueness is scoped to one Run.
 - New ID with an old, reused or skipped sequence: reject with `sequence` conflict.
 
 Inputs are not mutated and returned projections/history are recursively frozen.
-This is an in-memory contract, not persistence or authentication. C1-B must
+This is an in-memory contract, not persistence or authentication. The CP must
 enforce per-Run atomic append and uniqueness in its Event Store transaction;
 separately replaying two concurrent requests is not an atomic store operation.
 Old facts stay in history; a new verification/publication event supersedes the
@@ -146,20 +137,15 @@ required before acting on durable facts. Every validation/replay/mapping result
 returns `authority_verified: false`. No API in this module writes GitHub,
 executes verification commands, approves reviews or merges anything.
 
-## v0.1 Handoff Compatibility
 
-The C0 `BuilderHandoff`, validator and read-only CLI stay unchanged. Protocol 1.0
-is a separate schema, not a replacement for `AWH-HANDOFF v0.1`.
+The `BuilderHandoff`, validator and read-only CLI stay unchanged. Protocol 1.0
 `mapHandoffV01(record, expectedHead, context)` calls the original validator,
 requires the producer Run ID and exact candidate head to match context, and
-creates only `HANDOFF_PUBLISHED`. Context supplies the delivery repository and
-published comment ID, because v0.1 stores the Work Item repository, which can be
-different from the delivery repository. Context is data requiring live external
+creates only `HANDOFF_PUBLISHED`. Context supplies the delivery repository, which may differ from the Work Item repository. Context is data requiring live external
 verification; the mapper cannot infer PR ownership or comment identity.
 
 The mapper preserves pending/failed publication as facts. A confirmed record
 requires the original completed/pass/all-zero/subject-SHA/expected-head Ready
-claim. It normalizes accepted v0.1 uppercase SHAs to the protocol's lowercase
 representation, returns the original validation result, and never creates a
 Review PASS or authorization. Commands/evidence URLs remain in the original
 durable Handoff/evidence comments instead of being executed or duplicated as
@@ -167,12 +153,12 @@ provider truth.
 
 ## Fixtures and Checks
 
-`examples/protocol/webskill.json` and `future-ui.json` contain minimal parsed
+`examples/protocol/project-beta.json` and `project-alpha.json` contain minimal parsed
 Manifest, Registry Project/Policy, Executor, Work Item and initial Run fixtures.
 All executor/machine/version/SHA values are artificial. `*/default` references
 are proposed protocol bindings, not installed Registry records or replacement
 Builder Profiles. The fixtures do not modify external projects or grant their
-bootstrap permission. No live WebSkill/Future UI acceptance is claimed.
+bootstrap permission. No live Project Beta/Project Alpha acceptance is claimed.
 
 `pnpm check` covers strict schema/negative cases, binding consistency, every
 required Event type, basic transitions, sequence/idempotency, immutable snapshots,

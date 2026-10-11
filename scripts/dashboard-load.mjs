@@ -1,3 +1,4 @@
+import { fixtureStore } from '../tests/store-fixture.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -17,13 +18,13 @@ const baseline = '04f7b4373de6238e44e2a43c92c5d9726af0090d';
 const source = execFileSync('git', ['show', baseline + ':src/dashboard/projection.ts'], { encoding: 'utf8' });
 writeFileSync('dist/dashboard-ui/baseline-projection.mjs', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
 const { DashboardProjection: OldProjection } = await import('../dist/dashboard-ui/baseline-projection.mjs');
-const f = JSON.parse(readFileSync('examples/protocol/future-ui.json', 'utf8'));
+const f = JSON.parse(readFileSync('examples/protocol/project-alpha.json', 'utf8'));
 const viewer = { id: 'viewer', project_ids: [f.project.id] }, principal = { id: 'fixture-client', project_ids: [f.project.id], executor_ids: [f.executor.id] };
 const results = [];
 for (const size of [{ name: 'small', runs: 2, events: 4 }, { name: 'near-cap', runs: 1000, events: 9999 }]) {
   console.log('Measuring fixture ' + size.name + ' (synthetic only)');
   const dir = mkdtempSync(join(tmpdir(), 'awh-sse-load-')), path = join(dir, 'fixture.sqlite');
-  const store = new ControlPlaneStore(path, [f.profile_policy]);
+  const store = fixtureStore(path, [f.profile_policy]);
   let service, writer;
   const aborts = [];
   try {

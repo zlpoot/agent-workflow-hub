@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0",
+  "kind": "builder_policy",
+  "default_selection": {
+    "profile": "project-alpha",
+    "workflow": "develop"
+  },
+  "installation": {
+    "app_id": 123,
+    "installation_id": 456,
+    "account_login": "example-org",
+    "app_slug": "example-builder",
+    "selected_repository_sets": [
+      [
+        "example-org/project-alpha",
+        "example-org/project-beta"
+      ]
+    ],
+    "reviewers": [
+      {
+        "login": "example-reviewer",
+        "id": 1001
+      }
+    ],
+    "authorization_actors": [
+      {
+        "login": "example-owner",
+        "id": 1002
+      }
+    ]
+  },
+  "profiles": [
+    {
+      "id": "project-alpha",
+      "repository": "example-org/project-alpha",
+      "base": "main",
+      "workflows": [
+        {
+          "id": "develop",
+          "version": "policy-v1",
+          "branch": "codex/task-101",
+          "branch_mode": "fixed",
+          "work_item": {
+            "repo": "example-org/project-alpha",
+            "issue": 101
+          },
+          "verification_commands": [
+            "pnpm check"
+          ],
+          "bootstrap_paths": null,
+          "executor_restrictions": {
+            "executor_ids": [
+              "builder-one"
+            ],
+            "machine_ids": [
+              "machine-one"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

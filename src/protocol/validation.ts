@@ -54,11 +54,9 @@ export function validateEntity<K extends keyof ProtocolEntities>(kind: K, value:
   }
   if (kind === 'profile_policy') {
     const policy = value as unknown as ProtocolEntities['profile_policy'];
-    if (policy.branch.mode === 'issue_prefix' && (policy.branch.ref !== 'codex/awh-task-' ||
-        policy.repository !== 'zlpoot/future-ui' || policy.ref !== 'future-ui/c1c-acceptance' || policy.version !== 'v02-repeatable-v1' ||
-        policy.base !== 'main' || !policy.executor_restrictions ||
-        JSON.stringify(policy.executor_restrictions.executor_ids) !== JSON.stringify(['c1c-future-ui-windows']) || policy.executor_restrictions.machine_ids.length !== 1))
-      errors.push({ path: '$.branch', reason: 'Only the trusted Windows Future UI Issue template is supported' });
+    if (policy.branch.mode === 'issue_prefix' && (!/[-/]$/.test(policy.branch.ref) || !policy.executor_restrictions ||
+        policy.executor_restrictions.executor_ids.length === 0 || policy.executor_restrictions.machine_ids.length === 0))
+      errors.push({ path: '$.branch', reason: 'Issue-prefix policy requires explicit executor and machine restrictions' });
   }
   if (kind === 'run') {
     const run = value as unknown as ProtocolEntities['run'];

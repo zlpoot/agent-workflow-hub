@@ -1,136 +1,106 @@
 import { createHash } from 'node:crypto';
-export const HUB_REPO = 'zlpoot/agent-workflow-hub';
-export const FUTURE_REPO = 'zlpoot/future-ui';
-export const WEBSKILL_REPO = 'zlpoot/webskill';
+import { readExternalFile } from './shared/external-files.js';
+import { safeData } from './shared/security.js';
 
+export class ProfileError extends Error {}
+export interface BuilderSelection { profile: string; workflow: string }
 export interface Workflow {
   readonly id: string;
+  readonly version: string;
   readonly branch: string;
+  readonly branch_mode: 'fixed' | 'issue_prefix';
   readonly work_item: Readonly<{ repo: string; issue: number }>;
   readonly verification_commands: readonly string[];
   readonly bootstrap_paths: readonly string[] | null;
+  readonly executor_restrictions: Readonly<{ executor_ids: readonly string[]; machine_ids: readonly string[] }>;
 }
-export interface ProjectProfile {
-  readonly id: string;
-  readonly repository: string;
-  readonly base: string;
-  readonly workflows: readonly Workflow[];
+export interface ProjectProfile { readonly id: string; readonly repository: string; readonly base: string; readonly workflows: readonly Workflow[] }
+export interface ApprovedPolicy {
+  readonly schema_version: '1.0';
+  readonly kind: 'builder_policy';
+  readonly default_selection: Readonly<BuilderSelection>;
+  readonly installation: Readonly<{ app_id: number; installation_id: number; account_login: string; app_slug: string;
+    selected_repository_sets: readonly (readonly string[])[];
+    reviewers: readonly Readonly<{ login: string; id: number }>[];
+    authorization_actors: readonly Readonly<{ login: string; id: number }>[] }>;
+  readonly profiles: readonly ProjectProfile[];
 }
-export interface BuilderSelection { profile: string; workflow: string }
-export class ProfileError extends Error {}
-const workflow = (id: string, branch: string, issue: number, commands: string[], paths: string[] | null, repository = HUB_REPO): Workflow =>
-  Object.freeze({ id, branch, work_item: Object.freeze({ repo: repository, issue }),
-    verification_commands: Object.freeze(commands), bootstrap_paths: paths ? Object.freeze(paths) : null });
+const deny = (): never => { throw new ProfileError('Administrator-approved Builder policy required or policy validation failed'); };
+const object = (v: any, keys: string[]) => v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).sort().join(',') === keys.sort().join(',');
+const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(v);
+const repo = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(v) && !v.includes('..');
+const ref = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_./-]{0,127}$/.test(v) && !v.includes('..') && !v.includes('//') && !v.split('/').some(s => !s || s.endsWith('.lock') || s.endsWith('.'));
+const positive = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
+const list = (v: any, check: (x: any) => boolean, max = 128) => Array.isArray(v) && v.length > 0 && v.length <= max && new Set(v.map((x: any) => JSON.stringify(x))).size === v.length && v.every(check);
+function freeze<T>(v: T): T { if (v && typeof v === 'object') { Object.values(v).forEach(freeze); Object.freeze(v); } return v; }
 
-// Repository/workflow policy is checked-in data, never caller-provided URLs, agents or machine paths.
-export const PROFILES: readonly ProjectProfile[] = Object.freeze([
-  Object.freeze({ id: 'hub', repository: HUB_REPO, base: 'main', workflows: Object.freeze([
-    workflow('c05', 'codex/c05-github-app-builder', 4, ['pnpm check'], null),
-    workflow('c06', 'codex/c06-project-profiles', 6, ['pnpm check'], null),
-    workflow('c07', 'codex/c07-webskill-profile', 8, ['pnpm check'], null),
-    workflow('c07-r1', 'codex/c07-r1-git-transport', 10, ['pnpm check'], null),
-    workflow('c07-r2', 'codex/c07-r2-receive-pack', 13, ['pnpm check'], null),
-    workflow('c07-r3', 'codex/c07-r3-scoped-helper', 16, ['pnpm check'], null),
-    workflow('c1a', 'codex/c1a-protocol', 19, ['pnpm check'], null),
-    workflow('c1b', 'codex/c1b-control-plane', 20, ['pnpm check'], null),
-    workflow('c1c', 'codex/c1c-client', 21, ['pnpm check'], null),
-    workflow('c1e', 'codex/c1e-dashboard-api-contract', 23, ['pnpm check'], null),
-    workflow('c1g', 'codex/c1g-dashboard-readonly', 30, ['pnpm check'], null),
-    workflow('v02-mvp', 'codex/v02-repeatable-workflow', 41, ['pnpm check'], null),
-    workflow('v01-mvp', 'codex/v01-mvp', 39, ['pnpm check'], null),
-    workflow('c1h', 'codex/c12-trusted-onboarding', 31, ['pnpm check'], null),
-    workflow('c1h-b0', 'codex/c1h-b0-security', 31,
-      ['pnpm build', 'node --test tests/onboarding.test.mjs tests/builder.test.mjs'], null),
-    workflow('c1i', 'codex/c1i-doctor-prototype', 32,
-      ['pnpm build', 'node --test tests/doctor.test.mjs', 'node --test tests/client.test.mjs'], null),
-    // One-time #34 code publication only; dynamic declarations never select Builder authority.
-    workflow('c1k', 'codex/c1k-versioned-profile-prototype', 34,
-      ['pnpm build', 'node --test tests/versioned-profile.test.mjs', 'node --test tests/doctor.test.mjs'], null),
-    workflow('c1j', 'codex/c1j-dashboard-wizard-prototype', 33,
-      ['pnpm build', 'pnpm typecheck', 'node --test tests/dashboard-ui.test.mjs tests/dashboard-wizard.test.mjs tests/doctor.test.mjs'], null),
-    // Human-authorized #58 code/Draft publication; no production or Release gate.
-    workflow('issue58-r1d', 'codex/issue58-r1d-onboarding', 58, [
-      'pnpm --config.verifyDepsBeforeRun=false run build',
-      'pnpm --config.verifyDepsBeforeRun=false run typecheck',
-      'node --test tests/enrollment.test.mjs tests/config-startup.test.mjs tests/control-plane.test.mjs tests/control-plane-tls.test.mjs tests/windows-product.test.mjs tests/dashboard-gateway.test.mjs tests/dashboard-wizard.test.mjs tests/dashboard-ui.test.mjs tests/doctor.test.mjs tests/client.test.mjs tests/versioned-profile.test.mjs',
-      'node --test tests/builder.test.mjs tests/validator.test.mjs tests/cli.test.mjs',
-    ], null),
-    workflow('issue58', 'codex/issue58-windows-product', 58, [
-      'pnpm --config.verifyDepsBeforeRun=false run build',
-      'pnpm --config.verifyDepsBeforeRun=false run typecheck',
-      'node --test tests/windows-product.test.mjs tests/dashboard-gateway.test.mjs tests/dashboard-wizard.test.mjs tests/dashboard-ui.test.mjs tests/doctor.test.mjs tests/client.test.mjs',
-      'node --test tests/builder.test.mjs tests/validator.test.mjs tests/cli.test.mjs',
-      'node scripts/windows-product-smoke.mjs',
-      'node scripts/dashboard-smoke.mjs',
-    ], null),
-    workflow('c1d', 'codex/c1d-builder-adapter', 22, ['pnpm check'], null),
-  ]) }),
-  Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([
-    workflow('repeatable-docs', 'codex/awh-task-', 0, ['git diff --check origin/main...HEAD'],
-      ['docs/management/awh-repeatable-workflow.md', 'docs/management/awh-v01-acceptance.md'], FUTURE_REPO),
-    workflow('mvp-docs', 'codex/awh-v01-acceptance', 88, ['git diff --check origin/main...HEAD'],
-      ['docs/management/awh-v01-acceptance.md', '.awh/project.yaml', '.gitignore'], FUTURE_REPO),
-    workflow('bootstrap', 'codex/awh-c06-bootstrap', 6,
-      ['pnpm lint', 'pnpm typecheck', 'pnpm test'], ['docs/management/agent-workflow-hub.md']),
-  ]) }),
-  Object.freeze({ id: 'webskill', repository: WEBSKILL_REPO, base: 'main', workflows: Object.freeze([
-    workflow('bootstrap', 'codex/awh-c07-webskill-bootstrap', 8,
-      ['pnpm check:foundations', 'pnpm lint', 'pnpm typecheck'], ['docs/management/agent-workflow-hub.md']),
-  ]) }),
-]);
-export const DEFAULT_SELECTION: Readonly<BuilderSelection> = Object.freeze({ profile: 'hub', workflow: 'c05' });
-export const ALLOWED_INSTALLATION_SETS: readonly (readonly string[])[] = Object.freeze([
-  Object.freeze([HUB_REPO]), Object.freeze([HUB_REPO, FUTURE_REPO].sort()),
-  Object.freeze([HUB_REPO, FUTURE_REPO, WEBSKILL_REPO].sort()),
-  // Dormant installation member only: no agent-desktop Profile or write workflow.
-  Object.freeze([HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/agent-desktop'].sort()),
-]);
-
-export function selectWorkflow(selection: BuilderSelection = DEFAULT_SELECTION) {
-  if (!selection || typeof selection !== 'object' || Object.keys(selection).length !== 2 ||
-    !Object.hasOwn(selection, 'profile') || !Object.hasOwn(selection, 'workflow'))
-    throw new ProfileError('Select only a fixed profile and workflow');
-  const profile = PROFILES.find(p => p.id === selection.profile);
-  const chosen = profile?.workflows.find(w => w.id === selection.workflow);
-  if (!profile || !chosen) throw new ProfileError('Unsupported profile or workflow');
-  return Object.freeze({ profile, workflow: chosen });
+/** The administrator supplies an OS-protected external file and its independently
+ * approved digest in the launcher environment. Never discover them from a project,
+ * CP response, Issue, manifest or command argument. No built-in repository authority. */
+export function loadTrustedPolicy(): ApprovedPolicy {
+  try {
+    const path = process.env.AWH_BUILDER_POLICY_FILE, pin = process.env.AWH_BUILDER_POLICY_SHA256;
+    if (!path || !pin || !/^[a-f0-9]{64}$/.test(pin)) return deny();
+    const bytes = readExternalFile(path, 256 * 1024, true);
+    if (createHash('sha256').update(bytes).digest('hex') !== pin) return deny();
+    const v = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); safeData(v);
+    if (!object(v, ['schema_version','kind','default_selection','installation','profiles']) || v.schema_version !== '1.0' || v.kind !== 'builder_policy' ||
+        !object(v.default_selection, ['profile','workflow']) || !id(v.default_selection.profile) || !id(v.default_selection.workflow)) return deny();
+    const a = v.installation;
+    if (!object(a, ['app_id','installation_id','account_login','app_slug','selected_repository_sets','reviewers','authorization_actors']) ||
+        !positive(a.app_id) || !positive(a.installation_id) || typeof a.account_login !== 'string' || typeof a.app_slug !== 'string' || !/^[A-Za-z0-9-]+$/.test(a.account_login) || !/^[a-z0-9-]+$/.test(a.app_slug) ||
+        !list(a.selected_repository_sets, set => list(set, repo) && set.every((r: string) => r.split('/')[0] === a.account_login), 32) ||
+        ![a.reviewers,a.authorization_actors].every(actors => list(actors, actor => object(actor, ['login','id']) && typeof actor.login === 'string' && /^[A-Za-z0-9-]+$/.test(actor.login) && positive(actor.id)) && new Set(actors.map((actor: {login: string}) => actor.login)).size === actors.length && new Set(actors.map((actor: {id: number}) => actor.id)).size === actors.length)) return deny();
+    if (!list(v.profiles, p => {
+      if (!object(p, ['id','repository','base','workflows']) || !id(p.id) || !repo(p.repository) || !ref(p.base) ||
+          !a.selected_repository_sets.some((set: string[]) => set.includes(p.repository))) return false;
+      if (!list(p.workflows, w => object(w, ['id','version','branch','branch_mode','work_item','verification_commands','bootstrap_paths','executor_restrictions']) &&
+          id(w.id) && id(w.version) && ['fixed','issue_prefix'].includes(w.branch_mode) &&
+          (w.branch_mode === 'fixed' ? ref(w.branch) && w.branch !== p.base : typeof w.branch === 'string' && /[-/]$/.test(w.branch) && ref(w.branch + '1')) &&
+          object(w.work_item, ['repo','issue']) && repo(w.work_item.repo) && (w.branch_mode === 'fixed' ? positive(w.work_item.issue) : w.work_item.issue === 0 && w.work_item.repo === p.repository) &&
+          list(w.verification_commands, c => typeof c === 'string' && /^[\x20-\x7e]{1,512}$/.test(c) && !/[;&|`$<>\r\n]/.test(c), 32) &&
+          (w.bootstrap_paths === null || list(w.bootstrap_paths, path => typeof path === 'string' && /^[A-Za-z0-9_.\/-]{1,256}$/.test(path) && !path.startsWith('/') && !path.split('/').some((s: string) => !s || s === '.' || s === '..'))) &&
+          (w.branch_mode === 'fixed' || w.bootstrap_paths !== null) &&
+          object(w.executor_restrictions, ['executor_ids','machine_ids']) && list(w.executor_restrictions.executor_ids,id) && list(w.executor_restrictions.machine_ids,id))) return false;
+      return new Set(p.workflows.map((w: Workflow) => w.id)).size === p.workflows.length;
+    }, 64) || new Set(v.profiles.map((p: ProjectProfile) => p.id)).size !== v.profiles.length ||
+        !v.profiles.some((p: ProjectProfile) => p.id === v.default_selection.profile && p.workflows.some(w => w.id === v.default_selection.workflow))) return deny();
+    return freeze(v as ApprovedPolicy);
+  } catch { return deny(); }
 }
-
-export function allowedInstallation(repositories: unknown, total: unknown): repositories is { full_name: string }[] {
-  if (!Array.isArray(repositories) || repositories.length !== total ||
-    !repositories.every(r => r && typeof r.full_name === 'string')) return false;
+export function selectWorkflow(selection?: BuilderSelection, policy = loadTrustedPolicy()) {
+  selection ??= policy.default_selection;
+  if (!object(selection, ['profile','workflow'])) return deny();
+  const profile = policy.profiles.find(p => p.id === selection!.profile), workflow = profile?.workflows.find(w => w.id === selection!.workflow);
+  if (!profile || !workflow) return deny();
+  return Object.freeze({ profile, workflow });
+}
+export function allowedInstallation(repositories: unknown, total: unknown, policy = loadTrustedPolicy()): repositories is { full_name: string }[] {
+  if (!Array.isArray(repositories) || !positive(total) || repositories.length !== total || !repositories.every(r => r && repo(r.full_name))) return false;
   const names = repositories.map(r => r.full_name).sort();
-  return ALLOWED_INSTALLATION_SETS.some(set => JSON.stringify(set) === JSON.stringify(names));
+  return new Set(names).size === names.length && policy.installation.selected_repository_sets.some(set => JSON.stringify([...set].sort()) === JSON.stringify(names));
 }
-
-// One checked-in template. Caller data can only fill a positive Issue and its canonical branch.
-export const REPEATABLE_VERSION = 'v02-repeatable-v1';
-export const TASK_PREFIX = 'codex/awh-task-';
-export interface TaskBinding {
-  repository: string; issue: number; branch: string; source_sha: string;
-  profile_ref: string; profile_version: string; executor_id: string; machine_id: string; fingerprint: string;
-}
-export function taskBinding(value: Omit<TaskBinding, 'fingerprint'>): TaskBinding {
+export interface TaskBinding { repository: string; issue: number; branch: string; source_sha: string; profile_ref: string; profile_version: string; executor_id: string; machine_id: string; fingerprint: string }
+function checkedBinding(value: Omit<TaskBinding, 'fingerprint'>, policy: ApprovedPolicy): TaskBinding {
   const keys = ['repository','issue','branch','source_sha','profile_ref','profile_version','executor_id','machine_id'];
-  if (!value || Object.keys(value).sort().join(',') !== [...keys].sort().join(',') ||
-      value.repository !== FUTURE_REPO || !Number.isSafeInteger(value.issue) || value.issue < 1 ||
-      value.branch !== TASK_PREFIX + value.issue || !/^[a-f0-9]{40}$/.test(value.source_sha) ||
-      value.profile_ref !== 'future-ui/c1c-acceptance' || value.profile_version !== REPEATABLE_VERSION ||
-      value.executor_id !== 'c1c-future-ui-windows' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value.machine_id))
-    throw new ProfileError('Task binding differs from the trusted Windows Future UI template');
+  if (!object(value, keys) || typeof value.profile_ref !== 'string') return deny();
+  const [profileId, workflowId, extra] = value.profile_ref.split('/');
+  if (!profileId || !workflowId || extra) return deny();
+  const { profile, workflow } = selectWorkflow({ profile: profileId, workflow: workflowId }, policy);
+  if (workflow.branch_mode !== 'issue_prefix' || value.repository !== profile.repository || !positive(value.issue) || value.branch !== workflow.branch + value.issue ||
+      !/^[a-f0-9]{40}$/.test(value.source_sha) || value.profile_version !== workflow.version || !workflow.executor_restrictions.executor_ids.includes(value.executor_id) ||
+      !workflow.executor_restrictions.machine_ids.includes(value.machine_id)) return deny();
   const ordered = Object.fromEntries(keys.map(k => [k, value[k as keyof typeof value]]));
   return Object.freeze({ ...value, fingerprint: createHash('sha256').update(JSON.stringify(ordered)).digest('hex') });
 }
-export function bindWorkflow(selection: BuilderSelection | undefined, binding?: TaskBinding) {
-  const fixed = selectWorkflow(selection);
-  if (fixed.workflow.id !== 'repeatable-docs') {
-    if (binding !== undefined) throw new ProfileError('Fixed workflows do not accept a Task binding');
-    return fixed;
-  }
-  if (!binding || Object.keys(binding).length !== 9) throw new ProfileError('Repeatable delivery requires a frozen Task binding');
-  const { fingerprint, ...data } = binding;
-  const checked = taskBinding(data);
-  if (checked.fingerprint !== fingerprint) throw new ProfileError('Task fingerprint mismatch');
-  return Object.freeze({ profile: fixed.profile, workflow: Object.freeze({ ...fixed.workflow,
-    branch: checked.branch, work_item: Object.freeze({ repo: checked.repository, issue: checked.issue }) }) });
+export function taskBinding(value: Omit<TaskBinding, 'fingerprint'>): TaskBinding {
+  return checkedBinding(value, loadTrustedPolicy());
+}
+export function bindWorkflow(selection?: BuilderSelection, binding?: TaskBinding, policy = loadTrustedPolicy()) {
+  const fixed = selectWorkflow(selection, policy);
+  if (fixed.workflow.branch_mode === 'fixed') { if (binding !== undefined) return deny(); return fixed; }
+  if (!binding || !object(binding, ['repository','issue','branch','source_sha','profile_ref','profile_version','executor_id','machine_id','fingerprint'])) return deny();
+  const { fingerprint, ...data } = binding, checked = checkedBinding(data, policy);
+  if (checked.fingerprint !== fingerprint || checked.profile_ref !== `${fixed.profile.id}/${fixed.workflow.id}`) return deny();
+  return Object.freeze({ profile: fixed.profile, workflow: Object.freeze({ ...fixed.workflow, branch: checked.branch, work_item: Object.freeze({ repo: checked.repository, issue: checked.issue }) }) });
 }

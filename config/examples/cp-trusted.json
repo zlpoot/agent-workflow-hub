@@ -3,7 +3,7 @@
     {
       "id": "example-client",
       "project_ids": [
-        "webskill"
+        "project-beta"
       ],
       "executor_ids": [
         "example-executor"
@@ -15,13 +15,13 @@
     {
       "schema_version": "1.0",
       "kind": "profile_policy",
-      "ref": "webskill/default",
+      "ref": "project-beta/default",
       "version": "fixture-v1",
-      "repository": "zlpoot/webskill",
+      "repository": "example-org/project-beta",
       "base": "main",
       "branch": {
         "mode": "fixed",
-        "ref": "codex/awh-c07-webskill-bootstrap"
+        "ref": "codex/awh-flow-03-project-beta-bootstrap"
       },
       "verification": {
         "commands": [

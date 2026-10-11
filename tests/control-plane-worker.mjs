@@ -1,7 +1,8 @@
+import { fixtureStore } from './store-fixture.mjs';
 import { parentPort, workerData } from 'node:worker_threads';
 import { ControlPlaneStore } from '../dist/control-plane/index.js';
 const { path, policy, principal, event, gate } = workerData;
-const store = new ControlPlaneStore(path, [policy]);
+const store = fixtureStore(path, [policy]);
 parentPort.postMessage({ ready: true });
 Atomics.wait(new Int32Array(gate), 0, 0);
 try {

@@ -59,7 +59,8 @@ export function createLocalOnboarding(bindings: readonly LocalBinding[]) {
           createHash('sha256').update(readFileSync(b.client_entry)).digest('hex') !== b.client_entry_sha256) return failure(b, 'client_installation_mismatch');
       const args = [b.client_entry, ...(b.config_file ? ['--config', b.config_file] : []), 'doctor', '--json',
         ...(b.policy_trust_file ? ['--policy-trust', b.policy_trust_file, '--work-item', b.work_item!.id, '--work-item-version', b.work_item!.version] : [])];
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(GIT_|GH_|GITHUB_|AWH_|SSH_|NODE_|NPM_CONFIG_|npm_config_)/i.test(key)));
+        const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+          ['AWH_BUILDER_POLICY_FILE','AWH_BUILDER_POLICY_SHA256'].includes(key) || !/^(GIT_|GH_|GITHUB_|AWH_|SSH_|NODE_|NPM_CONFIG_|npm_config_)/i.test(key)));
       const output = await new Promise<string>((resolve, reject) => {
         const child = spawn(process.execPath, args, { cwd: identity.root, env, windowsHide: true, stdio: ['ignore','pipe','ignore'] });
         let text = '', bytes = 0, finished = false;

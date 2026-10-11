@@ -1,0 +1,17 @@
+[
+  {
+    "id": 6071492293,
+    "actor": "test-builder[bot]",
+    "body": "AWH-HANDOFF v0.1\n```json\n{\n  \"schema_version\": \"0.1\",\n  \"kind\": \"builder_handoff\",\n  \"work_item\": {\n    \"repo\": \"example-org/project-alpha\",\n    \"issue\": 90\n  },\n  \"candidate\": {\n    \"pr\": 92,\n    \"base_sha\": \"0a8a3c005f9f2b5c236b9e0f5f7952a949fe1a7a\",\n    \"head_sha\": \"162459a7bc532b5d21ef2905e1e85657e2696108\"\n  },\n  \"producer\": {\n    \"executor\": \"alpha-executor\",\n    \"run_id\": \"fixture-run-d9795f5109c3\"\n  },\n  \"verification\": {\n    \"subject_sha\": \"162459a7bc532b5d21ef2905e1e85657e2696108\",\n    \"lifecycle\": \"completed\",\n    \"outcome\": \"pass\",\n    \"checks\": [\n      {\n        \"command\": \"git diff --check origin/main...HEAD\",\n        \"exit_code\": 0\n      }\n    ],\n    \"evidence_refs\": [\n      \"https://github.com/example-org/project-alpha/pull/92#issuecomment-6071491686\"\n    ]\n  },\n  \"handoff\": {\n    \"next_step\": \"review\",\n    \"publication\": \"confirmed\"\n  }\n}\n```"
+  },
+  {
+    "id": 6071713660,
+    "actor": "test-builder[bot]",
+    "body": "Builder evidence — documentation review correction\n```json\n{\n  \"actor\": \"test-builder[bot]\",\n  \"verification\": {\n    \"command\": \"git diff --check origin/main...HEAD\",\n    \"command_runs\": 1,\n    \"exit_code\": 0,\n    \"before_sha\": \"2c60b4502908d3be85d731edf13ad9ade5e20f6b\",\n    \"after_sha\": \"2c60b4502908d3be85d731edf13ad9ade5e20f6b\",\n    \"base_sha\": \"0a8a3c005f9f2b5c236b9e0f5f7952a949fe1a7a\",\n    \"clean_before\": true,\n    \"clean_after\": true,\n    \"environment\": {\n      \"platform\": \"win32\",\n      \"arch\": \"x64\",\n      \"node\": \"v24.21.0\",\n      \"git\": \"fixture\"\n    },\n    \"started_at\": \"2026-10-09T00:00:00.000Z\",\n    \"finished_at\": \"2026-10-09T00:00:01.000Z\",\n    \"stdout\": \"\",\n    \"stderr\": \"\"\n  }\n}\n```\nRaw stdout: \"\"\nRaw stderr: \"\""
+  },
+  {
+    "id": 6071714260,
+    "actor": "test-builder[bot]",
+    "body": "AWH-HANDOFF v0.1\n```json\n{\n  \"schema_version\": \"0.1\",\n  \"kind\": \"builder_handoff\",\n  \"work_item\": {\n    \"repo\": \"example-org/project-alpha\",\n    \"issue\": 90\n  },\n  \"candidate\": {\n    \"pr\": 92,\n    \"base_sha\": \"0a8a3c005f9f2b5c236b9e0f5f7952a949fe1a7a\",\n    \"head_sha\": \"2c60b4502908d3be85d731edf13ad9ade5e20f6b\"\n  },\n  \"producer\": {\n    \"executor\": \"alpha-executor\",\n    \"run_id\": \"fixture-docs-review\"\n  },\n  \"verification\": {\n    \"subject_sha\": \"2c60b4502908d3be85d731edf13ad9ade5e20f6b\",\n    \"lifecycle\": \"completed\",\n    \"outcome\": \"pass\",\n    \"checks\": [\n      {\n        \"command\": \"git diff --check origin/main...HEAD\",\n        \"exit_code\": 0\n      }\n    ],\n    \"evidence_refs\": [\n      \"https://github.com/example-org/project-alpha/pull/92#issuecomment-6071713660\"\n    ]\n  },\n  \"handoff\": {\n    \"next_step\": \"review\",\n    \"publication\": \"confirmed\"\n  }\n}\n```\nSeparate local verification; original Run fixture-run-d9795f5109c3 remains at source 162459a7bc532b5d21ef2905e1e85657e2696108. Candidate 2c60b4502908d3be85d731edf13ad9ade5e20f6b."
+  }
+]

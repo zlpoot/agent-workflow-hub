@@ -66,7 +66,7 @@ export function Enrollment({onConnected}:{onConnected:(project:string)=>void}) {
     else {setPreview({...preview,status:'configured'});}
   });
   if (available === false) return <Card><Heading size="4">新增本机项目</Heading><Text>当前设备尚未完成接入设置。请管理员完成一次 Client 设置后再添加项目。</Text></Card>;
-  return <Card className="wizard-stack" aria-label="新增本机项目">
+  return <Card className="enrollment-stack" aria-label="新增本机项目">
     <Heading size="5">添加本机项目</Heading><Text>选择项目目录，点击接入，再确认即可。默认仅观察。</Text>
     <Badge>当前机器 · 已安装 Client</Badge>
     <Flex gap="2" wrap="wrap">{roots.map(root => <Button variant="soft" key={root} disabled={disabled} onClick={() => void flow(() => browse(root))}>{root}</Button>)}</Flex>
@@ -81,8 +81,8 @@ export function Enrollment({onConnected}:{onConnected:(project:string)=>void}) {
       {preview.status === 'approval_required' && running && <Text role="status">请查看 Windows 弹出的“AWH 管理员批准接入”窗口。若未在前台，可用 Alt+Tab 切换；取消或三分钟超时后会返回此页。</Text>}
       {preview.status === 'configured' && <Text>本机已有批准记录，点击“完成接入”核对并恢复连接。</Text>}
       {preview.status === 'registered' && <Text color="teal" role="status">已完成登记，正在启动连接。请到 Executor 查看实际在线状态。</Text>}
-      <details><summary>详情与诊断</summary><div className="wizard-stack enrollment-details">
-        <dl className="wizard-facts"><dt>项目目录</dt><dd>{preview.worktree}</dd><dt>Project</dt><dd>{preview.project_id}</dd><dt>Machine</dt><dd>{preview.machine.id} · {preview.machine.platform}</dd><dt>Executor</dt><dd>{preview.executor_id}</dd></dl>
+      <details><summary>详情与诊断</summary><div className="enrollment-stack enrollment-details">
+        <dl className="enrollment-facts"><dt>项目目录</dt><dd>{preview.worktree}</dd><dt>Project</dt><dd>{preview.project_id}</dd><dt>Machine</dt><dd>{preview.machine.id} · {preview.machine.platform}</dd><dt>Executor</dt><dd>{preview.executor_id}</dd></dl>
         {preview.request_file && <Text>管理员申请文件：<code>{preview.request_file}</code></Text>}
         {preview.status !== 'confirmation_required' && <Flex gap="2" wrap="wrap"><Button variant="soft" disabled={disabled} onClick={() => void flow(async () => {setDiagnosis(await call('doctor',{directory:preview.worktree}));})}>Doctor 检查</Button><Button variant="soft" disabled={disabled} onClick={() => void flow(async () => {setRepair(await call('plan',{directory:preview.worktree}));})}>预览 Doctor 修复</Button></Flex>}
         {repair && <div className="notice">修复会核对批准、恢复缺失配置并重试接入。<Button disabled={disabled} onClick={() => setConfirmation('repair')}>修复接入…</Button></div>}
@@ -92,11 +92,11 @@ export function Enrollment({onConnected}:{onConnected:(project:string)=>void}) {
     <Dialog.Root open={confirmation !== null} onOpenChange={open => {if (!open && !disabled) setConfirmation(null);}}><Dialog.Content maxWidth="560px" onEscapeKeyDown={e => {if(disabled)e.preventDefault();}} onPointerDownOutside={e => {if(disabled)e.preventDefault();}}>
       <Dialog.Title>{confirmation === 'repair' ? '确认修复接入' : '确认接入项目'}</Dialog.Title>
       <Dialog.Description>{confirmation === 'repair' ? '核对管理员批准并恢复接入。现有身份和本机改动将保留。' : '将这个本机项目接入 AWH，保留现有身份和本机改动。'}</Dialog.Description>
-      {preview && <div className="wizard-stack enrollment-details">
-        <dl className="wizard-facts"><dt>仓库</dt><dd>{preview.repository}</dd><dt>分支</dt><dd>{preview.branch}</dd><dt>目录</dt><dd>{preview.worktree}</dd></dl>
+      {preview && <div className="enrollment-stack enrollment-details">
+        <dl className="enrollment-facts"><dt>仓库</dt><dd>{preview.repository}</dd><dt>分支</dt><dd>{preview.branch}</dd><dt>目录</dt><dd>{preview.worktree}</dd></dl>
         <Text>接入方式：{mode === 'observe' ? '仅观察' : '受信开发准备'}。批准后会生成缺失接入文件，并登记、启动心跳；不会启动开发任务或 Deliver。</Text>
         {preview.dirty && <Text>目录有本机改动，将保留。</Text>}
-        {preview.status === 'confirmation_required' && confirmation === 'connect' && <details><summary>高级选项</summary><div className="wizard-stack enrollment-details">
+        {preview.status === 'confirmation_required' && confirmation === 'connect' && <details><summary>高级选项</summary><div className="enrollment-stack enrollment-details">
           <label className="enrollment-field">接入能力<select className="enrollment-select" aria-label="新增项目能力" value={mode} disabled={disabled} onChange={e => setMode(e.target.value)}><option value="observe">仅观察</option><option value="develop">受信开发准备</option></select></label>
           {mode === 'develop' && <><label className="enrollment-field">已批准任务<select className="enrollment-select" aria-label="批准任务" aria-describedby={policies.length === 0 ? 'approved-task-help' : undefined} value={selection} disabled={disabled || policies.length === 0} onChange={e => setSelection(e.target.value)}>{policies.length === 0 && <option value="">暂无已批准任务</option>}{policies.map(w => <option key={policyKey(w)} value={policyKey(w)}>#{w.issue} · {w.branch} · {w.version}</option>)}</select></label>{policies.length === 0 && <Text id="approved-task-help" color="red">当前项目和分支没有已批准的开发任务。请选择仅观察，或请管理员批准任务。</Text>}</>}
         </div></details>}

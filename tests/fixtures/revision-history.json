@@ -1,0 +1,530 @@
+{
+  "provenance": {
+    "source": "Synthetic retained multi-run history; never loaded by production",
+    "head": "2c60b4502908d3be85d731edf13ad9ade5e20f6b"
+  },
+  "tables": {
+    "profiles": [
+      {
+        "ref": "project-alpha/repeatable",
+        "version": "repeatable-v1",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"profile_policy\",\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\",\"repository\":\"example-org/project-alpha\",\"base\":\"main\",\"branch\":{\"mode\":\"issue_prefix\",\"ref\":\"codex/awh-task-\"},\"verification\":{\"commands\":[\"git diff --check origin/main...HEAD\"]},\"github_app\":{\"identity\":\"installation\",\"repository_scope\":\"single\",\"selected_set_policy\":\"exact\",\"permissions\":{\"contents\":\"write\",\"issues\":\"write\",\"metadata\":\"read\",\"pull_requests\":\"write\"}},\"review\":{\"mode\":\"independent_exact_head\",\"builder_is_reviewer\":false},\"delivery\":{\"draft_pr\":true,\"handoff_version\":\"0.1\",\"confirmed_publication_required\":true,\"exact_head_required\":true},\"executor_restrictions\":{\"executor_ids\":[\"alpha-executor\"],\"machine_ids\":[\"fixture-machine-5ad25b79145d\"]}}"
+      },
+      {
+        "ref": "project-beta/repeatable",
+        "version": "repeatable-v1",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"profile_policy\",\"ref\":\"project-beta/repeatable\",\"version\":\"repeatable-v1\",\"repository\":\"example-org/project-beta\",\"base\":\"main\",\"branch\":{\"mode\":\"fixed\",\"ref\":\"codex/awh-repeatable\"},\"verification\":{\"commands\":[\"awh status\"]},\"github_app\":{\"identity\":\"installation\",\"repository_scope\":\"single\",\"selected_set_policy\":\"exact\",\"permissions\":{\"contents\":\"write\",\"issues\":\"write\",\"metadata\":\"read\",\"pull_requests\":\"write\"}},\"review\":{\"mode\":\"independent_exact_head\",\"builder_is_reviewer\":false},\"delivery\":{\"draft_pr\":true,\"handoff_version\":\"0.1\",\"confirmed_publication_required\":true,\"exact_head_required\":true},\"executor_restrictions\":null}"
+      },
+      {
+        "ref": "project-alpha/repeatable",
+        "version": "fixed-v1",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"profile_policy\",\"ref\":\"project-alpha/repeatable\",\"version\":\"fixed-v1\",\"repository\":\"example-org/project-alpha\",\"base\":\"main\",\"branch\":{\"mode\":\"fixed\",\"ref\":\"codex/fixed-document\"},\"verification\":{\"commands\":[\"git diff --check origin/main...HEAD\"]},\"github_app\":{\"identity\":\"installation\",\"repository_scope\":\"single\",\"selected_set_policy\":\"exact\",\"permissions\":{\"contents\":\"write\",\"issues\":\"write\",\"metadata\":\"read\",\"pull_requests\":\"write\"}},\"review\":{\"mode\":\"independent_exact_head\",\"builder_is_reviewer\":false},\"delivery\":{\"draft_pr\":true,\"handoff_version\":\"0.1\",\"confirmed_publication_required\":true,\"exact_head_required\":true},\"executor_restrictions\":null}"
+      }
+    ],
+    "projects": [
+      {
+        "id": "project-alpha",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"project\",\"id\":\"project-alpha\",\"repository\":\"example-org/project-alpha\",\"profile_ref\":\"project-alpha/repeatable\"}"
+      },
+      {
+        "id": "project-beta",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"project\",\"id\":\"project-beta\",\"repository\":\"example-org/project-beta\",\"profile_ref\":\"project-beta/repeatable\"}"
+      }
+    ],
+    "executors": [
+      {
+        "id": "alpha-executor",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "last_seen": "2026-10-08T14:01:57.218Z",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"executor\",\"id\":\"alpha-executor\",\"display_name\":\"codex on FixtureMachine\",\"machine\":{\"id\":\"fixture-machine-5ad25b79145d\",\"platform\":\"windows\"}}"
+      },
+      {
+        "id": "beta-executor",
+        "client_id": "awh-project-beta-mac-c1c",
+        "last_seen": "2026-10-08T02:39:08.828Z",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"executor\",\"id\":\"beta-executor\",\"display_name\":\"codex on FixtureMac\",\"machine\":{\"id\":\"fixture-machine-40fcfefed443\",\"platform\":\"macos\"}}"
+      }
+    ],
+    "executor_clients": [
+      {
+        "executor_id": "alpha-executor",
+        "record": "{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"}"
+      },
+      {
+        "executor_id": "beta-executor",
+        "record": "{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMac\",\"arch\":\"arm64\",\"client_version\":\"0.4.8\"}"
+      }
+    ],
+    "work_items": [
+      {
+        "id": "work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61",
+        "project_id": "project-alpha",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"work_item\",\"id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"project_id\":\"project-alpha\",\"reference\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":21}}"
+      },
+      {
+        "id": "work-fefcc057026f581375a184ade36e49d5121ad4124f0757f10d9e39a17585eed1",
+        "project_id": "project-beta",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"work_item\",\"id\":\"work-fefcc057026f581375a184ade36e49d5121ad4124f0757f10d9e39a17585eed1\",\"project_id\":\"project-beta\",\"reference\":{\"provider\":\"github\",\"repository\":\"example-org/project-beta\",\"kind\":\"issue\",\"number\":21}}"
+      },
+      {
+        "id": "work-ee7dbcd123b6c43c27367ee3775face7eab1264d3456613281c84a6f4382f650",
+        "project_id": "project-alpha",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"work_item\",\"id\":\"work-ee7dbcd123b6c43c27367ee3775face7eab1264d3456613281c84a6f4382f650\",\"project_id\":\"project-alpha\",\"reference\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":88}}"
+      },
+      {
+        "id": "work-3648a0fe525a5d655caf2a073adfef57b045cfec58ca0de67276bf54ed259f67",
+        "project_id": "project-alpha",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"work_item\",\"id\":\"work-3648a0fe525a5d655caf2a073adfef57b045cfec58ca0de67276bf54ed259f67\",\"project_id\":\"project-alpha\",\"reference\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":90}}"
+      }
+    ],
+    "runs": [
+      {
+        "id": "fixture-run-a7ddb4c8c53d",
+        "project_id": "project-alpha",
+        "executor_id": "alpha-executor",
+        "work_item_id": "work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-a7ddb4c8c53d\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"f4514570a9c2956641a5374c721c397d58b3fd60\",\"ref\":\"feat/r1-04-phase-b-storyboard-keyframe\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T00:50:53.637Z\",\"updated_at\":\"2026-10-08T00:50:53.637Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-a7ddb4c8c53d\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"f4514570a9c2956641a5374c721c397d58b3fd60\",\"ref\":\"feat/r1-04-phase-b-storyboard-keyframe\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T00:50:53.637Z\",\"updated_at\":\"2026-10-08T00:50:56.190Z\",\"started_at\":\"2026-10-08T00:50:53.639Z\",\"completed_at\":\"2026-10-08T00:50:56.190Z\"}"
+      },
+      {
+        "id": "fixture-run-071d207c2147",
+        "project_id": "project-alpha",
+        "executor_id": "alpha-executor",
+        "work_item_id": "work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-071d207c2147\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"f4514570a9c2956641a5374c721c397d58b3fd60\",\"ref\":\"feat/r1-04-phase-b-storyboard-keyframe\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T01:07:12.562Z\",\"updated_at\":\"2026-10-08T01:07:12.562Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-071d207c2147\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"f4514570a9c2956641a5374c721c397d58b3fd60\",\"ref\":\"feat/r1-04-phase-b-storyboard-keyframe\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T01:07:12.562Z\",\"updated_at\":\"2026-10-08T01:07:15.459Z\",\"started_at\":\"2026-10-08T01:07:12.563Z\",\"completed_at\":\"2026-10-08T01:07:15.459Z\"}"
+      },
+      {
+        "id": "fixture-run-344db31be828",
+        "project_id": "project-alpha",
+        "executor_id": "alpha-executor",
+        "work_item_id": "work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-344db31be828\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T01:49:23.625Z\",\"updated_at\":\"2026-10-08T01:49:23.625Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-344db31be828\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T01:49:23.625Z\",\"updated_at\":\"2026-10-08T01:49:26.044Z\",\"started_at\":\"2026-10-08T01:49:23.627Z\",\"completed_at\":\"2026-10-08T01:49:26.044Z\"}"
+      },
+      {
+        "id": "fixture-run-6a4a7cf75beb",
+        "project_id": "project-alpha",
+        "executor_id": "alpha-executor",
+        "work_item_id": "work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-6a4a7cf75beb\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T02:17:58.597Z\",\"updated_at\":\"2026-10-08T02:17:58.597Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-6a4a7cf75beb\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T02:17:58.597Z\",\"updated_at\":\"2026-10-08T02:18:01.981Z\",\"started_at\":\"2026-10-08T02:17:58.598Z\",\"completed_at\":\"2026-10-08T02:18:01.981Z\"}"
+      },
+      {
+        "id": "fixture-run-a5f5eed5af1e",
+        "project_id": "project-alpha",
+        "executor_id": "alpha-executor",
+        "work_item_id": "work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-a5f5eed5af1e\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T02:34:23.441Z\",\"updated_at\":\"2026-10-08T02:34:23.441Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-a5f5eed5af1e\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3649813a8f9f3fe510213d1a89e65eabb824fb5ac9be2ca253b00c4085369d61\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\",\"ref\":\"integrate/r1-04-phase-b-after-a\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T02:34:23.441Z\",\"updated_at\":\"2026-10-08T02:34:27.986Z\",\"started_at\":\"2026-10-08T02:34:23.443Z\",\"completed_at\":\"2026-10-08T02:34:27.986Z\"}"
+      },
+      {
+        "id": "fixture-run-cdad9d36d19f",
+        "project_id": "project-beta",
+        "executor_id": "beta-executor",
+        "work_item_id": "work-fefcc057026f581375a184ade36e49d5121ad4124f0757f10d9e39a17585eed1",
+        "client_id": "awh-project-beta-mac-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-cdad9d36d19f\",\"project_id\":\"project-beta\",\"work_item_id\":\"work-fefcc057026f581375a184ade36e49d5121ad4124f0757f10d9e39a17585eed1\",\"executor_id\":\"beta-executor\",\"machine_id\":\"fixture-machine-40fcfefed443\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-beta\",\"sha\":\"070122c344ec960ebc8b7e437bb511f4ea212655\",\"ref\":\"070122c344ec960ebc8b7e437bb511f4ea212655\"},\"profile\":{\"ref\":\"project-beta/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T02:39:09.804Z\",\"updated_at\":\"2026-10-08T02:39:09.804Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-cdad9d36d19f\",\"project_id\":\"project-beta\",\"work_item_id\":\"work-fefcc057026f581375a184ade36e49d5121ad4124f0757f10d9e39a17585eed1\",\"executor_id\":\"beta-executor\",\"machine_id\":\"fixture-machine-40fcfefed443\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-beta\",\"sha\":\"070122c344ec960ebc8b7e437bb511f4ea212655\",\"ref\":\"070122c344ec960ebc8b7e437bb511f4ea212655\"},\"profile\":{\"ref\":\"project-beta/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T02:39:09.804Z\",\"updated_at\":\"2026-10-08T02:39:10.562Z\",\"started_at\":\"2026-10-08T02:39:09.805Z\",\"completed_at\":\"2026-10-08T02:39:10.562Z\"}"
+      },
+      {
+        "id": "fixture-run-859147aa164f",
+        "project_id": "project-alpha",
+        "executor_id": "alpha-executor",
+        "work_item_id": "work-ee7dbcd123b6c43c27367ee3775face7eab1264d3456613281c84a6f4382f650",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-859147aa164f\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-ee7dbcd123b6c43c27367ee3775face7eab1264d3456613281c84a6f4382f650\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"ref\":\"codex/fixed-document\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"fixed-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T12:15:31.226Z\",\"updated_at\":\"2026-10-08T12:15:31.226Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-859147aa164f\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-ee7dbcd123b6c43c27367ee3775face7eab1264d3456613281c84a6f4382f650\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"ref\":\"codex/fixed-document\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"fixed-v1\"},\"state\":\"completed\",\"created_at\":\"2026-10-08T12:15:31.226Z\",\"updated_at\":\"2026-10-08T12:51:23.025Z\",\"started_at\":\"2026-10-08T12:15:31.228Z\",\"completed_at\":\"2026-10-08T12:51:23.025Z\"}"
+      },
+      {
+        "id": "fixture-run-0def4681acaa",
+        "project_id": "project-alpha",
+        "executor_id": "alpha-executor",
+        "work_item_id": "work-3648a0fe525a5d655caf2a073adfef57b045cfec58ca0de67276bf54ed259f67",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-0def4681acaa\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3648a0fe525a5d655caf2a073adfef57b045cfec58ca0de67276bf54ed259f67\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"ref\":\"codex/awh-task-90\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-08T14:03:04.267Z\",\"updated_at\":\"2026-10-08T14:03:04.267Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-0def4681acaa\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3648a0fe525a5d655caf2a073adfef57b045cfec58ca0de67276bf54ed259f67\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"ref\":\"codex/awh-task-90\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"failed\",\"created_at\":\"2026-10-08T14:03:04.267Z\",\"updated_at\":\"2026-10-08T14:03:05.505Z\",\"started_at\":\"2026-10-08T14:03:04.268Z\",\"completed_at\":\"2026-10-08T14:03:05.505Z\"}"
+      },
+      {
+        "id": "fixture-run-d9795f5109c3",
+        "project_id": "project-alpha",
+        "executor_id": "alpha-executor",
+        "work_item_id": "work-3648a0fe525a5d655caf2a073adfef57b045cfec58ca0de67276bf54ed259f67",
+        "client_id": "awh-project-alpha-windows-c1c",
+        "initial": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-d9795f5109c3\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3648a0fe525a5d655caf2a073adfef57b045cfec58ca0de67276bf54ed259f67\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"ref\":\"codex/awh-task-90\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"created\",\"created_at\":\"2026-10-09T00:04:54.101Z\",\"updated_at\":\"2026-10-09T00:04:54.101Z\",\"started_at\":null,\"completed_at\":null}",
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"run\",\"id\":\"fixture-run-d9795f5109c3\",\"project_id\":\"project-alpha\",\"work_item_id\":\"work-3648a0fe525a5d655caf2a073adfef57b045cfec58ca0de67276bf54ed259f67\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"source\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"ref\":\"codex/awh-task-90\"},\"profile\":{\"ref\":\"project-alpha/repeatable\",\"version\":\"repeatable-v1\"},\"state\":\"awaiting_review\",\"created_at\":\"2026-10-09T00:04:54.101Z\",\"updated_at\":\"2026-10-09T00:05:30.191Z\",\"started_at\":\"2026-10-09T00:04:54.107Z\",\"completed_at\":null}"
+      }
+    ],
+    "events": [
+      {
+        "cursor": 1,
+        "run_id": "fixture-run-a7ddb4c8c53d",
+        "event_id": "fixture-event-b025d1bcc357",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-b025d1bcc357\",\"run_id\":\"fixture-run-a7ddb4c8c53d\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T00:50:53.639Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"f4514570a9c2956641a5374c721c397d58b3fd60\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 2,
+        "run_id": "fixture-run-a7ddb4c8c53d",
+        "event_id": "fixture-event-26330b20f632",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-26330b20f632\",\"run_id\":\"fixture-run-a7ddb4c8c53d\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T00:50:54.119Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 3,
+        "run_id": "fixture-run-a7ddb4c8c53d",
+        "event_id": "fixture-event-da6552c71b53",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-da6552c71b53\",\"run_id\":\"fixture-run-a7ddb4c8c53d\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T00:50:55.211Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 4,
+        "run_id": "fixture-run-a7ddb4c8c53d",
+        "event_id": "fixture-event-0ec7b3a4bf8e",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-0ec7b3a4bf8e\",\"run_id\":\"fixture-run-a7ddb4c8c53d\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T00:50:56.190Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 5,
+        "run_id": "fixture-run-071d207c2147",
+        "event_id": "fixture-event-92ee9587f171",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-92ee9587f171\",\"run_id\":\"fixture-run-071d207c2147\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T01:07:12.563Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"f4514570a9c2956641a5374c721c397d58b3fd60\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 6,
+        "run_id": "fixture-run-071d207c2147",
+        "event_id": "fixture-event-52e212a24fe4",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-52e212a24fe4\",\"run_id\":\"fixture-run-071d207c2147\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T01:07:13.050Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 7,
+        "run_id": "fixture-run-071d207c2147",
+        "event_id": "fixture-event-8b30d508d969",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-8b30d508d969\",\"run_id\":\"fixture-run-071d207c2147\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T01:07:14.404Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 8,
+        "run_id": "fixture-run-071d207c2147",
+        "event_id": "fixture-event-0e8a1cbac20a",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-0e8a1cbac20a\",\"run_id\":\"fixture-run-071d207c2147\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T01:07:15.459Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 9,
+        "run_id": "fixture-run-344db31be828",
+        "event_id": "fixture-event-a04757bc62ee",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-a04757bc62ee\",\"run_id\":\"fixture-run-344db31be828\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T01:49:23.627Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 10,
+        "run_id": "fixture-run-344db31be828",
+        "event_id": "fixture-event-d46a88c6cbca",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-d46a88c6cbca\",\"run_id\":\"fixture-run-344db31be828\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T01:49:24.343Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 11,
+        "run_id": "fixture-run-344db31be828",
+        "event_id": "fixture-event-60303419dd1b",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-60303419dd1b\",\"run_id\":\"fixture-run-344db31be828\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T01:49:24.815Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 12,
+        "run_id": "fixture-run-344db31be828",
+        "event_id": "fixture-event-612359ed034a",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-612359ed034a\",\"run_id\":\"fixture-run-344db31be828\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T01:49:26.044Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 13,
+        "run_id": "fixture-run-6a4a7cf75beb",
+        "event_id": "fixture-event-8a55fe6757b0",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-8a55fe6757b0\",\"run_id\":\"fixture-run-6a4a7cf75beb\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T02:17:58.598Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 14,
+        "run_id": "fixture-run-6a4a7cf75beb",
+        "event_id": "fixture-event-982ad2d8979d",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-982ad2d8979d\",\"run_id\":\"fixture-run-6a4a7cf75beb\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T02:17:59.157Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 15,
+        "run_id": "fixture-run-6a4a7cf75beb",
+        "event_id": "fixture-event-f30fb0bc9b52",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-f30fb0bc9b52\",\"run_id\":\"fixture-run-6a4a7cf75beb\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T02:18:00.679Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 16,
+        "run_id": "fixture-run-6a4a7cf75beb",
+        "event_id": "fixture-event-972c49d2cd90",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-972c49d2cd90\",\"run_id\":\"fixture-run-6a4a7cf75beb\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T02:18:01.981Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 17,
+        "run_id": "fixture-run-a5f5eed5af1e",
+        "event_id": "fixture-event-b00f3b182a2a",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-b00f3b182a2a\",\"run_id\":\"fixture-run-a5f5eed5af1e\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T02:34:23.443Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"9d83ede00df00fe80a8f1805ad088284c8a81f4e\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 18,
+        "run_id": "fixture-run-a5f5eed5af1e",
+        "event_id": "fixture-event-a2814832579e",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-a2814832579e\",\"run_id\":\"fixture-run-a5f5eed5af1e\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T02:34:24.118Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 19,
+        "run_id": "fixture-run-a5f5eed5af1e",
+        "event_id": "fixture-event-5f5ca5d20484",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-5f5ca5d20484\",\"run_id\":\"fixture-run-a5f5eed5af1e\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T02:34:24.718Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 20,
+        "run_id": "fixture-run-a5f5eed5af1e",
+        "event_id": "fixture-event-1dc6eeca224c",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-1dc6eeca224c\",\"run_id\":\"fixture-run-a5f5eed5af1e\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T02:34:27.986Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 21,
+        "run_id": "fixture-run-cdad9d36d19f",
+        "event_id": "fixture-event-efb7b28ad5c2",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-efb7b28ad5c2\",\"run_id\":\"fixture-run-cdad9d36d19f\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T02:39:09.805Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"070122c344ec960ebc8b7e437bb511f4ea212655\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMac\",\"arch\":\"arm64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 22,
+        "run_id": "fixture-run-cdad9d36d19f",
+        "event_id": "fixture-event-763e2b4fa5b9",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-763e2b4fa5b9\",\"run_id\":\"fixture-run-cdad9d36d19f\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T02:39:10.007Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"name\":\"Hub #21 controlled Mac Client reporting acceptance\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMac\",\"arch\":\"arm64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 23,
+        "run_id": "fixture-run-cdad9d36d19f",
+        "event_id": "fixture-event-e2e410771780",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-e2e410771780\",\"run_id\":\"fixture-run-cdad9d36d19f\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T02:39:10.193Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"installed-client-smoke\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMac\",\"arch\":\"arm64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 24,
+        "run_id": "fixture-run-cdad9d36d19f",
+        "event_id": "fixture-event-fc7b98cfab97",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-fc7b98cfab97\",\"run_id\":\"fixture-run-cdad9d36d19f\",\"sequence\":4,\"type\":\"RUN_FAILED\",\"occurred_at\":\"2026-10-08T02:39:10.562Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"reason\":\"Controlled Hub #21 reporting test ended explicitly; no product execution, delivery or independent Review\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMac\",\"arch\":\"arm64\",\"client_version\":\"0.4.8\"},\"source_dirty\":true}}}"
+      },
+      {
+        "cursor": 25,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-608595ef563c",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-608595ef563c\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T12:15:31.228Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"74693d83205670cc691142a8b36198de59f01635\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 26,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-022177b6218c",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-022177b6218c\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T12:15:31.256Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"name\":\"GitHub App fixed-scope preflight\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 27,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-5eb1dcfae3bb",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-5eb1dcfae3bb\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T12:15:36.058Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"exit_code\":0},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 28,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-1ff2bb481961",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-1ff2bb481961\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":4,\"type\":\"VERIFICATION_STARTED\",\"occurred_at\":\"2026-10-08T12:15:36.400Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 29,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-5f6905c6904c",
+        "sequence": 5,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-5f6905c6904c\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":5,\"type\":\"VERIFICATION_PASSED\",\"occurred_at\":\"2026-10-08T12:15:37.305Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"checks\":[{\"command\":\"git diff --check origin/main...HEAD\",\"exit_code\":0}]},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 30,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-1a4a990af058",
+        "sequence": 6,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-1a4a990af058\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":6,\"type\":\"GITHUB_PUSH_COMPLETED\",\"occurred_at\":\"2026-10-08T12:15:43.981Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"commit\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"ref\":\"codex/fixed-document\"}},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 31,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-7fc5300cc345",
+        "sequence": 7,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-7fc5300cc345\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":7,\"type\":\"GITHUB_PR_CREATED\",\"occurred_at\":\"2026-10-08T12:15:48.606Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":89},\"base_sha\":\"be4421f00d6a6758db417af4f88908fd5fb28c56\",\"head_sha\":\"74693d83205670cc691142a8b36198de59f01635\"},\"extensions\":{\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 32,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-3379a383c05f",
+        "sequence": 8,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-3379a383c05f\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":8,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-08T12:15:58.858Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"pending\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":89},\"comment\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6059639901},\"base_sha\":\"be4421f00d6a6758db417af4f88908fd5fb28c56\",\"head_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\"},\"extensions\":{\"evidence\":[{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6059638757}],\"work_item\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":88},\"builder_milestone\":\"evidence_published_and_handoff_pending\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 33,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-822b716193cd",
+        "sequence": 9,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-822b716193cd\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":9,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-08T12:16:06.364Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"confirmed\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":89},\"comment\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6059639901},\"base_sha\":\"be4421f00d6a6758db417af4f88908fd5fb28c56\",\"head_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\"},\"extensions\":{\"evidence\":[{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6059638757}],\"work_item\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":88},\"builder_milestone\":\"handoff_confirmed\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 34,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-bd173676b218",
+        "sequence": 10,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-bd173676b218\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":10,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-08T12:16:06.379Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"confirmed\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":89},\"comment\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6059639901},\"base_sha\":\"be4421f00d6a6758db417af4f88908fd5fb28c56\",\"head_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\"},\"extensions\":{\"evidence\":[{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6059638757}],\"work_item\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":88},\"builder_milestone\":\"waiting_for_human_acceptance\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 35,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-481f3caab1c2",
+        "sequence": 11,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-481f3caab1c2\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":11,\"type\":\"REVIEW_STARTED\",\"occurred_at\":\"2026-10-08T12:51:22.993Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":89},\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"reviewer_executor_id\":\"github:fixture-reviewer\"},\"extensions\":{\"provider_observation\":{\"repository\":\"example-org/project-alpha\",\"pull_request\":89,\"head_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"state\":\"closed\",\"merged\":true,\"merge_sha\":\"fc990e7612a3a112c023e85ccc6cf187293e2154\",\"issue\":88,\"issue_repository\":\"example-org/project-alpha\",\"issue_closed\":true,\"review\":{\"id\":5456729853,\"login\":\"fixture-reviewer\",\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"url\":\"https://github.com/example-org/project-alpha/pull/89#pullrequestreview-5456729853\"},\"changes_requested\":false,\"authority_verified\":false},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 36,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-a7f4751c9195",
+        "sequence": 12,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-a7f4751c9195\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":12,\"type\":\"REVIEW_PASSED\",\"occurred_at\":\"2026-10-08T12:51:23.012Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":89},\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"reviewer_executor_id\":\"github:fixture-reviewer\",\"review\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"review\",\"number\":5456729853}},\"extensions\":{\"provider_observation\":{\"repository\":\"example-org/project-alpha\",\"pull_request\":89,\"head_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"state\":\"closed\",\"merged\":true,\"merge_sha\":\"fc990e7612a3a112c023e85ccc6cf187293e2154\",\"issue\":88,\"issue_repository\":\"example-org/project-alpha\",\"issue_closed\":true,\"review\":{\"id\":5456729853,\"login\":\"fixture-reviewer\",\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"url\":\"https://github.com/example-org/project-alpha/pull/89#pullrequestreview-5456729853\"},\"changes_requested\":false,\"authority_verified\":false},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 37,
+        "run_id": "fixture-run-859147aa164f",
+        "event_id": "fixture-event-e07f9fb11f86",
+        "sequence": 13,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-e07f9fb11f86\",\"run_id\":\"fixture-run-859147aa164f\",\"sequence\":13,\"type\":\"RUN_COMPLETED\",\"occurred_at\":\"2026-10-08T12:51:23.025Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"outcome\":\"pass\"},\"extensions\":{\"provider_observation\":{\"repository\":\"example-org/project-alpha\",\"pull_request\":89,\"head_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"state\":\"closed\",\"merged\":true,\"merge_sha\":\"fc990e7612a3a112c023e85ccc6cf187293e2154\",\"issue\":88,\"issue_repository\":\"example-org/project-alpha\",\"issue_closed\":true,\"review\":{\"id\":5456729853,\"login\":\"fixture-reviewer\",\"subject_sha\":\"74693d83205670cc691142a8b36198de59f01635\",\"url\":\"https://github.com/example-org/project-alpha/pull/89#pullrequestreview-5456729853\"},\"changes_requested\":false,\"authority_verified\":false},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 38,
+        "run_id": "fixture-run-0def4681acaa",
+        "event_id": "fixture-event-84e42b2eec9e",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-84e42b2eec9e\",\"run_id\":\"fixture-run-0def4681acaa\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-08T14:03:04.268Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"cdf38236f48463b11cb819fa9990ad67ec7b33fe63d1bcf551ced90490aff141\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 39,
+        "run_id": "fixture-run-0def4681acaa",
+        "event_id": "fixture-event-9b810d3bca10",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-9b810d3bca10\",\"run_id\":\"fixture-run-0def4681acaa\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-08T14:03:04.503Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"name\":\"GitHub App fixed-scope preflight\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"cdf38236f48463b11cb819fa9990ad67ec7b33fe63d1bcf551ced90490aff141\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 40,
+        "run_id": "fixture-run-0def4681acaa",
+        "event_id": "fixture-event-dfbbe5439d84",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-dfbbe5439d84\",\"run_id\":\"fixture-run-0def4681acaa\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-08T14:03:04.516Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"exit_code\":0},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"cdf38236f48463b11cb819fa9990ad67ec7b33fe63d1bcf551ced90490aff141\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 41,
+        "run_id": "fixture-run-0def4681acaa",
+        "event_id": "fixture-event-62d6b248efa6",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-62d6b248efa6\",\"run_id\":\"fixture-run-0def4681acaa\",\"sequence\":4,\"type\":\"VERIFICATION_STARTED\",\"occurred_at\":\"2026-10-08T14:03:04.810Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"cdf38236f48463b11cb819fa9990ad67ec7b33fe63d1bcf551ced90490aff141\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 42,
+        "run_id": "fixture-run-0def4681acaa",
+        "event_id": "fixture-event-52ccbcf66058",
+        "sequence": 5,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-52ccbcf66058\",\"run_id\":\"fixture-run-0def4681acaa\",\"sequence\":5,\"type\":\"VERIFICATION_FAILED\",\"occurred_at\":\"2026-10-08T14:03:05.505Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"checks\":[{\"command\":\"git diff --check origin/main...HEAD\",\"exit_code\":2}],\"reason\":\"Fixed Builder verification failed; original logs retained locally\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"cdf38236f48463b11cb819fa9990ad67ec7b33fe63d1bcf551ced90490aff141\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 43,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-860b65a18df7",
+        "sequence": 1,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-860b65a18df7\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":1,\"type\":\"RUN_STARTED\",\"occurred_at\":\"2026-10-09T00:04:54.107Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\"},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 44,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-cb60682d795a",
+        "sequence": 2,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-cb60682d795a\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":2,\"type\":\"STEP_STARTED\",\"occurred_at\":\"2026-10-09T00:05:04.381Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"name\":\"GitHub App fixed-scope preflight\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\"},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 45,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-a90a648f8c4f",
+        "sequence": 3,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-a90a648f8c4f\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":3,\"type\":\"STEP_COMPLETED\",\"occurred_at\":\"2026-10-09T00:05:04.390Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"step_id\":\"builder-preflight\",\"exit_code\":0},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\"},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 46,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-2cf844f641a5",
+        "sequence": 4,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-2cf844f641a5\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":4,\"type\":\"VERIFICATION_STARTED\",\"occurred_at\":\"2026-10-09T00:05:04.822Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\"},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 47,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-0369c28da88d",
+        "sequence": 5,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-0369c28da88d\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":5,\"type\":\"VERIFICATION_PASSED\",\"occurred_at\":\"2026-10-09T00:05:05.912Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"subject_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"checks\":[{\"command\":\"git diff --check origin/main...HEAD\",\"exit_code\":0}]},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\"},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 48,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-3fc7431e36b3",
+        "sequence": 6,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-3fc7431e36b3\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":6,\"type\":\"GITHUB_PUSH_COMPLETED\",\"occurred_at\":\"2026-10-09T00:05:12.549Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"commit\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"ref\":\"codex/awh-task-90\"}},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\"},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 49,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-87e6f0e2ca7f",
+        "sequence": 7,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-87e6f0e2ca7f\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":7,\"type\":\"GITHUB_PR_CREATED\",\"occurred_at\":\"2026-10-09T00:05:16.928Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":92},\"base_sha\":\"0a8a3c005f9f2b5c236b9e0f5f7952a949fe1a7a\",\"head_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\"},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 50,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-8d5fb69eddff",
+        "sequence": 8,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-8d5fb69eddff\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":8,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-09T00:05:23.990Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"pending\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":92},\"comment\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6071492293},\"base_sha\":\"0a8a3c005f9f2b5c236b9e0f5f7952a949fe1a7a\",\"head_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"subject_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\",\"pull_request\":92},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"evidence\":[{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6071491686}],\"work_item\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":90},\"builder_milestone\":\"evidence_published_and_handoff_pending\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 51,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-29c64921b560",
+        "sequence": 9,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-29c64921b560\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":9,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-09T00:05:30.177Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"confirmed\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":92},\"comment\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6071492293},\"base_sha\":\"0a8a3c005f9f2b5c236b9e0f5f7952a949fe1a7a\",\"head_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"subject_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\",\"pull_request\":92},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"evidence\":[{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6071491686}],\"work_item\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":90},\"builder_milestone\":\"handoff_confirmed\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      },
+      {
+        "cursor": 52,
+        "run_id": "fixture-run-d9795f5109c3",
+        "event_id": "fixture-event-d8fc146edb2f",
+        "sequence": 10,
+        "record": "{\"schema_version\":\"1.0\",\"kind\":\"event\",\"id\":\"fixture-event-d8fc146edb2f\",\"run_id\":\"fixture-run-d9795f5109c3\",\"sequence\":10,\"type\":\"HANDOFF_PUBLISHED\",\"occurred_at\":\"2026-10-09T00:05:30.191Z\",\"payload\":{\"schema_version\":\"1.0\",\"data\":{\"handoff_version\":\"0.1\",\"publication\":\"confirmed\",\"pull_request\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"pull_request\",\"number\":92},\"comment\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6071492293},\"base_sha\":\"0a8a3c005f9f2b5c236b9e0f5f7952a949fe1a7a\",\"head_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"subject_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"extensions\":{\"task_binding\":{\"repository\":\"example-org/project-alpha\",\"issue\":90,\"branch\":\"codex/awh-task-90\",\"source_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\",\"profile_ref\":\"project-alpha/repeatable\",\"profile_version\":\"repeatable-v1\",\"executor_id\":\"alpha-executor\",\"machine_id\":\"fixture-machine-5ad25b79145d\",\"fingerprint\":\"87874ffe0ec223fb599bd3f0d2094ed978357604ae7c9e6f35f06731cbef4df9\",\"pull_request\":92},\"verification_recovery\":{\"attempt_id\":\"fixture-recovery-24a292608a93\",\"predecessor_run_id\":\"fixture-run-0def4681acaa\",\"old_sha\":\"6a7e35782dca376fba2b3e0b2f39d924f8f2532f\",\"new_sha\":\"162459a7bc532b5d21ef2905e1e85657e2696108\"},\"evidence\":[{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue_comment\",\"number\":6071491686}],\"work_item\":{\"provider\":\"github\",\"repository\":\"example-org/project-alpha\",\"kind\":\"issue\",\"number\":90},\"builder_milestone\":\"waiting_for_human_acceptance\",\"client\":{\"schema_version\":\"1.0\",\"executor_type\":\"codex\",\"machine_name\":\"FixtureMachine\",\"arch\":\"x64\",\"client_version\":\"0.4.8\"},\"source_dirty\":false}}}"
+      }
+    ]
+  }
+}
