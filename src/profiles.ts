@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readExternalFile } from './shared/external-files.js';
 import { safeData } from './shared/security.js';
+import { managedContext } from './admin/registry.js';
 
 export class ProfileError extends Error {}
 export interface BuilderSelection { profile: string; workflow: string }
@@ -45,11 +46,19 @@ function freeze<T>(v: T): T { if (v && typeof v === 'object') { Object.values(v)
  * CP response, Issue, manifest or command argument. No built-in repository authority. */
 export function loadTrustedPolicy(): ApprovedPolicy {
   try {
+    const managed = managedContext();
+    if (managed) return validateBuilderPolicy(managed.policy);
     const path = process.env.AWH_BUILDER_POLICY_FILE, pin = process.env.AWH_BUILDER_POLICY_SHA256;
     if (!path || !pin || !/^[a-f0-9]{64}$/.test(pin)) return deny();
     const bytes = readExternalFile(path, 256 * 1024, true);
     if (createHash('sha256').update(bytes).digest('hex') !== pin) return deny();
-    const v = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); safeData(v);
+    return validateBuilderPolicy(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+  } catch { return deny(); }
+}
+/** Structural validation of a proposal never confers administrator authority. */
+export function validateBuilderPolicy(v: any): ApprovedPolicy {
+  try {
+    safeData(v);
     if (!object(v, ['schema_version','kind','default_selection','installation','profiles']) || v.schema_version !== '1.0' || v.kind !== 'builder_policy' ||
         !object(v.default_selection, ['profile','workflow']) || !id(v.default_selection.profile) || !id(v.default_selection.workflow)) return deny();
     const a = v.installation;

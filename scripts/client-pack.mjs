@@ -16,6 +16,9 @@ try {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json')));
   mkdirSync(join(stage, 'dist/control-plane'), { recursive: true });
   for (const path of viewer ? ['dashboard','dashboard-ui','dashboard-cli.js','protocol','shared','validator.js','profiles.js','client','builder.js','control-plane/store.js'] : ['client','protocol','shared','validator.js','profiles.js','builder.js']) cpSync(join(root, 'dist', path), join(stage, 'dist', path), { recursive: true });
+  // Client/Viewer need the read-only managed-policy loader, never the admin writer CLI.
+  mkdirSync(join(stage,'dist/admin'), { recursive: true });
+  cpSync(join(root,'dist/admin/registry.js'),join(stage,'dist/admin/registry.js'));
   cpSync(join(root, 'dist/control-plane/security.js'), join(stage, 'dist/control-plane/security.js'));
   if (existsSync(join(root, 'docs/client.md'))) cpSync(join(root, viewer ? 'docs/windows-product.md' : 'docs/client.md'), join(stage, 'README.md'));
   cpSync(join(root, 'docs/doctor.md'), join(stage, 'doctor.md'));

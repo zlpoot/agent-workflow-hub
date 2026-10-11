@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { relative, isAbsolute, dirname, join } from 'node:path';
 import { validateHandoff } from './validator.js';
 import { allowedInstallation, loadTrustedPolicy, bindWorkflow, supportsRevision, type TaskBinding, type BuilderSelection } from './profiles.js';
+import { managedContext, digest, encode } from './admin/registry.js';
 
 const API = 'https://api.github.com';
 const PERMISSIONS = { contents: 'write', issues: 'write', metadata: 'read', pull_requests: 'write' };
@@ -78,6 +79,18 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   if (!['deliver','observe','recover','revision'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Tasks support restricted Builder modes');
   const policy = loadTrustedPolicy();
   const { profile, workflow } = bindWorkflow(selection, binding, policy);
+  const managedEnv = { ...process.env }, managed = managedContext(managedEnv);
+  const checkManaged = () => {
+    if (!managed) return;
+    const current = managedContext(managedEnv), task = managed.proposed.task!;
+    if (!current || current.version !== managed.version || digest(encode(current.policy)) !== digest(encode(policy)) ||
+        current.approved.proposal_sha256 !== managed.approved.proposal_sha256 ||
+        task.profile !== profile.id || task.workflow !== workflow.id || task.repository !== profile.repository ||
+        task.branch !== workflow.branch || workflow.work_item.repo !== task.repository || workflow.work_item.issue !== task.issue ||
+        managedEnv.AWH_ADMIN_EXECUTOR_ID !== task.executor_id || managedEnv.AWH_ADMIN_MACHINE_ID !== task.machine_id ||
+        binding && binding.source_sha !== task.head_sha) fail('Managed administrator version or task binding differs; obtain a new approval');
+  };
+  checkManaged();
   if (mode === 'revision' && !supportsRevision(profile, workflow)) fail('Revision requires the approved main diff-check policy');
   if (adoption && (mode !== 'revision' || !positive(adoption.pr) || !positive(adoption.comment) || !/^[a-f0-9]{64}$/.test(adoption.body_sha256) ||
       Object.keys(adoption).sort().join(',') !== 'body_sha256,comment,pr')) fail('Invalid receipt-bound comment adoption');
@@ -120,6 +133,18 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       `https://github.com/${REPO}`, `https://github.com/${REPO}.git`, `git@github.com:${REPO}`, `git@github.com:${REPO}.git`,
     ].includes(origin.stdout.trim())) fail('Worktree repository does not match selected Profile');
   } catch { return fail('Cannot verify repository worktree root (details suppressed)'); }
+  const checkManagedCandidate = () => {
+    checkManaged();
+    if (!managed) return;
+    const task = managed.proposed.task!, env = gitEnvironment(d.env, root);
+    const head = d.spawn('git', ['rev-parse','HEAD'], { cwd: root, env, encoding: 'utf8', timeout: 10000 });
+    const branch = d.spawn('git', ['branch','--show-current'], { cwd: root, env, encoding: 'utf8', timeout: 10000 });
+    const clean = d.spawn('git', ['status','--porcelain=v1'], { cwd: root, env, encoding: 'utf8', timeout: 10000 });
+    if (head.status !== 0 || branch.status !== 0 || clean.status !== 0 || head.stdout.trim() !== task.head_sha || branch.stdout.trim() !== task.branch || clean.stdout.trim())
+      fail('Managed task requires its exact clean approved local HEAD and branch');
+    checkManaged();
+  };
+  checkManagedCandidate();
   let canonicalKeyPath: string;
   try { canonicalKeyPath = await d.realpath(keyPath); }
   catch { return fail('Private key file unavailable; check existence and read permissions'); }
@@ -197,6 +222,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     throw new BuilderError('Revision GitHub operation failed', undefined, undefined, undefined, { ...metadata, stage, category });
   };
   const request = async (path: string, credential: string, method = 'GET', body?: unknown, stage?: PublicationStage): Promise<Json> => {
+    checkManaged();
     let r: Response | undefined;
     let value: unknown;
     try {
@@ -300,8 +326,24 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       fail('Revision comment-only token scope, permissions or expiry mismatch');
     secrets.push(v.token); return { token: v.token as string, expiry: Date.parse(v.expires_at) };
   };
+  if (managed) {
+    // Read actual Issue/base with a single-repository read token before any write token.
+    const permissions = { contents: 'read', issues: 'read', pull_requests: 'read' };
+    const observed = await request(`/app/installations/${inst.id}/access_tokens`, jwt, 'POST', { repositories: [REPO.split('/')[1]], permissions });
+    if (!observed.token || !equalPermissions(observed.permissions, { ...permissions, metadata: 'read' }) ||
+        !Array.isArray(observed.repositories) || observed.repositories.length !== 1 || observed.repositories[0]?.full_name !== REPO ||
+        !Number.isFinite(Date.parse(observed.expires_at)) || Date.parse(observed.expires_at) <= d.now() || Date.parse(observed.expires_at) > d.now() + 3660000) fail('Managed read token scope or expiry mismatch');
+    secrets.push(observed.token);
+    knownSecrets.push({ value: observed.token, reason: 'known_installation_token' },
+      { value: Buffer.from(`x-access-token:${observed.token}`).toString('base64'), reason: 'known_basic_credential' });
+    const task = managed.proposed.task!;
+    const issue = await request(`${ROOT}/issues/${task.issue}`, observed.token);
+    const base = await request(`${ROOT}/git/ref/heads/${profile.base}`, observed.token);
+    if (issue.number !== task.issue || issue.pull_request || issue.state !== 'open' || issue.html_url !== `https://github.com/${REPO}/issues/${task.issue}` ||
+        base.object?.sha !== task.base_sha) fail('Managed Issue or remote base differs; obtain a new approval');
+  }
   const { token, expiry } = mode === 'revision' ? await revisionToken() : mode !== 'deliver' ? observer! : await mint(true);
-  const live = () => { if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
+  const live = () => { checkManaged(); if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
   const writable = () => { if (mode !== 'deliver' && mode !== 'revision') fail('Lifecycle observation cannot mutate GitHub'); };
   let fixedRevisionPR: number | undefined = adoption?.pr;
   const call = (path: string, method = 'GET', body?: unknown, diagnosticStage?: PublicationStage) => {
@@ -342,6 +384,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   };
   const id = (v: number) => { if (!positive(v)) fail('Invalid GitHub object number'); return v; };
   const prSummary = (p: Json) => {
+    if (managed && (p.head?.sha !== managed.proposed.task!.head_sha || p.base?.sha !== managed.proposed.task!.base_sha)) fail('Managed PR exact base/head differs');
     if (!positive(p.number) || p.user?.login !== actor || p.user?.type !== 'Bot' || !sha(p.head?.sha) ||
       !sha(p.base?.sha) || p.head?.ref !== BRANCH || p.base?.ref !== profile.base ||
       p.head?.repo?.full_name !== REPO || p.base?.repo?.full_name !== REPO ||
@@ -398,8 +441,8 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       if (mode !== 'observe' && mode !== 'revision') fail('Only revision observation can read its fixed remote ref');
       return readFeatureRefState();
     },
-    preflight: () => ({ repo: REPO, app_id: Number(appId), installation_id: inst.id as number, actor,
-      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: mode === 'revision' ? { ...revisionPermissions } : mode !== 'deliver' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : { ...PERMISSIONS }, ...(binding ? { task_binding: binding, issue_state: issueState } : {}), ...(mode === 'recover' ? { recovery_inspection: { remote_branch_absent: true as const, same_branch_pr_absent: true as const } } : {}) }),
+    preflight: () => { live(); return ({ repo: REPO, app_id: Number(appId), installation_id: inst.id as number, actor,
+      repository_selection: 'selected', repositories: [...repositoryNames].sort(), permissions: mode === 'revision' ? { ...revisionPermissions } : mode !== 'deliver' ? { contents: 'read', issues: 'read', metadata: 'read', pull_requests: 'read' } : { ...PERMISSIONS }, ...(binding ? { task_binding: binding, issue_state: issueState } : {}), ...(mode === 'recover' ? { recovery_inspection: { remote_branch_absent: true as const, same_branch_pr_absent: true as const } } : {}) }); },
     push: async () => {
       if (mode !== 'deliver') fail('Lifecycle observation cannot push');
       live();
@@ -424,6 +467,11 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
           fail('Unsafe local Git transport configuration');
         const branch = d.spawn('git', ['branch', '--show-current'], { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
         if (branch.error || branch.status !== 0 || branch.stdout.trim() !== BRANCH) fail('Push requires the selected workflow feature branch');
+        if (managed) {
+          const head = d.spawn('git', ['rev-parse','HEAD'], { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
+          const clean = d.spawn('git', ['status','--porcelain=v1'], { cwd: root, env: inspectEnv, encoding: 'utf8', timeout: 10000 });
+          if (head.status !== 0 || clean.status !== 0 || head.stdout.trim() !== managed.proposed.task!.head_sha || clean.stdout.trim()) fail('Managed push requires exact clean approved HEAD');
+        }
         if (workflow.bootstrap_paths) {
           const baseline = await call(`${ROOT}/git/ref/heads/${profile.base}`);
           if (!sha(baseline.object?.sha)) fail('Invalid bootstrap baseline SHA');
@@ -489,6 +537,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       const after = await readFeatureRefState();
       if (before !== after) fail('Fixed feature ref changed during receive-pack dry-run; push refused');
       live();
+      checkManagedCandidate();
       transport('push', ['push', url, `HEAD:refs/heads/${BRANCH}`]);
       return { pushed: BRANCH, actor };
     },
