@@ -3,7 +3,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { relative, isAbsolute, dirname, join } from 'node:path';
 import { validateHandoff } from './validator.js';
-import { allowedInstallation, loadTrustedPolicy, bindWorkflow, type TaskBinding, type BuilderSelection } from './profiles.js';
+import { allowedInstallation, loadTrustedPolicy, bindWorkflow, supportsRevision, type TaskBinding, type BuilderSelection } from './profiles.js';
 
 const API = 'https://api.github.com';
 const PERMISSIONS = { contents: 'write', issues: 'write', metadata: 'read', pull_requests: 'write' };
@@ -78,7 +78,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
   if (!['deliver','observe','recover','revision'].includes(mode) || mode !== 'deliver' && !binding) fail('Only frozen Tasks support restricted Builder modes');
   const policy = loadTrustedPolicy();
   const { profile, workflow } = bindWorkflow(selection, binding, policy);
-  if (mode === 'revision' && workflow.branch_mode !== 'issue_prefix') fail('Revision publication requires the trusted docs-only Task policy');
+  if (mode === 'revision' && !supportsRevision(profile, workflow)) fail('Revision requires the approved main diff-check policy');
   if (adoption && (mode !== 'revision' || !positive(adoption.pr) || !positive(adoption.comment) || !/^[a-f0-9]{64}$/.test(adoption.body_sha256) ||
       Object.keys(adoption).sort().join(',') !== 'body_sha256,comment,pr')) fail('Invalid receipt-bound comment adoption');
   const REPO = profile.repository, BRANCH = workflow.branch, ROOT = `/repos/${REPO}`;

@@ -16,4 +16,6 @@ Verification additionally accepts only a bounded executor grammar: pnpm script c
 
 The standard source CLI is `pnpm builder --profile <approved-id> --workflow <approved-id> preflight`. Other bounded operations publish a candidate and comments, or read its actual lifecycle. Ready requires an exact confirmed Handoff and remote readback; it grants no Review or merge authority. Review decisions count only from approved identities on the exact candidate HEAD. Same-PR revision and recovery retain consumed receipts and original records.
 
+The current Revision capability supports only an approved issue_prefix workflow with base=main, a path allowlist and exactly one verification command: `git diff --check origin/main...HEAD`. Both Client and Builder refuse a different base, missing check or additional checks. Other approved workflows remain available for ordinary delivery; their approval does not imply this Revision capability.
+
 See config/examples/builder-policy.json for fictional structure. Administrator approval, OS protection, live App preflight and independent Review are separate facts; generating a file or matching a digest cannot substitute for them.

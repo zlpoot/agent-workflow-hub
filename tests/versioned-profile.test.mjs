@@ -1,4 +1,4 @@
-import './trusted-policy-fixture.mjs';
+import { DEFAULT_SELECTION, PROFILES } from './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, symlinkSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { join, dirname } from 'node:path';
 import { loadApprovedWorkItem,versionedPreflight,approvedRevisionDiff,declareDevelop,reportDevelop,policyFingerprint } from '../dist/client/versioned-profile.js';
 import { formatPreflight } from '../dist/shared/preflight.js';
 import { deliveryPolicy } from '../dist/client/delivery-policy.js';
-import { selectWorkflow,DEFAULT_SELECTION } from '../dist/profiles.js';
+import { selectWorkflow } from '../dist/profiles.js';
 import { facts,trustedFixture } from './versioned-profile-fixture.mjs';
 const now='2026-10-09T12:00:00.000Z';
 function temp(t){const p=mkdtempSync(join(tmpdir(),'awh-policy-'));t.after(()=>{assert.equal(dirname(p),tmpdir());assert(p.startsWith(join(tmpdir(),'awh-policy-')));rmSync(p,{recursive:true,force:true});});return p;}
@@ -22,12 +22,15 @@ test('new approved business Work Item has no fixed source mapping; immutable Obs
   const c=reportDevelop(a,s,{sequence:2,type:'checks_reported',checks:facts.checks.map(command=>({command,exit_code:0}))},now);
   const done=reportDevelop(a,c,{sequence:3,type:'completed',checks:[]},now);assert.equal(done.events.length,3);assert.equal(r.events.length,0);assert.equal(done.execution,'declarations_only');
 });
-test('one-time flow-15 code publication remains fixed Hub scope; historical defaults and profiles retain bindings',()=>{
-  const chosen=selectWorkflow({profile:'core',workflow:'flow-15'});assert.equal(chosen.profile.repository,'example-org/workflow-core');assert.equal(chosen.profile.base,'main');
-  assert.deepEqual(chosen.workflow,{id:'flow-15',branch:'codex/flow-15-versioned-profile-prototype',work_item:{repo:'example-org/workflow-core',issue:34},verification_commands:['pnpm build','node --test tests/versioned-profile.test.mjs','node --test tests/doctor.test.mjs'],bootstrap_paths:null});
-  for(const [workflow,issue] of [['flow-12',31],['flow-13',31],['flow-14',32]])assert.equal(selectWorkflow({profile:'core',workflow}).workflow.work_item.issue,issue);
-  assert.equal(selectWorkflow().workflow.id,'flow-01');assert.equal(selectWorkflow({profile:'project-alpha',workflow:'bootstrap'}).workflow.branch,'codex/awh-flow-02-bootstrap');assert.equal(selectWorkflow({profile:'project-beta',workflow:'bootstrap'}).workflow.branch,'codex/awh-flow-03-project-beta-bootstrap');
-  assert.throws(()=>selectWorkflow({profile:'core',workflow:'flow-15',repo:'example-org/other'}));assert.throws(()=>deliveryPolicy('core/flow-15'));
+test('Builder bindings come only from the approved synthetic catalog; observation cannot add a publication grant',()=>{
+  for(const profile of PROFILES)for(const workflow of profile.workflows){
+    const chosen=selectWorkflow({profile:profile.id,workflow:workflow.id});
+    assert.deepEqual(chosen.profile,profile);assert.deepEqual(chosen.workflow,workflow);
+    assert.deepEqual(deliveryPolicy(`${profile.id}/${workflow.id}`,workflow.version).workflow,workflow);
+  }
+  assert.equal(selectWorkflow().workflow.id,DEFAULT_SELECTION.workflow);
+  assert.throws(()=>selectWorkflow({profile:'core',workflow:'unapproved',repo:'example-org/other'}));
+  assert.throws(()=>deliveryPolicy('core/unapproved'));
 });
 test('every binding difference is visible and Develop refuses all wrong or incomplete declarations',t=>{
   const a=load(trustedFixture(temp(t)));

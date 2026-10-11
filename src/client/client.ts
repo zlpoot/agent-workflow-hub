@@ -5,7 +5,7 @@ import { appendEvent, assertEntity, assertClientMetadata, replayRun, validateBin
 import type { ClientMetadata, Event, EventType, Executor, ProjectManifest, ProfilePolicy, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
 import { safeData, MAX_PAYLOAD_BYTES } from '../shared/security.js';
 import { connectBuilder } from '../builder.js';
-import { taskBinding, bindWorkflow, type TaskBinding } from '../profiles.js';
+import { taskBinding, bindWorkflow, supportsRevision, type TaskBinding } from '../profiles.js';
 import { qualifyRecovery, assertRecoveryInspection, exclusiveRecoveryFile, type RecoveryRecord, type RecoveryLink, type RecoveryInspection, type RecoveryJournal } from './recovery.js';
 import { CLIENT_VERSION } from './version.js';
 import { atomicJson, clientFail, inspectRepository, locked, machine, readConfig, readCredential, readCaCertificate, readJson, readManifest, same, type Machine, type RepositoryIdentity, type ClientConfig } from './local.js';
@@ -584,7 +584,7 @@ export class AwhClient {
           c.identity.ref !== s.initial.source.ref || this.revisionPending(c).length)
         clientFail('revision_state', 'Revision requires the same clean awaiting-review delivery with no pending or interrupted attempt');
       const fixed = deliveryPolicy(c.manifest.profile.ref, s.initial.profile.version);
-      if (fixed.workflow.branch_mode !== 'issue_prefix' || c.config.profile_version !== s.initial.profile.version)
+      if (!supportsRevision(fixed.profile, fixed.workflow) || c.config.profile_version !== s.initial.profile.version)
         clientFail('revision_policy', 'Revision supports only the trusted repeatable docs Profile');
       await this.project(c); await this.executor(c);
       const policies = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(c.manifest.project.id)); keys(policies, ['profiles']);

@@ -15,6 +15,12 @@ export interface Workflow {
   readonly executor_restrictions: Readonly<{ executor_ids: readonly string[]; machine_ids: readonly string[] }>;
 }
 export interface ProjectProfile { readonly id: string; readonly repository: string; readonly base: string; readonly workflows: readonly Workflow[] }
+export const REVISION_COMMAND = 'git diff --check origin/main...HEAD';
+/** Current Revision capability executes exactly one bounded main diff check. */
+export function supportsRevision(profile: ProjectProfile, workflow: Workflow): boolean {
+  return profile.base === 'main' && workflow.branch_mode === 'issue_prefix' && workflow.bootstrap_paths !== null &&
+    workflow.verification_commands.length === 1 && workflow.verification_commands[0] === REVISION_COMMAND;
+}
 export interface ApprovedPolicy {
   readonly schema_version: '1.0';
   readonly kind: 'builder_policy';
