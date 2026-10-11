@@ -14,30 +14,40 @@ export const digest = (bytes: string | Buffer) => createHash('sha256').update(by
 export const revisionId = (run: string, task: TaskBinding, previous: string, head: string, pr: number) =>
   'revision-' + digest(JSON.stringify([run, task.fingerprint, previous, head, pr]));
 
-export function inspectRevision(root: string, original: string, previous: string, head: string, base: string, paths: readonly string[]) {
+export function inspectRevision(root: string, original: string, previous: string, head: string, base: string, paths: readonly string[] | null, baseRef = 'main') {
   if (previous === head || git(root, ['merge-base', '--is-ancestor', previous, head], true) !== '' ||
       git(root, ['merge-base', previous, head]) !== previous || git(root, ['merge-base', original, head]) !== original)
     clientFail('revision_ancestry', 'Revision must be a strict descendant of both the previous and original candidate');
-  if (git(root, ['rev-parse', 'origin/main']) !== base) clientFail('revision_base', 'Trusted origin/main must match the original PR base');
+  if (git(root, ['rev-parse', 'origin/' + baseRef]) !== base) clientFail('revision_base', 'Trusted base must match the original PR base');
   return [previous, original].map(from => {
-    const names = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', '-C', '--find-copies-harder', from, head, '--']).split('\0');
+    const names = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', ...(paths ? ['-M','-C','--find-copies-harder'] : ['--no-renames']), from, head, '--']).split('\0');
     if (names.at(-1) === '') names.pop();
-    if (!names.length || names.length % 2 || names.some((v, i) => i % 2 ? !paths.includes(v) : !['A','M'].includes(v)))
+    if (!names.length || names.length % 2 || names.some((v, i) => i % 2 ? paths && !paths.includes(v) : !(paths ? ['A','M'] : ['A','M','D']).includes(v)))
       clientFail('revision_paths', 'Both revision diffs must contain only added or modified allowlisted documents');
     // Disallow executable/symlink/submodule changes, even at an allowlisted document path.
     const raw = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--raw', '--no-abbrev', '--no-renames', from, head, '--']);
-    if (raw.split('\n').some(line => !/^:(?:000000|100644) 100644 [a-f0-9]{40} [a-f0-9]{40} [AM]\t/.test(line)))
+    if (raw.split('\n').some(line => !(paths ? /^:(?:000000|100644) 100644 [a-f0-9]{40} [a-f0-9]{40} [AM]\t/ : /^:(?:000000|100644|100755) (?:000000|100644|100755) [a-f0-9]{40} [a-f0-9]{40} [AMD]\t/).test(line)))
       clientFail('revision_paths', 'Revision documents must remain regular non-executable files');
     const diff = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', from, head, '--']);
-    if (!diff || diff.includes('GIT binary patch') || /^Binary files /m.test(diff)) clientFail('revision_paths', 'Revision requires an inspectable text diff');
+    if (!diff || paths && (diff.includes('GIT binary patch') || /^Binary files /m.test(diff))) clientFail('revision_paths', 'Revision requires an inspectable diff');
     return { from, head, name_status_sha256: digest(names.join('\0')), diff_sha256: digest(diff) };
   });
 }
 
 export interface RevisionEvidence { command: typeof REVISION_COMMAND; before_sha: string; after_sha: string; base_sha: string;
-  exit_code: 0; stdout: string; stderr: string; environment: Record<string, unknown>; started_at: string; finished_at: string }
-export function parseRevisionEvidence(body: string, actor: string, head: string, base: string): RevisionEvidence {
+  exit_code: 0; stdout: string; stderr: string; environment: Record<string, unknown>; started_at: string; finished_at: string; checks?: {command:string;exit_code:number}[] }
+export function parseRevisionEvidence(body: string, actor: string, head: string, base: string, commands?: readonly string[]): RevisionEvidence {
   const reject = () => clientFail('revision_evidence', 'Existing App evidence must contain exact-head clean verification, environment and raw output');
+  if (commands) {
+    let m: any;
+    try { const match = /^Builder evidence\n([\s\S]+)$/.exec(body); m = JSON.parse(match?.[1] ?? 'null'); } catch { return reject(); }
+    if (!m || m.actor !== actor || m.before_sha !== head || m.after_sha !== head || m.base_sha !== base || m.clean_before !== true || m.clean_after !== true ||
+        !Array.isArray(m.logs) || !same(m.logs.map((l:any) => l.command),commands) || m.logs.some((l:any) => l.exit_code !== 0 || typeof l.stdout !== 'string' || typeof l.stderr !== 'string') ||
+        !m.environment || !['platform','arch','node'].every(k => typeof m.environment[k] === 'string' && m.environment[k]) ||
+        ![m.started_at,m.finished_at].every(t => typeof t === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(t) && Number.isFinite(Date.parse(t))) || m.finished_at < m.started_at) return reject();
+    return {command:REVISION_COMMAND,before_sha:head,after_sha:head,base_sha:base,exit_code:0,stdout:JSON.stringify(m.logs),stderr:'',environment:m.environment,
+      started_at:m.started_at,finished_at:m.finished_at,checks:m.logs.map((l:any)=>({command:l.command,exit_code:l.exit_code}))};
+  }
   let metadata: Record<string, any>, v: Record<string, any>;
   try {
     const match = /^Builder evidence — documentation review correction\n```json\n([\s\S]+?)\n```\nRaw stdout: ([^\n]+)\nRaw stderr: ([^\n]+)/.exec(body);

@@ -24,7 +24,7 @@ const credentialOutput = (value: string) => /-----BEGIN[^\r\n]*PRIVATE KEY-----|
 const statistic = (output: string, label: string): number | null => {
   const match = new RegExp('(?:#|ℹ) ' + label + ' (\\d+)').exec(output); return match ? Number(match[1]) : null;
 };
-const defaults: DeliveryDependencies = { connect: connectBuilder, verify: async (command, root) => {
+export const deliveryDependencies: DeliveryDependencies = { connect: connectBuilder, verify: async (command, root) => {
   // Approved commands still pass a bounded executor grammar; there is no shell/API pass-through.
   const pnpm = /^pnpm(?: --config\.verifyDepsBeforeRun=false)? (?:run )?[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(command);
   const node = /^node --test(?: tests\/[A-Za-z0-9_.\/-]+\.mjs)+$/.test(command) && !command.includes('..');
@@ -47,7 +47,7 @@ export async function deliver(client: AwhClient, options: DeliveryOptions, overr
   if (options.recoverFromRun !== undefined && (!/^run-[a-f0-9-]{36}$/.test(options.recoverFromRun) || options.issue === undefined))
     clientFail('arguments', 'Recovery requires --issue and an exact predecessor Run ID');
   safeData(options);
-  const identity = inspectRepository(client.cwd), deps = { ...defaults, ...overrides };
+  const identity = inspectRepository(client.cwd), deps = { ...deliveryDependencies, ...overrides };
   ignoredDeliveryLogs(identity);
   let prepared: Awaited<ReturnType<typeof connectBuilder>> | undefined;
   return client.observeDelivery(async o => execute(o), options.issue, async (binding, recovery) => {

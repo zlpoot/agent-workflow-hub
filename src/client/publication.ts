@@ -16,7 +16,7 @@ export function publicationBodies(prepared: any, pending: string) {
     work_item: { repo: prepared.task.repository, issue: prepared.task.issue },
     candidate: { pr: prepared.pull_request.number, base_sha: prepared.base_sha, head_sha: prepared.new_head },
     producer: { executor: prepared.task.executor_id, run_id: prepared.run_id },
-    verification: { subject_sha: prepared.new_head, lifecycle: 'completed', outcome: 'pass', checks: [{ command: REVISION_COMMAND, exit_code: 0 }],
+    verification: { subject_sha: prepared.new_head, lifecycle: 'completed', outcome: 'pass', checks: prepared.verified?.checks ?? [{ command: REVISION_COMMAND, exit_code: 0 }],
       evidence_refs: [`https://github.com/${prepared.task.repository}/pull/${prepared.pull_request.number}#issuecomment-${prepared.evidence.comment.number}`] },
     handoff: { next_step: 'review', publication: 'pending' } };
   const revision = { schema_version: '1.0', revision_id: prepared.revision_id, run_id: prepared.run_id,

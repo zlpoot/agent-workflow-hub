@@ -35,6 +35,7 @@ export function replayRun(initial: unknown, history: readonly unknown[]): Replay
   require(Array.isArray(history), 'schema', 'Event history must be an array');
   const events: Event[] = [], ids = new Set<string>(), steps = new Map<string, number | null>();
   let verificationSha: string | null = null;
+  let verificationChecks: {command:string;exit_code:number}[] = [];
   let candidate: EventData['GITHUB_PR_CREATED'] | null = null;
   let publication: EventData['HANDOFF_PUBLISHED'] | null = null;
   let reviewer: string | null = null;
@@ -76,6 +77,7 @@ export function replayRun(initial: unknown, history: readonly unknown[]): Replay
       case 'VERIFICATION_PASSED':
         state('verifying');
         require(event.payload.data.subject_sha === verificationSha, 'binding', 'Verification result must match its start SHA');
+        verificationChecks = event.payload.data.checks;
         run.state = 'awaiting_review';
         break;
       case 'VERIFICATION_FAILED':
@@ -104,7 +106,7 @@ export function replayRun(initial: unknown, history: readonly unknown[]): Replay
         publication = event.payload.data;
         break;
       case 'PR_REVISION_LINKED': {
-        state('awaiting_review');
+        state('awaiting_review','reviewing','review_passed');
         const d = event.payload.data;
         checkPR(d.pull_request, d.previous_head);
         require(publication?.publication === 'confirmed' && d.previous_handoff.repository === run.source.repository &&
@@ -114,9 +116,9 @@ export function replayRun(initial: unknown, history: readonly unknown[]): Replay
           d.evidence.comment.repository === run.source.repository && d.handoff.comment.repository === run.source.repository &&
           d.handoff.comment.number !== publication.comment.number && d.handoff.comment.number !== d.evidence.comment.number &&
           !revisions.some(r => r.handoff.comment.number === d.handoff.comment.number) &&
-          d.checks.length === 1 && d.checks[0]!.command === 'git diff --check origin/main...HEAD' && d.checks[0]!.exit_code === 0,
+          canonical(d.checks) === canonical(verificationChecks) && d.checks.every(c => c.exit_code === 0),
           'binding', 'Revision requires a continuous same-PR verified candidate and a new confirmed Handoff');
-        candidate = { ...candidate!, head_sha: d.new_head }; verificationSha = d.new_head; reviewer = null;
+        candidate = { ...candidate!, head_sha: d.new_head }; verificationSha = d.new_head; reviewer = null; run.state = 'awaiting_review';
         publication = { handoff_version: '0.1', publication: 'confirmed', pull_request: d.pull_request,
           comment: d.handoff.comment, base_sha: d.base_sha, head_sha: d.new_head, subject_sha: d.new_head };
         revisions.push(d);

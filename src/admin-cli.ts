@@ -18,13 +18,14 @@ launcher --version <approved-version>
 validate --proposal <external-proposal> | --version <approved-work-item> --stage <observe|develop|deliver>
 diagnose [--version <approved-work-item>]
 Defaults: Develop only, zero Provider operations, no future HEAD. prepare aliases propose.
+Revision: add --original-version <first-grant> --run <Run> --pr <same-PR> --previous-head <old-SHA> --review <native-REQUEST_CHANGES-id>, exact --head-sha, and operations push,evidence,handoff. Separate independent approval required.
 Approve requires independently provisioned AWH_ADMIN_TRUST_FILE/SHA256 and AWH_ADMIN_APPROVAL_FILE/SHA256. Preparation and --confirm alone grant nothing.`;
 export function main(args: string[]): object | string {
   if (args.length === 1 && args[0] === '--help') return usage;
   const command = args[0] === 'prepare' ? 'propose' : args[0] ?? '', options = new Map<string,string>();
   const keys: Record<string, string[]> = {
     inspect: ['--proposal'], compare: ['--left','--right'], register: ['--policy','--version','--out'],
-    propose: ['--policy-version','--profile','--workflow','--repo','--issue','--branch','--base-sha','--head-sha','--executor','--machine','--expires-at','--stages','--operations','--version','--out'],
+    propose: ['--policy-version','--profile','--workflow','--repo','--issue','--branch','--base-sha','--head-sha','--executor','--machine','--expires-at','--stages','--operations','--version','--out','--original-version','--run','--pr','--previous-head','--review'],
     'approval-prepare': ['--proposal','--receipt','--reason','--out'], approve: ['--proposal','--confirm'], recover: ['--proposal','--confirm'],
     revoke: ['--version','--target','--out'], preflight: ['--version'], launcher: ['--version'], validate: ['--proposal','--version','--stage'], diagnose: ['--version']
   };
@@ -35,7 +36,7 @@ export function main(args: string[]): object | string {
     if (key === '--confirm') { options.set(key,'true'); continue; }
     const value = args[++index]; if (!value || value.startsWith('--')) deny('arguments'); options.set(key,value);
   }
-  if (!['inspect','diagnose','validate'].includes(command) && keys[command]!.some(key => !['--head-sha','--stages','--operations'].includes(key) && !options.has(key))) deny('arguments');
+  if (!['inspect','diagnose','validate'].includes(command) && keys[command]!.some(key => !['--head-sha','--stages','--operations','--original-version','--run','--pr','--previous-head','--review'].includes(key) && !options.has(key))) deny('arguments');
   const get = (key: string): string => options.get('--' + key)!;
   if (command === 'inspect') return options.has('--proposal') ? inspectProposal(get('proposal')) : inspectRegistry();
   if (command === 'compare') return compareProposals(get('left'),get('right'));
@@ -56,6 +57,11 @@ export function main(args: string[]): object | string {
   const task: Task = { repository: get('repo'), issue: Number(get('issue')), branch: get('branch'), base_sha: get('base-sha'), head_sha: get('head-sha') ?? null,
     profile: get('profile'), workflow: get('workflow'), executor_id: get('executor'), machine_id: get('machine'), expires_at: get('expires-at'),
     stages: (get('stages') ?? 'develop').split(',') as Stage[], provider_operations: get('operations') ? get('operations').split(',') as ProviderOperation[] : [] };
+  const revisionKeys = ['original-version','run','pr','previous-head','review'];
+  if (revisionKeys.some(k => options.has('--' + k))) {
+    if (!revisionKeys.every(k => options.has('--' + k)) || ![get('pr'),get('review')].every(v => /^[1-9]\d*$/.test(v))) deny('arguments');
+    task.revision = {original_version:get('original-version'),run_id:get('run'),pull_request:Number(get('pr')),previous_head:get('previous-head'),review_id:Number(get('review'))};
+  }
   return prepareGrant(get('policy-version'),get('version'),task,get('out'));
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

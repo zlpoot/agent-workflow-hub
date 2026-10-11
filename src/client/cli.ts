@@ -6,6 +6,7 @@ import { AwhClient, CLIENT_EVENT_TYPES } from './client.js';
 import { ClientError, clientFail, inspectRepository, initManifest, readJson } from './local.js';
 import { CLIENT_VERSION, CLIENT_PACKAGE } from './version.js';
 import { deliver, DeliveryError, deliveryDiagnostic } from './deliver.js';
+import { prepareCodexStage, developToPR } from '../workflow/codex.js';
 import { readFileSync, lstatSync } from 'node:fs';
 import { publicationDiagnostic } from '../builder.js';
 import { doctor, formatDoctor, isDoctorReport } from './doctor.js';
@@ -20,7 +21,7 @@ export async function main(args: string[]): Promise<unknown> {
     'resident start|status|stop', 'doctor [--json] [--probe-cp] [--policy-trust <external-file> --work-item <id> --work-item-version <version> --observations <json-file>]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
     'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry',
     'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry',
-    'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>'], event_types: CLIENT_EVENT_TYPES,
+    'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>', 'stage prepare', 'stage execute --title <title> --body <utf8-file>'], event_types: CLIENT_EVENT_TYPES,
     configuration: '--config <absolute-external-json-file> before command or AWH_CLIENT_CONFIG', doctor: 'read-only offline by default; explicit CP GET probe uses existing approved config; never grants authority', deliver: 'fixed Builder policy; explicit event-only retry', authority_verified: false };
   let configPath = process.env.AWH_CLIENT_CONFIG;
   if (args[0] === '--config') {
@@ -28,6 +29,11 @@ export async function main(args: string[]): Promise<unknown> {
     configPath = args[1]; args = args.slice(2);
   }
   const [command, ...rest] = args, options = new Map<string, string>();
+  if (command === 'stage') {
+    if (rest.length === 1 && rest[0] === 'prepare') return prepareCodexStage(process.cwd());
+    if (!configPath || rest.length !== 5 || rest[0] !== 'execute' || rest[1] !== '--title' || !rest[2] || rest[3] !== '--body' || !rest[4]) clientFail('arguments','stage execute requires external config, title and body file');
+    return developToPR(new AwhClient(configPath),{title:rest[2],body:readFileSync(rest[4],'utf8')});
+  }
   if (command === 'setup' || (command === 'init' || command === 'doctor') && rest.includes('--machine-config')) {
     if (configPath) clientFail('configuration','Machine initialization cannot override an existing Client config source');
     for (let i = 0; i < rest.length; i++) {
@@ -135,7 +141,7 @@ export async function main(args: string[]): Promise<unknown> {
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
   main(process.argv.slice(2)).then(result => {
     console.log(isDoctorReport(result) && !process.argv.slice(2).includes('--json') ? formatDoctor(result) : JSON.stringify(result));
-    if (isDoctorReport(result) && result.status === 'blocked' || result && typeof result === 'object' && 'kind' in result && result.kind === 'enrollment_doctor' && 'status' in result && result.status === 'blocked') process.exitCode = 2;
+    if (isDoctorReport(result) && result.status === 'blocked' || result && typeof result === 'object' && 'status' in result && result.status === 'BLOCKED' || result && typeof result === 'object' && 'kind' in result && result.kind === 'enrollment_doctor' && 'status' in result && result.status === 'blocked') process.exitCode = 2;
   }).catch(error => {
     const known = error instanceof ClientError;
     console.error(JSON.stringify({ error: error instanceof DeliveryError ? deliveryDiagnostic(error) : publicationDiagnostic(error) ?? { code: known ? error.code : 'client', message: known ? error.message : 'Client operation failed; configuration, input and remote diagnostics suppressed',

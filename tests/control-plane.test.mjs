@@ -62,6 +62,15 @@ test('revision capability is authenticated read-only, bounded and has no DB muta
   assert.equal(h.store.latestCursor(),before);
 });
 
+test('workflow capability advertises managed code revision without changing old capabilities or state',async t=>{
+ const h=await httpService(t),before=h.store.latestCursor();
+ assert.equal((await h.call('/v1/workflow-capabilities','GET',undefined,'')).status,401);
+ const response=await h.call('/v1/workflow-capabilities');assert.equal(response.status,200);
+ assert.equal(response.body.develop_to_pr,'stage-v1');assert.equal(response.body.managed_revision,'exact-grant-v1');
+ assert.equal((await h.call('/v1/capabilities')).body.revision_linking,'revision-link-v1');assert.equal(h.store.latestCursor(),before);
+ assert.equal((await h.call('/v1/workflow-capabilities?extra=true')).status,400);
+});
+
 test('New SQLite initialization is versioned, and preserves every registry and runtime after restart', t => {
   const db = database(t); populate(db.store); const appended = db.store.append(principal, sample.run.id, event());
   db.store.heartbeat(principal, sample.executor.id); const lastSeen = db.store.listExecutors(principal)[0].last_seen;

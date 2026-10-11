@@ -251,6 +251,11 @@ export class ControlPlaneStore {
       projectAccess(principal, initial.project_id); executorAccess(principal, initial.executor_id);
       if (row.client_id !== principal.id) fail(403, 'forbidden', 'Run belongs to another client');
       const history = this.#db.prepare('SELECT record FROM events WHERE run_id = ? ORDER BY sequence').all(runId).map(row => decode<Event>(row));
+      if (event.type === 'PR_REVISION_LINKED') {
+        const profile = this.#db.prepare('SELECT record FROM profiles WHERE ref = ? AND version = ?').get(initial.profile.ref,initial.profile.version);
+        if (!profile || canonical(event.payload.data.checks.map(c => c.command)) !== canonical(decode<ProfilePolicy>(profile).verification.commands))
+          fail(409,'binding','Revision verification must match the original immutable Profile commands');
+      }
       const result = appendEvent(initial, history, event);
       if (result.disposition === 'appended') {
         this.#db.prepare('INSERT INTO events (run_id, event_id, sequence, record) VALUES (?, ?, ?, ?)').run(runId, event.id, event.sequence, JSON.stringify(event));

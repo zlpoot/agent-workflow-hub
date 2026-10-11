@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readExternalFile } from './shared/external-files.js';
 import { safeData } from './shared/security.js';
-import { managedContext } from './admin/registry.js';
+import { managedContext, snapshot, readEntry } from './admin/registry.js';
 
 export class ProfileError extends Error {}
 export interface BuilderSelection { profile: string; workflow: string }
@@ -19,6 +19,8 @@ export interface ProjectProfile { readonly id: string; readonly repository: stri
 export const REVISION_COMMAND = 'git diff --check origin/main...HEAD';
 /** Current Revision capability executes exactly one bounded main diff check. */
 export function supportsRevision(profile: ProjectProfile, workflow: Workflow): boolean {
+  const managed = managedContext();
+  if (managed?.proposed.task?.revision && workflow.version === managed.proposed.task.revision.original_version) return true;
   return profile.base === 'main' && workflow.branch_mode === 'issue_prefix' && workflow.bootstrap_paths !== null &&
     workflow.verification_commands.length === 1 && workflow.verification_commands[0] === REVISION_COMMAND;
 }
@@ -102,18 +104,36 @@ function checkedBinding(value: Omit<TaskBinding, 'fingerprint'>, policy: Approve
   const [profileId, workflowId, extra] = value.profile_ref.split('/');
   if (!profileId || !workflowId || extra) return deny();
   const { profile, workflow } = selectWorkflow({ profile: profileId, workflow: workflowId }, policy);
-  if (workflow.branch_mode !== 'issue_prefix' || value.repository !== profile.repository || !positive(value.issue) || value.branch !== workflow.branch + value.issue ||
+  const managed = managedContext(), fixed = workflow.branch_mode === 'fixed' && managed;
+  if ((!fixed && workflow.branch_mode !== 'issue_prefix') || value.repository !== profile.repository || !positive(value.issue) ||
+      (fixed ? value.branch !== workflow.branch || value.issue !== workflow.work_item.issue : value.branch !== workflow.branch + value.issue) ||
       !/^[a-f0-9]{40}$/.test(value.source_sha) || value.profile_version !== workflow.version || !workflow.executor_restrictions.executor_ids.includes(value.executor_id) ||
       !workflow.executor_restrictions.machine_ids.includes(value.machine_id)) return deny();
   const ordered = Object.fromEntries(keys.map(k => [k, value[k as keyof typeof value]]));
   return Object.freeze({ ...value, fingerprint: createHash('sha256').update(JSON.stringify(ordered)).digest('hex') });
 }
+function bindingPolicy(value: Omit<TaskBinding, 'fingerprint'>): ApprovedPolicy {
+  const managed = managedContext();
+  if (managed && value.profile_version !== selectWorkflow(undefined,validateBuilderPolicy(managed.policy)).workflow.version) {
+    const { state } = snapshot(managed.trust), i = state.entries.findIndex(e => e.version === value.profile_version && e.action === 'grant');
+    if (i < 0) return deny(); // Historical bindings describe immutable audit records; Builder still requires the active grant.
+    const record = readEntry(managed.trust,state.entries[i]!,state.receipt_ids[i]!,new Date().toISOString());
+    return validateBuilderPolicy(record.policy);
+  }
+  return loadTrustedPolicy();
+}
 export function taskBinding(value: Omit<TaskBinding, 'fingerprint'>): TaskBinding {
-  return checkedBinding(value, loadTrustedPolicy());
+  return checkedBinding(value, bindingPolicy(value));
+}
+export function taskVerificationCommands(binding: TaskBinding): readonly string[] {
+  const { fingerprint, ...value } = binding, policy = bindingPolicy(value);
+  if (checkedBinding(value, policy).fingerprint !== fingerprint) return deny();
+  const [profile, workflow] = value.profile_ref.split('/');
+  return selectWorkflow({ profile: profile!, workflow: workflow! }, policy).workflow.verification_commands;
 }
 export function bindWorkflow(selection?: BuilderSelection, binding?: TaskBinding, policy = loadTrustedPolicy()) {
   const fixed = selectWorkflow(selection, policy);
-  if (fixed.workflow.branch_mode === 'fixed') { if (binding !== undefined) return deny(); return fixed; }
+  if (fixed.workflow.branch_mode === 'fixed' && binding === undefined) return fixed;
   if (!binding || !object(binding, ['repository','issue','branch','source_sha','profile_ref','profile_version','executor_id','machine_id','fingerprint'])) return deny();
   const { fingerprint, ...data } = binding, checked = checkedBinding(data, policy);
   if (checked.fingerprint !== fingerprint || checked.profile_ref !== `${fixed.profile.id}/${fixed.workflow.id}`) return deny();
