@@ -21,6 +21,10 @@ npm install --prefix /absolute/external/awh-client --offline --ignore-scripts --
 
 Windows 使用相同 prefix 的 `node_modules\.bin\awh.cmd`。`--prefix` 应是独立工具目录，不改变产品 package.json/lockfile。支持 Windows、macOS、Linux；自动测试中的平台取自实际 OS，其他 OS 的实测结果必须单独记录。模拟 platform 字段或 fixture 不能证明双平台 PASS。
 
+## 正式常驻与本机 Viewer（0.4.7）
+
+`awh --config <原外置配置> resident start|status|stop` 提供显式前台常驻及心跳，仅复用已有身份，不自动注册或执行任务。普通浏览器 Viewer、当前已安装 Client 离线 Doctor、外置配置模板和安装/启停路径见 [Windows 产品接入](windows-product.md)。真实部署仍需独立授权。
+
 ## 项目身份与本地状态
 
 在真实产品 worktree 执行 `awh init --profile <requested-ref> [--project-id <id>]`，默认 project id 为 origin repo 名，只创建 `.awh/project.yaml`：

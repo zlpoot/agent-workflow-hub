@@ -115,6 +115,45 @@ test('C1-I publication stays fixed to Hub #32/main/current branch with single-re
   assert(!foreignBranch.git.some(r => r[1].includes('push')));
 });
 
+test('#58 publication is fixed Hub/main/branch/Issue, scoped App credentials and Draft only at creation', async () => {
+  const selection = { profile: 'hub', workflow: 'issue58' };
+  const { profile, workflow } = selectWorkflow(selection);
+  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
+  assert.deepEqual(workflow, { id: 'issue58', branch: 'codex/issue58-windows-product', work_item: { repo: HUB_REPO, issue: 58 },
+    verification_commands: [
+      'pnpm --config.verifyDepsBeforeRun=false run build',
+      'pnpm --config.verifyDepsBeforeRun=false run typecheck',
+      'node --test tests/windows-product.test.mjs tests/dashboard-gateway.test.mjs tests/dashboard-wizard.test.mjs tests/dashboard-ui.test.mjs tests/doctor.test.mjs tests/client.test.mjs',
+      'node --test tests/builder.test.mjs tests/validator.test.mjs tests/cli.test.mjs',
+      'node scripts/windows-product-smoke.mjs', 'node scripts/dashboard-smoke.mjs',
+    ], bootstrap_paths: null });
+  assert.deepEqual(DEFAULT_SELECTION, { profile: 'hub', workflow: 'c05' });
+  assert.equal(selectWorkflow({ profile: 'hub', workflow: 'c07' }).workflow.work_item.issue, 8);
+  for (const key of ['repo','repository','base','branch','work_item','verification_commands','bootstrap_paths','api','url','git','gh'])
+    assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
+  assert.throws(() => { workflow.verification_commands.push('arbitrary'); });
+  assert.throws(() => selectWorkflow({ profile: 'future-ui', workflow: 'issue58' }));
+  assert.throws(() => selectWorkflow({ profile: 'webskill', workflow: 'issue58' }));
+  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
+  const f = fake({ branch: workflow.branch, installed: [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/agent-desktop'] });
+  const builder = await connectBuilder(f.deps, selection); await builder.push();
+  const candidate = await builder.createPR('Windows local product', 'Refs #58; Draft, independent Review pending.');
+  assert.equal(candidate.draft, true); assert.equal(candidate.head, head);
+  assert.deepEqual(f.requests.filter(r => r.url.endsWith('/access_tokens')).map(r => JSON.parse(r.body)), [
+    { permissions: inspectionPermissions }, { repositories: ['agent-workflow-hub'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } },
+  ]);
+  const create = JSON.parse(f.requests.find(r => r.url.endsWith('/pulls') && r.method === 'POST').body);
+  assert.equal(create.head, workflow.branch); assert.equal(create.base, 'main'); assert.equal(create.draft, true);
+  const handoff = structuredClone(record); handoff.work_item.issue = 58;
+  handoff.verification.checks = [...workflow.verification_commands].reverse().map(command => ({ command, exit_code: 0 }));
+  await assert.rejects(builder.ready(5, head, handoff, 10), /verification commands/);
+  assert(!f.requests.some(r => r.url.endsWith('/graphql') || /\/reviews(?:\?|$)|\/merge$/.test(r.url)));
+  for (const key of ['approve','review','merge','request','fetch','token']) assert.equal(builder[key], undefined);
+  const foreign = fake({ branch: 'codex/c07-webskill-profile' });
+  await assert.rejects((await connectBuilder(foreign.deps, selection)).push());
+  assert(!foreign.git.some(r => r[1].includes('push')));
+});
+
 test('Adapter Draft restoration is fixed App-owned exact-head and read back', async () => {
   let restored = false;
   const f = fake({ response: (url, options, value) => {

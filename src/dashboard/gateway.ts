@@ -5,8 +5,12 @@ import { ControlPlaneError, fail } from '../control-plane/security.js';
 import type { DashboardStore } from '../control-plane/store.js';
 import type { AuthenticateViewer } from './security.js';
 import { dashboardRoute } from './routes.js';
+import { localBrowserSession } from './local-browser.js';
+import type { Viewer } from './security.js';
+import type { createLocalOnboarding } from './onboarding.js';
 
-export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; now?: () => number }
+export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; now?: () => number;
+  localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding> }
 export const dashboardHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin',
   'Cross-Origin-Opener-Policy': 'same-origin', 'Referrer-Policy': 'no-referrer',
@@ -16,7 +20,10 @@ export const dashboardHeaders = {
 // Opt-in sidecar only. It neither changes the existing CP nor accepts Client/GitHub credentials.
 // The trusted host must provision separate HttpOnly cookies scoped to /dashboard; no public login/token endpoint.
 export function createDashboardGateway(options: GatewayOptions = {}) {
-  if (options.enabled && (!options.store || !options.authenticate || !options.assets)) fail(500, 'configuration', 'An explicit read store, viewer authenticator and built assets are required');
+  if (options.enabled && (!options.store || (!options.authenticate && !options.localBrowserViewer) || !options.assets) || options.authenticate && options.localBrowserViewer)
+    fail(500, 'configuration', 'An explicit read store, one viewer authenticator and built assets are required');
+  const local = options.localBrowserViewer ? localBrowserSession(options.localBrowserViewer, options.now) : undefined;
+  const authenticate = local?.authenticate ?? options.authenticate!;
   const files = options.enabled ? new Map([
     ['/dashboard', { type: 'text/html; charset=utf-8', body: readFileSync(resolve(options.assets!, 'index.html')) }],
     ['/dashboard/', { type: 'text/html; charset=utf-8', body: readFileSync(resolve(options.assets!, 'index.html')) }],
@@ -24,7 +31,7 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
     ['/dashboard/app.css', { type: 'text/css; charset=utf-8', body: readFileSync(resolve(options.assets!, 'app.css')) }]
   ]) : new Map();
   const streams = new Set<ServerResponse>();
-  const server = createServer({ maxHeaderSize: 16384, requestTimeout: 15000, headersTimeout: 10000 }, (request, response) => {
+  const server = createServer({ maxHeaderSize: 16384, requestTimeout: 15000, headersTimeout: 10000 }, async (request, response) => {
     for (const [key, value] of Object.entries(dashboardHeaders)) response.setHeader(key, value);
     try {
       if (!options.enabled) fail(404, 'not_found', 'Dashboard gateway is not enabled');
@@ -38,10 +45,22 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
       if (!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.length > 2048 || request.url.includes('\\') || /%2e|%2f|%5c/i.test(request.url))
         fail(400, 'invalid_route', 'Invalid request target');
       const url = new URL(request.url, 'http://dashboard.invalid');
-      if (url.pathname.startsWith('/dashboard/v1/')) {
-        dashboardRoute(request, response, url, { store: options.store!, authenticate: options.authenticate!, streams, interval: 250, now: options.now }); return;
+      if (url.pathname.startsWith('/dashboard/onboarding/v1/')) {
+        const viewer = authenticate(request);
+        if (!viewer) fail(401, 'viewer_unauthorized', 'A separate viewer session is required');
+        if (request.method !== 'GET') fail(405, 'read_only', 'Onboarding only performs offline diagnosis');
+        if (!options.onboarding || url.search) fail(404, 'not_found', 'Local diagnosis is not configured');
+        const path = url.pathname.slice('/dashboard/onboarding/v1/'.length);
+        const value = path === 'projects' ? { items: options.onboarding.list(viewer) } : /^doctor\/[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(path)
+          ? { item: await options.onboarding.diagnose(viewer, path.slice(7)) } : fail(404, 'not_found', 'Unknown local diagnosis path');
+        // The session may have expired while the local child was running.
+        if (!authenticate(request)) fail(401, 'viewer_unauthorized', 'Viewer session expired');
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify({ ...value, authority_verified: false })); return;
       }
-      if (!options.authenticate!(request)) fail(401, 'viewer_unauthorized', 'A separate viewer session is required');
+      if (url.pathname.startsWith('/dashboard/v1/')) {
+        dashboardRoute(request, response, url, { store: options.store!, authenticate, streams, interval: 250, now: options.now }); return;
+      }
+      if (!authenticate(request) && !local?.bootstrap(request, response)) fail(401, 'viewer_unauthorized', 'A separate viewer session is required');
       if (request.method !== 'GET') fail(405, 'read_only', 'Dashboard is read-only');
       const file = files.get(url.pathname);
       if (!file || url.search) fail(404, 'not_found', 'Dashboard asset was not found');

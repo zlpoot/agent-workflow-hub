@@ -17,8 +17,11 @@
     "control-plane": "node dist/control-plane-cli.js",
     "client": "node dist/client/cli.js",
     "client:pack": "pnpm build && node scripts/client-pack.mjs",
+    "viewer": "node dist/dashboard-cli.js",
+    "viewer:pack": "pnpm build && node scripts/client-pack.mjs --viewer",
     "dashboard:fixture": "node scripts/dashboard-fixture.mjs",
     "dashboard:smoke": "node scripts/dashboard-smoke.mjs",
+    "windows:smoke": "node scripts/windows-product-smoke.mjs",
     "dashboard:load": "node scripts/dashboard-load.mjs",
     "mvp": "node dist/mvp-cli.js"
   },

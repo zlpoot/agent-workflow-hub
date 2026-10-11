@@ -29,7 +29,7 @@ const labels: Record<string, string> = { loading: '加载中', refreshing: '刷�
 const color = (status: string): 'teal' | 'red' | 'amber' | 'gray' =>
   ['online', 'completed', 'passed', 'live'].includes(status) ? 'teal' : ['failed', 'blocked', 'offline', 'error'].includes(status) ? 'red' :
     ['running', 'partial', 'refreshing', 'outdated', 'verifying'].includes(status) ? 'amber' : 'gray';
-const known = (value: unknown) => value === null || value === undefined ? '未知' : typeof value === 'boolean' ? value ? '已启用' : '未启用' : String(value);
+const known = (value: unknown) => value === null || value === undefined ? '未提供' : typeof value === 'boolean' ? value ? '已启用' : '未启用' : String(value);
 const stamp = (value: string | number | null) => value === null ? '未知' : new Date(value).toLocaleString('zh-CN', { hour12: false });
 const short = (sha: string) => sha.slice(0, 10);
 function Status({ value }: { value: string }) { return <Badge color={color(value)} variant="soft">{text(value)}</Badge>; }

@@ -48,6 +48,15 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
       ['pnpm build', 'node --test tests/versioned-profile.test.mjs', 'node --test tests/doctor.test.mjs'], null),
     workflow('c1j', 'codex/c1j-dashboard-wizard-prototype', 33,
       ['pnpm build', 'pnpm typecheck', 'node --test tests/dashboard-ui.test.mjs tests/dashboard-wizard.test.mjs tests/doctor.test.mjs'], null),
+    // Human-authorized #58 code/Draft publication; no production or Release gate.
+    workflow('issue58', 'codex/issue58-windows-product', 58, [
+      'pnpm --config.verifyDepsBeforeRun=false run build',
+      'pnpm --config.verifyDepsBeforeRun=false run typecheck',
+      'node --test tests/windows-product.test.mjs tests/dashboard-gateway.test.mjs tests/dashboard-wizard.test.mjs tests/dashboard-ui.test.mjs tests/doctor.test.mjs tests/client.test.mjs',
+      'node --test tests/builder.test.mjs tests/validator.test.mjs tests/cli.test.mjs',
+      'node scripts/windows-product-smoke.mjs',
+      'node scripts/dashboard-smoke.mjs',
+    ], null),
     workflow('c1d', 'codex/c1d-builder-adapter', 22, ['pnpm check'], null),
   ]) }),
   Object.freeze({ id: 'future-ui', repository: FUTURE_REPO, base: 'main', workflows: Object.freeze([
