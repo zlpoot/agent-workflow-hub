@@ -6,6 +6,7 @@ import { spawnSync, fork } from 'node:child_process';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
+import { request } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { npmEntry, npmEnv } from './npm-tool.mjs';
@@ -21,14 +22,14 @@ mkdirSync(evidence); const audit=validateRelease(kit,head), manifest=JSON.parse(
 const scratch=mkdtempSync(join(tmpdir(),'awh-m1-b1-离仓 space-')), install=join(scratch,'install'),cache=join(scratch,'empty-cache'),repo=join(scratch,'consumer');
 mkdirSync(install); mkdirSync(repo);
 const env=npmEnv(cache); delete env.NODE_PATH; delete env.NODE_EXTRA_CA_CERTS;
-const children=new Set(),checks={archive_audit:'PASS'},commands=[];
+const children=new Set(),checks={archive_audit:'PASS'},commands=[],powershell=[];
 const write=(path,value)=>writeFileSync(path,JSON.stringify(value,null,2)+'\n',{mode:0o600,flag:'wx'});
-const run=(file,argv,{cwd=scratch,status=0,allowed=[status],label='command'}={})=>{
+const run=(file,argv,{cwd=scratch,status=0,allowed=[status],label='command',channel='stdout'}={})=>{
   const r=spawnSync(file,argv,{cwd,env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:4*1024*1024});
   commands.push({label,exit_code:r.status,expected:allowed});
   // CLI output is already sanitized; no external credentials/config bytes are logged.
   writeFileSync(join(evidence,'commands.log'),`\n${label}: exit=${r.status}\n${r.stdout??''}${r.stderr??''}`,{flag:'a'});
-  assert(allowed.includes(r.status),label+' failed: '+r.stderr); return r.stdout.trim();
+  assert(allowed.includes(r.status),label+' failed: '+r.stderr); return r[channel].trim();
 };
 const node=(argv,options)=>run(process.execPath,argv,options);
 const modulePath=(id,path)=>join(install,'node_modules','@zlpoot',id,path);
@@ -36,9 +37,11 @@ const entry=id=>modulePath(id,Object.values(specs[id].bin)[0]);
 const port=async()=>{const server=createServer();server.listen(0,'127.0.0.1');await once(server,'listening');const p=server.address().port;await new Promise(done=>server.close(done));return p;};
 const launcher=join(scratch,'launch.mjs');
 writeFileSync(launcher,"process.on('message',m=>{if(m==='stop'){process.disconnect();process.emit('SIGTERM');}});const {main}=await import(process.argv[2]);await main(JSON.parse(process.argv[3]));\n");
-const start=async(id,argv)=>{
-  const child=fork(launcher,[pathToFileURL(entry(id)).href,JSON.stringify(argv)],{cwd:scratch,env,stdio:['ignore','pipe','pipe','ipc'],windowsHide:true});
-  children.add(child); let output='',error=''; child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>error+=b);
+const start=async(id,argv,installedEntry=entry(id))=>{
+  const child=fork(launcher,[pathToFileURL(installedEntry).href,JSON.stringify(argv)],{cwd:scratch,env,stdio:['ignore','pipe','pipe','ipc'],windowsHide:true});
+  children.add(child); let output='',error='';
+  child.stdout.on('data',b=>{output+=b;writeFileSync(join(evidence,id+'-server.log'),b,{flag:'a'});});
+  child.stderr.on('data',b=>{error+=b;writeFileSync(join(evidence,id+'-server.log'),b,{flag:'a'});});
   const until=Date.now()+15000;
   while(!output.includes(id==='awh-viewer'?'existing_v2_readonly':'listening at')){assert.equal(child.exitCode,null,error);assert(Date.now()<until,'Startup timeout');await delay(50);}
   return child;
@@ -56,6 +59,7 @@ try {
     for(const bin of Object.values(specs[id].bin))assert(readFileSync(modulePath(id,bin),'utf8').startsWith('#!/usr/bin/env node'));
   }
   for(const shell of [join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),'pwsh.exe']) {
+    powershell.push(run(shell,['-NoProfile','-NonInteractive','-Command','$PSVersionTable.PSVersion.ToString()'],{label:'PowerShell runtime '+shell}));
     const shim=join(install,'node_modules/.bin/awh.cmd').replaceAll("'","''");
     const version=run(shell,['-NoProfile','-NonInteractive','-Command',`& '${shim}' --version; exit $LASTEXITCODE`],{label:'installed .cmd via '+shell});
     assert.equal(JSON.parse(version).version,specs['awh-client'].version);
@@ -63,8 +67,8 @@ try {
   // This is a synthetic isolated Git consumer, never an approved Provider target.
   const git=argv=>run('git',['-c','commit.gpgsign=false','-c','core.hooksPath=NUL',...argv],{cwd:repo,label:'isolated Git '+argv[0]});
   git(['init','-b','main']);git(['config','user.name','Isolated smoke']);git(['config','user.email','smoke@example.invalid']);
-  git(['remote','add','origin','https://github.com/example-org/release-smoke.git']);writeFileSync(join(repo,'source.txt'),'synthetic isolated Observe consumer\n');
-  git(['add','source.txt']);git(['commit','-m','synthetic Observe source']);
+  git(['remote','add','origin','https://github.com/example-org/release-smoke.git']);writeFileSync(join(repo,'source.txt'),'synthetic isolated Observe consumer\n');writeFileSync(join(repo,'.gitignore'),'.handoff/\n');
+  git(['add','source.txt','.gitignore']);git(['commit','-m','synthetic Observe source']);
   const cpPort=await port(), viewerPort=await port(), endpoint='http://127.0.0.1:'+cpPort;
   assert.notEqual(cpPort,viewerPort);
   const home=join(scratch,'external-home'),machine=join(scratch,'machine-config.json');mkdirSync(home);
@@ -87,7 +91,9 @@ try {
   for(const id of ['installation','profile','client_state','cp_connection','cp_profile','cp_executor'])assert.equal(doctor.checks.find(c=>c.id===id)?.status,'passed',id);
   assert.equal(doctor.authority_verified,false);checks.observe_doctor='PASS';
   writeFileSync(join(scratch,'pr-body.md'),'synthetic denied Deliver\n');
-  node([client,'--config',config,'deliver','--title','must refuse','--body',join(scratch,'pr-body.md'),'--hold-draft'],{cwd:repo,status:2,label:'Observe cannot Deliver'});assert.deepEqual(readFileSync(session),initial);checks.unauthorized_deliver='PASS';
+  const denied=JSON.parse(node([client,'--config',config,'deliver','--title','must refuse','--body',join(scratch,'pr-body.md'),'--hold-draft'],{cwd:repo,status:2,label:'Observe cannot Deliver',channel:'stderr'}));
+  assert(['http','profile','delivery_policy','enrollment_binding'].includes(denied.error?.code),'Must reject for authorization, not an unrelated setup error');
+  assert.deepEqual(readFileSync(session),initial);checks.unauthorized_deliver='PASS';
   node([entry('awh-builder'),'preflight'],{cwd:repo,status:2,label:'Builder missing external authorization'});checks.builder_fail_closed='PASS';
   for(const id of ['awh-client','awh-viewer']) {
     const result=node(['--input-type=module','-e',`const {managedContext}=await import(${JSON.stringify(pathToFileURL(modulePath(id,'dist/admin/registry.js')).href)});if(managedContext({})!==null)process.exit(1);console.log('read-only loader PASS');`],{label:id+' read-only loader'});assert(result.includes('PASS'));
@@ -98,8 +104,11 @@ try {
   write(viewerConfig,{schema_version:'1.0',mode:'local_browser_direct',database,port:viewerPort,viewer:{id:'smoke-viewer',project_ids:[completed.project_id]},local_bindings:[]});
   const viewer=await start('awh-viewer',['--config',viewerConfig]),origin='http://127.0.0.1:'+viewerPort;
   assert.equal((await fetch(origin+'/dashboard')).status,401);
-  const navigation=await fetch(origin+'/dashboard',{headers:{'Sec-Fetch-Site':'none','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'}});assert.equal(navigation.status,200);
-  const cookie=navigation.headers.get('set-cookie').split(';')[0];assert((await navigation.text()).includes('AWH'));
+  // Fetch overrides Sec-Fetch-Mode; use HTTP to send the same explicit navigation as a browser.
+  const navigation=await new Promise((done,reject)=>{
+    const req=request(origin+'/dashboard',{headers:{'Sec-Fetch-Site':'none','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'}},res=>{let body='';res.on('data',b=>body+=b);res.on('end',()=>done({status:res.statusCode,cookie:res.headers['set-cookie']?.[0],body}));});req.on('error',reject);req.end();
+  });assert.equal(navigation.status,200);
+  const cookie=navigation.cookie.split(';')[0];assert(navigation.body.includes('AWH'));
   for(const path of ['/dashboard/app.js','/dashboard/app.css','/dashboard/v1/snapshot']) {
     const response=await fetch(origin+path,{headers:{Cookie:cookie}});assert.equal(response.status,200);assert(response.headers.get('content-security-policy'));
     if(path.endsWith('snapshot')){const snapshot=await response.json();write(join(evidence,'viewer-snapshot.json'),snapshot);assert(JSON.stringify(snapshot).includes(completed.project_id));}else await response.arrayBuffer();
@@ -116,12 +125,14 @@ try {
   const env2=npmEnv(cache2),r=spawnSync(process.execPath,[npmEntry(),'install','--prefix',reinstall,'--offline','--ignore-scripts','--no-audit','--no-fund',...manifest.artifacts.filter(a=>a.target==='universal').map(a=>join(kit,a.filename))],{cwd:scratch,env:env2,encoding:'utf8',windowsHide:true,timeout:60000});
   writeFileSync(join(evidence,'reinstall.log'),(r.stdout??'')+(r.stderr??''));assert.equal(r.status,0);
   const reClient=join(reinstall,'node_modules/@zlpoot/awh-client/dist/client/cli.js');assert.equal(JSON.parse(node([reClient,'--version'],{label:'reinstalled version'})).version,specs['awh-client'].version);
+  const reCP=await start('awh-control-plane',['serve','--runtime-config',runtime],join(reinstall,'node_modules/@zlpoot/awh-control-plane/dist/control-plane-cli.js'));
+  node([reClient,'--config',config,'register'],{cwd:repo,label:'reinstalled Client retained identity and Session'});await stop(reCP);
   assert.deepEqual(readFileSync(session),initial);assert.deepEqual(readFileSync(join(state,'machine.json')),identity);checks.reinstall='PASS';
   for(const p of [cpPort,viewerPort]){const server=createServer();server.listen(p,'127.0.0.1');await once(server,'listening');await new Promise(done=>server.close(done));}checks.ports_released='PASS';
 } catch(error) {
-  failure={name:error.name,message:error.message};write(join(evidence,'failure.json'),failure);process.exitCode=1;
+  failure={name:error.name,message:error.message,stack:error.stack};write(join(evidence,'failure.json'),failure);process.exitCode=1;
 } finally {
-  for(const child of children)child.kill();
-  const result={schema_version:'1.0',kind:'awh_windows_package_smoke',source_commit:head,status:failure?'BLOCKED':'PASS',environment:{os:process.platform,cpu:process.arch,node:process.version},artifacts:manifest.artifacts.map(({component,filename,sha256})=>({component,filename,sha256})),audit,checks,commands,failure,scratch_retained:scratch,production_touched:false,provider_writes:0,fixture_provenance:'synthetic isolated Observe consumer; no business E2E claim',browser_full_flow:'NOTRUN',mac:'NOTRUN'};
+  await Promise.allSettled([...children].map(async child=>{const exited=once(child,'exit');child.kill();await exited;}));
+  const result={schema_version:'1.0',kind:'awh_windows_package_smoke',source_commit:head,status:failure?'BLOCKED':'PASS',environment:{os:process.platform,cpu:process.arch,node:process.version,powershell},artifacts:manifest.artifacts.map(({component,filename,sha256})=>({component,filename,sha256})),audit,checks,commands,failure,scratch_retained:scratch,production_touched:false,provider_writes:0,fixture_provenance:'synthetic isolated Observe consumer; no business E2E claim',browser_full_flow:'NOTRUN',mac:'NOTRUN'};
   write(join(evidence,'result.json'),result);console.log(JSON.stringify(result));
 }
