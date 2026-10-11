@@ -10,10 +10,14 @@ import { readFileSync, lstatSync } from 'node:fs';
 import { publicationDiagnostic } from '../builder.js';
 import { doctor, formatDoctor, isDoctorReport } from './doctor.js';
 import { residentControl, startResident } from './resident.js';
+import { setupMachine, enrollmentPreview, submitEnrollment, finishEnrollment, browseDirectories, diagnoseEnrollment, enrollmentPolicies } from './enrollment.js';
 
 export async function main(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
-  if (args.length === 1 && args[0] === '--help') return { commands: ['resident start|status|stop', 'doctor [--json] [--probe-cp] [--policy-trust <external-file> --work-item <id> --work-item-version <version> --observations <json-file>]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
+  if (args.length === 1 && args[0] === '--help') return { commands: ['setup --machine-config <external-file> --home <external-directory> --endpoint <trusted-CP> --project-root <directory> [--ca <external-public-CA>] [--policy-trust <external-anchor>] [--reuse-machine-state <existing-directory>]',
+    'init --machine-config <external-file> --directory <Git-root> [--mode observe|develop --confirm] [--complete --confirm]',
+    'doctor --machine-config <external-file> --directory <Git-root> [--json] [--probe-cp] [--repair [--confirm]]',
+    'resident start|status|stop', 'doctor [--json] [--probe-cp] [--policy-trust <external-file> --work-item <id> --work-item-version <version> --observations <json-file>]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
     'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry',
     'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry',
     'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>'], event_types: CLIENT_EVENT_TYPES,
@@ -24,6 +28,41 @@ export async function main(args: string[]): Promise<unknown> {
     configPath = args[1]; args = args.slice(2);
   }
   const [command, ...rest] = args, options = new Map<string, string>();
+  if (command === 'setup' || (command === 'init' || command === 'doctor') && rest.includes('--machine-config')) {
+    if (configPath) clientFail('configuration','Machine initialization cannot override an existing Client config source');
+    for (let i = 0; i < rest.length; i++) {
+      const key = rest[i]!;
+      if (!['--machine-config','--directory','--mode','--confirm','--complete','--repair','--json','--browse','--policies','--endpoint','--home','--project-root','--ca','--policy-trust','--reuse-machine-state','--work-item','--work-item-version','--probe-cp'].includes(key) || options.has(key)) clientFail('arguments','Invalid initialization option');
+      if (['--confirm','--complete','--repair','--json','--browse','--probe-cp','--policies'].includes(key)) { options.set(key,'true'); continue; }
+      const value = rest[++i]; if (!value || value.startsWith('--')) clientFail('arguments','Missing initialization value'); options.set(key,value);
+    }
+    const path = options.get('--machine-config'); if (!path) clientFail('arguments','Explicit machine setup required');
+    if (command === 'setup') {
+      if (!['--endpoint','--home','--project-root'].every(k => options.has(k)) || [...options.keys()].some(k => !['--machine-config','--endpoint','--home','--project-root','--ca','--policy-trust','--reuse-machine-state'].includes(k))) clientFail('arguments','Invalid machine setup');
+      return setupMachine({path,endpoint:options.get('--endpoint')!,home:options.get('--home')!,projectRoot:options.get('--project-root')!,clientEntry:realpathSync(process.argv[1]!),ca:options.get('--ca'),policyTrust:options.get('--policy-trust'),existingMachineState:options.get('--reuse-machine-state')});
+    }
+    if ([...options.keys()].some(k => ['--endpoint','--home','--project-root','--ca','--policy-trust','--reuse-machine-state'].includes(k))) clientFail('arguments','Machine setup cannot be overridden by project input');
+    if (command === 'init' && options.has('--browse')) {
+      if ([...options.keys()].some(k => !['--machine-config','--directory','--browse'].includes(k))) clientFail('arguments','Invalid directory browse');
+      return browseDirectories(path,options.get('--directory'));
+    }
+    const directory = options.get('--directory'); if (!directory) clientFail('arguments','Choose a local directory');
+    if (command === 'init' && options.has('--policies')) return enrollmentPolicies(path,directory);
+    if (command === 'doctor' && !options.has('--repair')) {
+      if ([...options.keys()].some(k => !['--machine-config','--directory','--json','--probe-cp'].includes(k))) clientFail('arguments','Doctor is read-only unless repair is explicitly selected');
+      return diagnoseEnrollment(path,directory,options.has('--probe-cp'));
+    }
+    if (command === 'doctor' && !options.has('--confirm')) return enrollmentPreview(path,directory);
+    if (options.has('--complete') || command === 'doctor' && options.has('--repair') && options.has('--confirm')) {
+      if (!options.has('--confirm')) clientFail('arguments','Registration requires explicit confirmation');
+      return finishEnrollment(path,directory);
+    }
+    if (!options.has('--confirm')) return enrollmentPreview(path,directory);
+    const mode = options.get('--mode') ?? 'observe'; if (!['observe','develop'].includes(mode)) clientFail('arguments','Select observe or develop');
+    const selection = options.has('--work-item') || options.has('--work-item-version');
+    if (selection && (!options.has('--work-item') || !options.has('--work-item-version'))) clientFail('arguments','Exact Work Item selection required');
+    return submitEnrollment(path,directory,mode as 'observe'|'develop',selection ? {id:options.get('--work-item')!,version:options.get('--work-item-version')!} : undefined);
+  }
   if (command === 'resident') {
     if (rest.length === 1 && rest[0] === '--help') return { usage: 'awh --config <existing-external-config> resident start|status|stop',
       start: 'explicit foreground presence service; Ctrl+C or resident stop shuts it down; no task execution or auto-registration', authority_verified: false };
@@ -96,7 +135,7 @@ export async function main(args: string[]): Promise<unknown> {
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
   main(process.argv.slice(2)).then(result => {
     console.log(isDoctorReport(result) && !process.argv.slice(2).includes('--json') ? formatDoctor(result) : JSON.stringify(result));
-    if (isDoctorReport(result) && result.status === 'blocked') process.exitCode = 2;
+    if (isDoctorReport(result) && result.status === 'blocked' || result && typeof result === 'object' && 'kind' in result && result.kind === 'enrollment_doctor' && 'status' in result && result.status === 'blocked') process.exitCode = 2;
   }).catch(error => {
     const known = error instanceof ClientError;
     console.error(JSON.stringify({ error: error instanceof DeliveryError ? deliveryDiagnostic(error) : publicationDiagnostic(error) ?? { code: known ? error.code : 'client', message: known ? error.message : 'Client operation failed; configuration, input and remote diagnostics suppressed',

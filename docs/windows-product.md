@@ -1,5 +1,7 @@
 # Windows Client / Viewer 接入
 
+R1-D（Client / Viewer 0.4.8）新增完整的本机项目初始化、CP 管理员批准、Doctor 修复与可续用的 Viewer 会话。新用户流程和安装设置见 [项目接入](project-enrollment.md)。下文 0.4.7 是 #59 的保留基线；其既有身份、证据和候选产物不被追认或覆盖。
+
 本功能实现 #58 的离线代码范围。Client 0.4.7 增加正式 presence 常驻入口；Viewer 0.4.7 增加普通浏览器本机入口及当前已安装 Client 的离线 Doctor。它不改变既有 CP、身份、业务历史或审批。真实 Future UI 验收、新 Windows RC、独立 Review 和 Release 仍是后续门槛，旧 #57 ZIP 不因本功能而成为合格候选。
 
 ## 从外置目录安装

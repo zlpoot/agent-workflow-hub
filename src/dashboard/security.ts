@@ -8,12 +8,12 @@ export type AuthenticateViewer = (request: IncomingMessage) => Viewer | null;
 
 // Separate opaque HttpOnly cookie sessions, provisioned by a trusted host/gateway; never Client bearers.
 // This first implementation deliberately accepts only an exact IPv4 loopback origin.
-export function createViewerAuthenticator(sessions: readonly ViewerSession[], now = Date.now): AuthenticateViewer {
+export function createViewerAuthenticator(sessions: readonly ViewerSession[], now = Date.now, allowEmptyLocalScope = false): AuthenticateViewer {
   if (!Array.isArray(sessions) || !sessions.length || sessions.length > 64) fail(500, 'configuration', 'Explicit viewer sessions are required');
   const ids = new Set<string>(), hashes = new Set<string>();
   const registry = sessions.map(session => {
     if (!session || Object.keys(session).sort().join(',') !== 'expires_at,id,project_ids,session_sha256' || !validId(session.id) || ids.has(session.id) ||
-        !Array.isArray(session.project_ids) || !session.project_ids.length || session.project_ids.length > 64 || !session.project_ids.every(validId) ||
+        !Array.isArray(session.project_ids) || !session.project_ids.length && !allowEmptyLocalScope || session.project_ids.length > 64 || !session.project_ids.every(validId) ||
         new Set(session.project_ids).size !== session.project_ids.length || !/^[a-f0-9]{64}$/.test(session.session_sha256) || hashes.has(session.session_sha256) ||
         !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(session.expires_at) || !Number.isFinite(Date.parse(session.expires_at)))
       fail(500, 'configuration', 'Invalid viewer session');

@@ -60,6 +60,161 @@
       "items": {
         "$ref": "urn:awh:protocol:1.0#/$defs/profile_policy"
       }
+    },
+    "enrollments": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/enrollment_grant"
+      }
+    }
+  },
+  "$defs": {
+    "enrollment_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "id",
+        "repository",
+        "project_id",
+        "profile_ref",
+        "client_id",
+        "executor_id",
+        "machine",
+        "worktree_id",
+        "token_sha256",
+        "mode",
+        "branch",
+        "sha",
+        "work_item"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "kind": {
+          "const": "enrollment_request"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"
+        },
+        "project_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "profile_ref": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$"
+        },
+        "client_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "executor_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "machine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "platform"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            },
+            "platform": {
+              "enum": [
+                "windows",
+                "macos",
+                "linux"
+              ]
+            }
+          }
+        },
+        "worktree_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "token_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "mode": {
+          "enum": [
+            "observe",
+            "develop"
+          ]
+        },
+        "branch": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_./-]{0,127}$"
+        },
+        "sha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "work_item": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "enrollment_grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "manifest",
+        "approved_at",
+        "capability"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/enrollment_request"
+        },
+        "manifest": {
+          "$ref": "urn:awh:protocol:1.0#/$defs/manifest"
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "capability": {
+          "const": "register_presence"
+        }
+      }
     }
   }
 }

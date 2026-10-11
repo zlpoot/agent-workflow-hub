@@ -49,6 +49,12 @@ export const PROFILES: readonly ProjectProfile[] = Object.freeze([
     workflow('c1j', 'codex/c1j-dashboard-wizard-prototype', 33,
       ['pnpm build', 'pnpm typecheck', 'node --test tests/dashboard-ui.test.mjs tests/dashboard-wizard.test.mjs tests/doctor.test.mjs'], null),
     // Human-authorized #58 code/Draft publication; no production or Release gate.
+    workflow('issue58-r1d', 'codex/issue58-r1d-onboarding', 58, [
+      'pnpm --config.verifyDepsBeforeRun=false run build',
+      'pnpm --config.verifyDepsBeforeRun=false run typecheck',
+      'node --test tests/enrollment.test.mjs tests/config-startup.test.mjs tests/control-plane.test.mjs tests/control-plane-tls.test.mjs tests/windows-product.test.mjs tests/dashboard-gateway.test.mjs tests/dashboard-wizard.test.mjs tests/dashboard-ui.test.mjs tests/doctor.test.mjs tests/client.test.mjs tests/versioned-profile.test.mjs',
+      'node --test tests/builder.test.mjs tests/validator.test.mjs tests/cli.test.mjs',
+    ], null),
     workflow('issue58', 'codex/issue58-windows-product', 58, [
       'pnpm --config.verifyDepsBeforeRun=false run build',
       'pnpm --config.verifyDepsBeforeRun=false run typecheck',

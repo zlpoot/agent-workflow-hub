@@ -32,6 +32,8 @@ CP deployment/trusted/TLS/database paths now reject missing/empty/wrong files, r
 
 ## Schema and source contract
 
+R1-D extends CP trusted input with optional bounded `enrollments` (registration/presence only), and introduces `client-machine.schema.json` for one-time installed Client setup. Local Viewer configuration optionally points to that machine setup. Existing workflow policies remain immutable; dynamic Work Items prepare development but do not grant execution or Provider rights. See [project enrollment](../docs/project-enrollment.md) for approval, repair, renewal and remaining production gates.
+
 `schemas/` is JSON Schema draft 2020-12. `cp-trusted.schema.json` references `urn:awh:protocol:1.0#/$defs/profile_policy` from `src/protocol/schema.json`; register that schema when validating offline. Schemas reject extra fields and invalid basic field types; authoritative closed runtime validators additionally check files, byte limits, endpoint rules, TLS, duplicates, hashes/identity agreement and live permissions. Schemas do not provision anything. Sources/version live in this inventory and schema `$id`; don't add unrecognized provenance fields to legacy config.
 
 ## Hardcoded policy inventory (`src/profiles.ts`, `src/builder.ts`)

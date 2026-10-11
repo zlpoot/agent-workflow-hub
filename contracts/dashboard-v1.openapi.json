@@ -1643,6 +1643,43 @@
                 }
               }
             }
+          },
+          "project_ids": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          },
+          "worktrees": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "path"
+              ],
+              "properties": {
+                "id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                },
+                "path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1024
+                }
+              }
+            }
           }
         }
       },

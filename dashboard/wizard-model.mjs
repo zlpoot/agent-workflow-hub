@@ -11,8 +11,8 @@ export const HISTORY = Object.freeze({
     source_sha: '1e507c35f0cd908bcd8b226417ff471a505d677b',
     sha256: 'a8e9a771a5a17e55b5797ef3c31c8ee1aa56813e850a088c3796b0b9921c257c' }
 });
-export const CANDIDATE_ARTIFACT = Object.freeze({ version: '0.4.7', status: 'not_checked',
-  note: '当前源码候选 0.4.7；新包来源 SHA 与实际 digest 需从本次产物证据核对。历史包 digest 不适用。' });
+export const CANDIDATE_ARTIFACT = Object.freeze({ version: '0.4.8', status: 'not_checked',
+  note: '当前源码候选 0.4.8；新包来源 SHA 与实际 digest 需从本次产物证据核对。历史包 digest 不适用。' });
 const preserve = '保留当前产品分支、文件与原有 Client state；请操作人做有界诊断，不自动切换、修复或重试。';
 const request = '向操作人申请已批准的 Profile / Work Item 版本；项目表单和历史记录不能批准权限。';
 const check = (id, status, code, source, safe_next_step) => ({ id, status, code, source, safe_next_step });

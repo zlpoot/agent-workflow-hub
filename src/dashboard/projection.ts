@@ -101,7 +101,9 @@ export class DashboardProjection {
     const observed = this.now();
     return view.executors.map(({ executor, client, last_seen }) => {
       const age = observed - Date.parse(last_seen);
+      const bindings = view.enrollment_bindings?.filter(b => b.executor_id === executor.id) ?? [];
       return { ...envelope, id: executor.id, display_name: executor.display_name, type: client?.executor_type ?? null,
+        ...(bindings.length ? {project_ids:[...new Set(bindings.map(b => b.project_id))],worktrees:bindings.map(b => ({id:b.worktree_id ?? null,path:b.worktree ?? null}))} : {}),
         machine: { ...executor.machine, name: client?.machine_name ?? null, arch: client?.arch ?? null }, platform: executor.machine.platform,
         last_seen, heartbeat_at: null, status: !Number.isFinite(age) || age < 0 ? 'unknown' as const : age <= 60000 ? 'online' as const : 'offline' as const,
         observed_at: new Date(observed).toISOString(), freshness_ms: 60000, presence_provenance: 'server_registration_or_heartbeat' as const,
@@ -158,10 +160,11 @@ export class DashboardProjection {
     const view = this.view();
     const values = this[kind](view).filter(item => {
       if (kind === 'projects') return !project || item.id === project;
-      if (kind === 'executors') return !project || view.runs.some(run => run.executor_id === item.id && run.project_id === project);
+      if (kind === 'executors') return !project || ('project_ids' in item && item.project_ids?.includes(project)) ||
+        view.runs.some(run => run.executor_id === item.id && run.project_id === project);
       const run = view.runs.find(run => run.id === item.id)!;
       return (!project || run.project_id === project) && (!executor || run.executor_id === executor) && (!state || run.state === state);
-    });
+    }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     if (after && !values.some(item => item.id === after)) fail(400, 'invalid_cursor', 'Cursor no longer belongs to this result set; restart pagination');
     const remaining = values.filter(value => value.id > after), items = remaining.slice(0, limit);
     return { ...envelope, items, next_cursor: remaining.length > limit ? Buffer.from(JSON.stringify([binding, items.at(-1)!.id])).toString('base64url') : null,

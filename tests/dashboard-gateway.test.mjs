@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { ControlPlaneStore, DashboardReadStore } from '../dist/control-plane/store.js';
 import { createDashboardGateway } from '../dist/dashboard/gateway.js';
 import { DashboardStreamCache } from '../dist/dashboard/stream-cache.js';
+import { DashboardProjection } from '../dist/dashboard/projection.js';
 import { createViewerAuthenticator } from '../dist/dashboard/security.js';
 
 function setup(t) {
@@ -39,6 +40,35 @@ test('shared SSE cache performs one projection per exact scope and bounded cheap
   for (let tick = 0; tick < 16; ++tick) { clock = tick * 250; for (let viewer = 0; viewer < 64; ++viewer) cache.read({ ...h.viewer, id: 'viewer-' + viewer }); }
   assert.equal(reads, 1); assert.equal(probes, 16);
   const foreign = cache.read({ id: h.viewer.id, project_ids: ['webskill'] }); assert.deepEqual(foreign.snapshot.projects, []); assert.equal(reads, 2);
+});
+
+test('Executor project pages include run-free bindings and paginate reverse bindings in ID order without gaps', t => {
+  const h = setup(t), ids = ['z-enrolled', 'a-enrolled', 'Z-enrolled', 'A-enrolled'];
+  const owner = { id: 'enrolled-client', project_ids: [h.f.project.id, 'outside-scope'], executor_ids: [...ids, 'foreign-executor'] };
+  const bindings = [];
+  h.writer.registerProject(owner, { ...h.f.manifest, project: { ...h.f.manifest.project, id: 'outside-scope' } });
+  for (const id of [...ids, 'foreign-executor']) {
+    h.writer.registerExecutor(owner, { ...h.f.executor, id });
+    bindings.push({ executor_id: id, client_id: owner.id, machine_id: h.f.executor.machine.id,
+      project_id: id === 'foreign-executor' ? 'outside-scope' : h.f.project.id, worktree_id: id, worktree: '/fixture/' + id });
+  }
+  const reader = new DashboardReadStore(h.path, () => bindings); h.stores.push(reader);
+  const projection = new DashboardProjection(reader, h.viewer);
+  const before = reader.dashboardReadView(h.viewer); assert.equal(before.runs.length, 1);
+  assert(before.executors.filter(e => ids.includes(e.executor.id)).every(e => !before.runs.some(r => r.executor_id === e.executor.id)));
+  for (const filtered of [false, true]) {
+    const seen = []; let cursor = null;
+    do {
+      const url = new URL('http://fixture.invalid/dashboard/v1/executors?limit=1');
+      if (filtered) url.searchParams.set('project_id', h.f.project.id);
+      if (cursor) url.searchParams.set('cursor', cursor);
+      const page = projection.page('executors', url); assert.equal(page.items.length, 1);
+      seen.push(page.items[0].id); cursor = page.next_cursor;
+      assert(seen.length <= ids.length + 1, 'pagination must terminate');
+    } while (cursor);
+    assert.deepEqual(seen, [...ids, h.f.executor.id].sort());
+  }
+  assert.throws(() => projection.page('executors', new URL('http://fixture.invalid/?project_id=outside-scope')), /scope/);
 });
 test('cache refreshes own/external writes, cursor-constant metadata and presence, preserving event watermark', t => {
   const h = setup(t); let clock = 0, presence = Date.now();
