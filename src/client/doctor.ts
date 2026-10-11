@@ -5,8 +5,10 @@ import { CLIENT_PACKAGE, CLIENT_VERSION } from './version.js';
 import { ClientError, clientFail, inspectRepository, machine, readCaCertificate, readConfig, readCredential, readManifest, same,
   readJson, type ClientConfig, type RepositoryIdentity, type Machine } from './local.js';
 import { observationPolicy, compareObservedPolicy } from './observe-policy.js';
+import { deliveryPolicy, matchDeliveryPolicy } from './delivery-policy.js';
+import type { EnrollmentGrant } from '../shared/enrollment.js';
 import { loadApprovedWorkItem, versionedPreflight, VersionedProfileError, type ApprovedWorkItem } from './versioned-profile.js';
-import { formatPreflight, type PolicyFacts, type PolicyPreflight, type PreflightStatus } from '../shared/preflight.js';
+import { comparePolicy, formatPreflight, type PolicyFacts, type PolicyPreflight, type PreflightStatus } from '../shared/preflight.js';
 import { loadTrustedPolicy, ProfileError } from '../profiles.js';
 import { assertEntity, assertClientMetadata, ProtocolError, type ProjectManifest } from '../protocol/index.js';
 import { ControlPlaneError, safeData } from '../shared/security.js';
@@ -30,7 +32,7 @@ const knownFailure = (error: unknown): string => {
   const code = error instanceof ClientError || error instanceof ProtocolError || error instanceof ControlPlaneError ? error.code : '';
   return ['git','origin','origin_mismatch','manifest','configuration','endpoint','certificate','credential','machine','state','file','platform','recovery','state_limit',
     'revision_overlay','revision_receipt','authentication','http','network','timeout','tls','response_schema','response_size','response_binding','delivery_policy','profile',
-    'schema','binding','sequence','idempotency','timestamp','credential_data','invalid_json','body_too_large'].includes(code) ? code : 'invalid_local_or_remote_data';
+    'schema','binding','enrollment_binding','sequence','idempotency','timestamp','credential_data','invalid_json','body_too_large'].includes(code) ? code : 'invalid_local_or_remote_data';
 };
 // Only explicitly selected non-secret identity/comparison fields enter the bounded DTO.
 const display = (value: string): string => {
@@ -41,7 +43,7 @@ const displayCommand = (command: string) => {
   try { return loadTrustedPolicy().profiles.some(p => p.workflows.some(w => w.verification_commands.includes(command))) ? command : '[unregistered command suppressed]'; }
   catch { return '[unregistered command suppressed]'; }
 };
-const fixedPolicy = observationPolicy;
+const fixedPolicy = deliveryPolicy;
 // Diagnostic data only: never infer a current Issue from a retained Session.
 const dynamicIssue = (branch: string, prefix: string): number | null => {
   if (!branch.startsWith(prefix)) return null;
@@ -62,6 +64,7 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
   let identity: RepositoryIdentity | undefined, manifest: ProjectManifest | undefined, config: ClientConfig | undefined, m: Machine | undefined;
   let fixed: ReturnType<typeof fixedPolicy> | undefined, local: ReturnType<AwhClient['inspectLocalDiagnostics']> | undefined;
   let approved: ApprovedWorkItem | undefined;
+  let observe: EnrollmentGrant | undefined;
   const versionedRequested = options.trustPath !== undefined || options.workItem !== undefined || options.observationPath !== undefined;
   if (versionedRequested) {
     try {
@@ -103,7 +106,21 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
       add('configuration', 'passed', 'external_config_valid', 'external_config', 'Keep the original endpoint, CA, dedicated credential and namespace unchanged.');
     } catch (error) { config = undefined; add('configuration', 'blocked', knownFailure(error), 'external_config', CONFIGURE); }
   } else add('configuration', options.configPath ? 'not_checked' : 'blocked', options.configPath ? 'repository_unavailable' : 'explicit_config_missing', 'external_config', CONFIGURE);
-  if (manifest && identity && !versionedRequested) {
+  const observeRequested = !versionedRequested && manifest?.profile.ref.startsWith('observe/');
+  if (observeRequested && manifest && identity) {
+    try {
+      if (!config || !options.configPath) clientFail('enrollment_binding', 'Existing external Enrollment configuration required');
+      observe = observationPolicy(options.configPath, config, identity, manifest, machine(config, false));
+      const repository = report.checks.find(c => c.id === 'repository')!;
+      Object.assign(repository, { status: 'passed', code: 'canonical_root_origin_verified', safe_next_step: 'Continue read-only Observe diagnosis.',
+        details: { root_verified: true, origin_verified: true, repository: identity.repository, head: identity.sha, branch: display(identity.ref), dirty: identity.dirty } });
+      const worktree = report.checks.find(c => c.id === 'worktree')!;
+      Object.assign(worktree, { status: 'passed', code: identity.dirty ? 'local_changes_retained' : 'worktree_clean', safe_next_step: 'Observe preserves local changes; development requires separate approval.' });
+      add('profile', 'passed', 'approved_observe_enrollment_matches', 'external_config', 'Enrollment permits registration and presence only; it grants no Deliver authority.');
+      add('branch', 'not_checked', 'observe_has_no_delivery_branch', 'external_config', 'Observe does not constrain the current branch or approve development.');
+    } catch (error) { add('profile', 'blocked', knownFailure(error), 'external_config', CONFIGURE); }
+    add('deliver', 'not_checked', 'deliver_authorization_not_checked', 'not_observed', 'Request separate administrator-approved Deliver policy and Work Item; Observe cannot deliver.');
+  } else if (manifest && identity && !versionedRequested) {
     try {
       fixed = fixedPolicy(manifest.profile.ref, config?.profile_version);
       if (fixed.profile.repository !== identity.repository) clientFail('profile', 'Profile and origin disagree');
@@ -182,22 +199,34 @@ export async function doctor(options: { configPath?: string; probeCp?: boolean; 
       if (project.id !== manifest.project.id || project.repository !== manifest.project.repository || project.profile_ref !== manifest.profile.ref) clientFail('response_binding', 'CP Project mismatch');
       add('cp_connection', 'passed', 'cp_authenticated_project_get_matches', 'control_plane_get', 'A GET observation does not approve a Profile, delivery, Review or production operation.');
       try {
-        const response = await get('/v1/profiles?project_id=' + encodeURIComponent(manifest.project.id)); safeData(response);
-        if (Object.keys(response).sort().join(',') !== 'authority_verified,profiles' || !Array.isArray(response.profiles) || response.profiles.length > 256) clientFail('response_schema', 'Invalid Profile envelope');
-        const policies = response.profiles.map(p => assertEntity('profile_policy', p)).filter(p => p.ref === manifest!.profile.ref && (!config!.profile_version || p.version === config!.profile_version));
-        if (policies.length !== 1) clientFail('profile', 'One observed Profile version required');
-        const observed = policies[0]!, expected = observationPolicy(manifest.profile.ref, observed.version);
-        const details = { observed_version: display(observed.version), expected_branch: expected.workflow.branch, actual_branch: display(observed.branch.ref),
-          expected_commands: expected.workflow.verification_commands, actual_commands: observed.verification.commands.map(displayCommand) };
-        try {
-          const comparison = compareObservedPolicy(observed, manifest.profile.ref);
-          // Preserve the Doctor rule that unregistered CP command text is suppressed.
-          const checksDiff = comparison.differences.find(d => d.field === 'checks');
-          if (checksDiff) checksDiff.observed = observed.verification.commands.map(displayCommand);
-          report.policy_preflight = comparison;
-          if (comparison.status === 'blocked') clientFail('profile', 'Observed policy conflicts with administrator-approved mapping');
-          add('cp_profile', 'passed', 'cp_policy_matches_approved_mapping', 'control_plane_get', 'Observed CP Registry version is comparison data; effective Work Item approval through the administrator remains unverified.', details);
-        } catch (error) { add('cp_profile', 'blocked', knownFailure(error), 'control_plane_get', REQUEST_PROFILE, details); }
+        if (observeRequested) {
+          if (!observe) clientFail('enrollment_binding', 'Local Observe Enrollment is unavailable');
+          const response = await get('/v1/enrollment'); safeData(response);
+          if (Object.keys(response).sort().join(',') !== 'authority_verified,enrollment') clientFail('response_schema', 'Invalid Enrollment envelope');
+          compareObservedPolicy(response.enrollment, observe);
+          add('cp_profile', 'passed', 'cp_observe_enrollment_matches', 'control_plane_get', 'CP Enrollment matches the approved Observe identity; no Deliver policy or grant is inferred.');
+        } else {
+          const response = await get('/v1/profiles?project_id=' + encodeURIComponent(manifest.project.id)); safeData(response);
+          if (Object.keys(response).sort().join(',') !== 'authority_verified,profiles' || !Array.isArray(response.profiles) || response.profiles.length > 256) clientFail('response_schema', 'Invalid Profile envelope');
+          const policies = response.profiles.map(p => assertEntity('profile_policy', p)).filter(p => p.ref === manifest!.profile.ref && (!config!.profile_version || p.version === config!.profile_version));
+          if (policies.length !== 1) clientFail('profile', 'One observed Profile version required');
+          const observed = policies[0]!, expected = deliveryPolicy(manifest.profile.ref, observed.version);
+          const details = { observed_version: display(observed.version), expected_branch: expected.workflow.branch, actual_branch: display(observed.branch.ref),
+            expected_commands: expected.workflow.verification_commands, actual_commands: observed.verification.commands.map(displayCommand) };
+          try {
+            const comparison = comparePolicy({ repository: expected.profile.repository, issue_repository: expected.workflow.work_item.repo,
+              ...(expected.workflow.branch_mode === 'fixed' ? { issue: expected.workflow.work_item.issue } : {}), base: expected.profile.base,
+              branch: expected.workflow.branch, checks: expected.workflow.verification_commands, profile_ref: manifest.profile.ref, profile_version: expected.workflow.version },
+              { repository: observed.repository, base: observed.base, branch: observed.branch.ref, checks: observed.verification.commands, profile_ref: observed.ref, profile_version: observed.version });
+            try { matchDeliveryPolicy(observed, manifest.profile.ref); } catch { comparison.status = 'blocked'; }
+            // Preserve the Doctor rule that unregistered CP command text is suppressed.
+            const checksDiff = comparison.differences.find(d => d.field === 'checks');
+            if (checksDiff) checksDiff.observed = observed.verification.commands.map(displayCommand);
+            report.policy_preflight = comparison;
+            if (comparison.status === 'blocked') clientFail('profile', 'Observed policy conflicts with administrator-approved mapping');
+            add('cp_profile', 'passed', 'cp_policy_matches_approved_mapping', 'control_plane_get', 'Observed CP Registry version is comparison data; effective Work Item approval through the administrator remains unverified.', details);
+          } catch (error) { add('cp_profile', 'blocked', knownFailure(error), 'control_plane_get', REQUEST_PROFILE, details); }
+        }
       } catch (error) { add('cp_profile', 'blocked', knownFailure(error), 'control_plane_get', REQUEST_PROFILE); }
       if (m) {
         try {
