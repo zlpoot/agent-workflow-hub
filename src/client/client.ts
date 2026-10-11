@@ -5,6 +5,7 @@ import { appendEvent, assertEntity, assertClientMetadata, replayRun, validateBin
 import type { ClientMetadata, Event, EventType, Executor, ProjectManifest, ProfilePolicy, ProtocolEntities, Run, WorkItem } from '../protocol/index.js';
 import { safeData, MAX_PAYLOAD_BYTES } from '../shared/security.js';
 import { connectBuilder } from '../builder.js';
+import { managedContext } from '../admin/registry.js';
 import { taskBinding, bindWorkflow, supportsRevision, type TaskBinding } from '../profiles.js';
 import { qualifyRecovery, assertRecoveryInspection, exclusiveRecoveryFile, type RecoveryRecord, type RecoveryLink, type RecoveryInspection, type RecoveryJournal } from './recovery.js';
 import { CLIENT_VERSION } from './version.js';
@@ -245,6 +246,24 @@ export class AwhClient {
       pending_event: s.pending ? { id: s.pending.id, sequence: s.pending.sequence, type: s.pending.type } : null,
       pending_delivery_events: (s.pending ? 1 : 0) + (s.outbox?.length ?? 0), authority_verified: false };
   }
+  /** Read-only workflow postcondition input; the original Journal and Session remain untouched. */
+  workflowObservation() {
+    const c = this.context(false,true), s = this.load(c);
+    if (!s.initial || s.pending || s.outbox?.length) clientFail('workflow_pending','Workflow needs acknowledged original history');
+    const path = join(dirname(c.path),s.initial.id+'.delivery.json'), journal = readJson(path) as Record<string,any>;
+    const projection = replayRun(s.initial,s.events);
+    if (journal.run_id !== s.initial.id || journal.source_sha !== s.initial.source.sha || !same(journal.task_binding,s.task_binding) ||
+        journal.refs?.pull_request !== projection.candidate?.pull_request.number || journal.refs?.head_sha !== s.initial.source.sha ||
+        journal.refs?.base_sha !== projection.candidate?.base_sha || !['draft_waiting_for_acceptance','waiting_for_independent_review','completed'].includes(journal.disposition))
+      clientFail('workflow_journal','Original Journal does not support delivery');
+    return {initial:s.initial,events:s.events,projection,journal_sha256:digest(readFileSync(path))};
+  }
+  async workflowCapabilities() {
+    const c = this.context(false,true), value = await this.request(c,'/v1/workflow-capabilities');
+    keys(value,['develop_to_pr','managed_revision']);
+    if (value.develop_to_pr !== 'stage-v1' || value.managed_revision !== 'exact-grant-v1') clientFail('workflow_upgrade','Independently provision the compatible CP before Provider writes');
+    return value;
+  }
   private makeEvent(c: Context, s: Session, type: EventType, data: unknown, extensions: Record<string, Json> = {}): Event {
     if (!s.initial) clientFail('state', 'Start a Run before reporting an Event');
     const history = [...s.events, ...(s.pending ? [s.pending] : []), ...(s.outbox ?? [])];
@@ -370,7 +389,8 @@ export class AwhClient {
     const fixed = deliveryPolicy(c.manifest.profile.ref, policy.version), repeatable = fixed.workflow.branch_mode === 'issue_prefix';
     if (repeatable && (!Number.isSafeInteger(issue) || issue! < 1)) clientFail('arguments', 'Repeatable deliver requires --issue');
     if (!repeatable && issue !== undefined && issue !== fixed.workflow.work_item.issue) clientFail('arguments', 'Fixed delivery Issue cannot be changed');
-    const binding = repeatable ? taskBinding({ repository: c.identity.repository, issue: issue!, branch: c.identity.ref, source_sha: c.identity.sha,
+    const managed = managedContext();
+    const binding = repeatable || managed ? taskBinding({ repository: c.identity.repository, issue: issue ?? fixed.workflow.work_item.issue, branch: c.identity.ref, source_sha: c.identity.sha,
       profile_ref: policy.ref, profile_version: policy.version, executor_id: c.executor.id, machine_id: c.machine.id }) : undefined;
     if (!policy.executor_restrictions?.executor_ids.includes(c.executor.id) || !policy.executor_restrictions.machine_ids.includes(c.machine.id)) clientFail('binding', 'Untrusted repeatable delivery machine');
     const resolved = bindWorkflow(fixed.selection, binding);
@@ -466,7 +486,7 @@ export class AwhClient {
         p.revision_id !== revision || p.run_id !== s.initial.id || p.namespace_sha256 !== digest(dirname(c.path)) || !same(p.task, s.task_binding) ||
         p.session_sha256 !== digest(readFileSync(c.path)) || p.journal_sha256 !== digest(readFileSync(journalPath)) || p.cp_events_sha256 !== digest(JSON.stringify(s.events)) ||
         p.source_sha !== s.initial.source.sha || p.previous_head !== projection.effective_candidate_head || p.new_head !== c.identity.sha || c.identity.ref !== s.initial.source.ref ||
-        revision !== revisionId(s.initial.id, s.task_binding, p.previous_head, p.new_head, p.pull_request?.number) || projection.run.state !== 'awaiting_review' ||
+        revision !== revisionId(s.initial.id, s.task_binding, p.previous_head, p.new_head, p.pull_request?.number) || !['awaiting_review','reviewing','review_passed'].includes(projection.run.state) ||
         projection.publication?.publication !== 'confirmed' || !same(p.previous_handoff, projection.publication.comment) || !same(p.pull_request, projection.candidate?.pull_request) ||
         p.base_sha !== projection.candidate?.base_sha || p.evidence?.sha256 !== digest(p.evidence_body) ||
         p.evidence.comment.provider !== 'github' || p.evidence.comment.repository !== c.identity.repository || p.evidence.comment.kind !== 'issue_comment' ||
@@ -475,7 +495,7 @@ export class AwhClient {
         journal.refs?.base_sha !== p.base_sha || journal.refs?.repository !== c.identity.repository || !['draft_waiting_for_acceptance','waiting_for_independent_review'].includes(journal.disposition))
       clientFail('publication_receipt', 'Frozen receipt, Run, Session or Journal identity changed');
     const fixed = deliveryPolicy(c.manifest.profile.ref, s.initial.profile.version);
-    if (fixed.workflow.branch_mode !== 'issue_prefix' || c.config.profile_version !== s.initial.profile.version) clientFail('publication_policy', 'Recovery requires the original docs-only Profile');
+    if (!supportsRevision(fixed.profile,fixed.workflow) || c.config.profile_version !== s.initial.profile.version) clientFail('publication_policy', 'Recovery requires the original approved Profile');
     await this.project(c); await this.executor(c);
     const policies = await this.request(c, '/v1/profiles?project_id=' + encodeURIComponent(c.manifest.project.id)); keys(policies, ['profiles']);
     if (!Array.isArray(policies.profiles)) clientFail('publication_policy', 'Invalid Profile response');
@@ -488,8 +508,8 @@ export class AwhClient {
     if (capability.revision_linking !== 'revision-link-v1' || capability.database_version !== 2) clientFail('publication_upgrade', 'Compatible reviewed CP is required');
     const timeline = await this.timeline(s.initial.id);
     if (!same(timeline.events.map(e => e.event), s.events) || !same(timeline.run, projection.run)) clientFail('publication_history', 'CP history differs from original receipt');
-    if (!same(inspectRevision(c.identity.root, p.source_sha, p.previous_head, p.new_head, p.base_sha, fixed.workflow.bootstrap_paths!), p.diffs) ||
-        !same(parseRevisionEvidence(p.evidence_body, p.actor, p.new_head, p.base_sha), p.verified)) clientFail('publication_evidence', 'Frozen diff or verification evidence changed');
+    if (!same(inspectRevision(c.identity.root, p.source_sha, p.previous_head, p.new_head, p.base_sha, fixed.workflow.bootstrap_paths, fixed.profile.base), p.diffs) ||
+        !same(parseRevisionEvidence(p.evidence_body, p.actor, p.new_head, p.base_sha, managedContext()?.proposed.task?.revision ? fixed.workflow.verification_commands : undefined), p.verified)) clientFail('publication_evidence', 'Frozen diff or verification evidence changed');
     await this.recoveryRecords(c, s);
     const recoveryPath = s.recovery ? join(dirname(c.path), s.recovery.predecessor_run_id + '.recovery.json') : null;
     const recovery = recoveryPath ? digest(readFileSync(recoveryPath)) : null;
@@ -575,16 +595,23 @@ export class AwhClient {
     });
   }
   async linkRevision(options: { run: string; pr: number; head: string; evidenceComment: number }, connect: typeof connectBuilder = connectBuilder) {
+    if (managedContext()?.proposed.task?.revision) await this.workflowCapabilities();
     if (Object.keys(options).sort().join(',') !== 'evidenceComment,head,pr,run' || !/^run-[a-f0-9-]{36}$/.test(options.run) ||
         !/^[a-f0-9]{40}$/.test(options.head) || ![options.pr,options.evidenceComment].every(v => Number.isSafeInteger(v) && v > 0))
       clientFail('arguments', 'link-revision requires an existing Run/PR, exact HEAD and evidence comment ID');
     const c = this.context();
     return locked(c.path + '.lock', async () => {
       const s = this.load(c), projection = s.initial ? replayRun(s.initial, s.events) : null;
+      const interrupted = this.revisionPending(c);
+      // Phase 0 precedes the Handoff intent. Resume only the same immutable preparation.
+      const phaseZero = interrupted.length === 1 ? interrupted[0]!.phases() : [];
+      const preparedOnly = interrupted.length === 1 && phaseZero.length === 1 &&
+        phaseZero[0]!.value.run_id === options.run && phaseZero[0]!.value.new_head === options.head &&
+        phaseZero[0]!.value.pull_request?.number === options.pr && phaseZero[0]!.value.evidence?.comment?.number === options.evidenceComment;
       if (!s.initial || s.initial.id !== options.run || !s.task_binding || s.pending || s.outbox?.length ||
-          projection!.run.state !== 'awaiting_review' || projection!.publication?.publication !== 'confirmed' ||
+          !['awaiting_review','reviewing','review_passed'].includes(projection!.run.state) || projection!.publication?.publication !== 'confirmed' ||
           projection!.candidate?.pull_request.number !== options.pr || c.identity.dirty || c.identity.sha !== options.head ||
-          c.identity.ref !== s.initial.source.ref || this.revisionPending(c).length)
+          c.identity.ref !== s.initial.source.ref || interrupted.length && !preparedOnly)
         clientFail('revision_state', 'Revision requires the same clean awaiting-review delivery with no pending or interrupted attempt');
       const fixed = deliveryPolicy(c.manifest.profile.ref, s.initial.profile.version);
       if (!supportsRevision(fixed.profile, fixed.workflow) || c.config.profile_version !== s.initial.profile.version)
@@ -612,7 +639,10 @@ export class AwhClient {
           journal.refs.base_sha !== projection!.candidate!.base_sha)
         clientFail('revision_journal', 'Original delivery Journal and frozen candidate must agree');
       const base = projection!.candidate!.base_sha, previous = projection!.effective_candidate_head!;
-      const diffs = inspectRevision(c.identity.root, s.initial.source.sha, previous, options.head, base, fixed.workflow.bootstrap_paths!);
+      const authorization = managedContext()?.proposed.task?.revision;
+      if (authorization && (authorization.run_id !== options.run || authorization.pull_request !== options.pr || authorization.previous_head !== previous))
+        clientFail('revision_authorization', 'Revision authorization differs from the original Run/PR/effective HEAD');
+      const diffs = inspectRevision(c.identity.root, s.initial.source.sha, previous, options.head, base, fixed.workflow.bootstrap_paths, fixed.profile.base);
       const { fingerprint: _fingerprint, ...task } = s.task_binding;
       const candidateBinding = taskBinding({ ...task, source_sha: options.head });
       const observer = await connect({ cwd: () => c.identity.root }, fixed.selection, candidateBinding, 'observe');
@@ -629,7 +659,7 @@ export class AwhClient {
       const evidence = await observer.readComment(options.pr, options.evidenceComment);
       if (evidence.actor !== actor || evidence.id !== options.evidenceComment) clientFail('revision_evidence', 'Evidence must match the explicit comment and trusted App');
       safeData(evidence.body);
-      const verified = parseRevisionEvidence(evidence.body, actor, options.head, base);
+      const verified = parseRevisionEvidence(evidence.body, actor, options.head, base, authorization ? fixed.workflow.verification_commands : undefined);
       const old = await observer.readComment(options.pr, projection!.publication!.comment.number);
       if (old.actor !== actor || old.id !== projection!.publication!.comment.number) clientFail('revision_handoff', 'Previous Handoff must match the same trusted App and recorded comment');
       const h = /AWH-HANDOFF v0\.1\n```json\n([\s\S]+?)\n```/.exec(old.body);
@@ -641,14 +671,18 @@ export class AwhClient {
         clientFail('revision_handoff', 'Previous Handoff must belong to the actual original Run and effective candidate');
       await exactPR(observer);
       const id = revisionId(s.initial.id, s.task_binding, previous, options.head, options.pr), receipt = new RevisionReceipt(dirname(c.path), id);
-      if (receipt.phases().length) clientFail('revision_receipt', 'Revision attempt is already consumed; no provider replay');
+      const retained = receipt.phases();
+      if (retained.length && (retained.length !== 1 || interrupted.length !== 1 || interrupted[0]!.id !== id))
+        clientFail('revision_receipt', 'Revision attempt is already consumed; no provider replay');
       const github = (number: number) => ({ provider: 'github' as const, repository: c.identity.repository, kind: 'issue_comment' as const, number });
       const prepared = { revision_id: id, run_id: s.initial.id, namespace_sha256: digest(dirname(c.path)), task: s.task_binding,
         session_sha256: digest(readFileSync(c.path)), journal_sha256: digest(readFileSync(journalPath)), cp_events_sha256: digest(JSON.stringify(s.events)),
         source_sha: s.initial.source.sha, previous_head: previous, new_head: options.head, base_sha: base,
         pull_request: projection!.candidate!.pull_request, previous_handoff: projection!.publication!.comment,
         evidence: { comment: github(evidence.id), sha256: digest(evidence.body) }, evidence_body: evidence.body, verified, diffs, actor };
-      receipt.append(prepared);
+      if (retained.length) {
+        if (!same(retained[0]!.value, prepared)) clientFail('revision_receipt', 'Frozen preparation changed; no provider replay');
+      } else receipt.append(prepared);
       const publisher = await connect({ cwd: () => c.identity.root }, fixed.selection, candidateBinding, 'revision');
       if (publisher.preflight().actor !== actor) clientFail('revision_provider', 'App identity changed before Handoff publication');
       await exactPR(publisher);
@@ -656,7 +690,7 @@ export class AwhClient {
         clientFail('revision_provider', 'Evidence or prior Handoff changed before publication');
       const handoff: BuilderHandoff = { schema_version: '0.1', kind: 'builder_handoff', work_item: { repo: c.identity.repository, issue: s.work_item!.reference.number },
         candidate: { pr: options.pr, base_sha: base, head_sha: options.head }, producer: { executor: s.initial.executor_id, run_id: s.initial.id },
-        verification: { subject_sha: options.head, lifecycle: 'completed', outcome: 'pass', checks: [{ command: REVISION_COMMAND, exit_code: 0 }], evidence_refs: [evidence.url] },
+        verification: { subject_sha: options.head, lifecycle: 'completed', outcome: 'pass', checks: verified.checks ?? [{ command: REVISION_COMMAND, exit_code: 0 }], evidence_refs: [evidence.url] },
         handoff: { next_step: 'review', publication: 'pending' } };
       const metadata = { schema_version: '1.0', revision_id: id, run_id: s.initial.id, original_head: s.initial.source.sha, previous_head: previous,
         new_head: options.head, previous_handoff: old.url, evidence: evidence.url, evidence_sha256: digest(evidence.body) };
@@ -745,7 +779,7 @@ export class AwhClient {
         const timeline = await this.timeline(s.initial.id);
         if (!same(timeline.events.map(e => e.event), s.events) || !same(timeline.run, projection.run)) clientFail('revision_history', 'CP revision history differs from local projection');
       }
-      const builder = await connect({ cwd: () => c.identity.root }, fixed.selection, binding, binding ? 'observe' : undefined);
+      const builder = await connect({ cwd: () => c.identity.root }, fixed.selection, binding, binding || managedContext() ? 'observe' : undefined);
       const observation = await builder.readLifecycle(candidate.pull_request.number, effective!);
       if (observation.repository !== s.initial.source.repository || observation.pull_request !== candidate.pull_request.number || observation.head_sha !== effective ||
           observation.issue !== s.work_item!.reference.number || observation.issue_repository !== s.work_item!.reference.repository ||
@@ -761,7 +795,7 @@ export class AwhClient {
         const payload = { pull_request: candidate.pull_request, subject_sha: effective!, reviewer_executor_id: reviewer };
         if (state === 'awaiting_review') { await emit('REVIEW_STARTED', payload); state = 'reviewing'; }
         if (state === 'reviewing') {
-          const started = s.events.find(e => e.type === 'REVIEW_STARTED');
+          const started = [...s.events].reverse().find(e => e.type === 'REVIEW_STARTED');
           if (started?.type !== 'REVIEW_STARTED' || started.payload.data.reviewer_executor_id !== reviewer)
             clientFail('review_binding', 'Native Review actor differs from the recorded reviewer');
           await emit('REVIEW_PASSED', { ...payload, review: { provider: 'github', repository: fixed.profile.repository, kind: 'review', number: observation.review.id } }); state = 'review_passed';
@@ -853,7 +887,7 @@ export class AwhClient {
       const rawSession = readFileSync(c.path), journalPath = join(dirname(c.path), fromRun + '.delivery.json');
       const journal = readJson(journalPath) as RecoveryJournal, rawJournal = readFileSync(journalPath);
       const evidencePath = join(c.identity.root, '.handoff', fromRun, 'verification.json');
-      const evidence = journal.stage === 'verification' ? readJson(evidencePath, 16 * 1024) : null;
+      const evidence = journal.stage === 'verification' ? readJson(evidencePath, 64 * 1024) : null;
       const evidenceJson = evidence === null ? null : readFileSync(evidencePath, 'utf8');
       const timeline = await this.timeline(fromRun);
       qualifyRecovery(s.initial, s.events, s.task_binding, !!s.pending || !!s.outbox?.length, journal, evidence, binding, timeline.run, timeline.events.map(e => e.event));
@@ -864,7 +898,7 @@ export class AwhClient {
       if (!same(inspectRepository(this.cwd), c.identity) || c.identity.dirty || !rawSession.equals(readFileSync(c.path)) || !rawJournal.equals(readFileSync(journalPath)) ||
           evidenceJson !== null && evidenceJson !== readFileSync(evidencePath, 'utf8'))
         clientFail('recovery', 'Recovery source or predecessor changed during qualification');
-      const now = new Date().toISOString(), initial: Run = { ...s.initial, id: 'run-' + randomUUID(), source: { ...s.initial.source, sha: binding.source_sha },
+      const now = new Date().toISOString(), initial: Run = { ...s.initial, id: 'run-' + randomUUID(), source: { ...s.initial.source, sha: binding.source_sha }, profile: { ref: binding.profile_ref, version: binding.profile_version },
         state: 'created', created_at: now, updated_at: now, started_at: null, completed_at: null };
       const link: RecoveryLink = { attempt_id: 'recovery-' + randomUUID(), predecessor_run_id: fromRun, old_sha: s.initial.source.sha, new_sha: binding.source_sha };
       const receipt: RecoveryRecord = { schema_version: '1.0', kind: 'verification_recovery', link, namespace_sha256: this.digest(dirname(c.path)),

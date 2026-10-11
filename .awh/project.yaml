@@ -1,0 +1,6 @@
+apiVersion: awh/v1
+project:
+  id: awh
+  repository: zlpoot/agent-workflow-hub
+profile:
+  ref: awh-m1c/develop-to-pr

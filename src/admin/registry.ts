@@ -38,6 +38,12 @@ export interface Task {
   repository: string; issue: number; branch: string; base_sha: string; head_sha: string | null;
   profile: string; workflow: string; executor_id: string; machine_id: string; expires_at: string;
   stages: Stage[]; provider_operations: ProviderOperation[];
+  revision?: RevisionAuthorization;
+  verification_recovery?: VerificationRecoveryAuthorization;
+}
+export interface VerificationRecoveryAuthorization { original_version: string; run_id: string; previous_head: string }
+export interface RevisionAuthorization {
+  original_version: string; run_id: string; pull_request: number; previous_head: string; review_id: number;
 }
 export type Stage = 'observe' | 'develop' | 'deliver';
 export type ProviderOperation = 'push' | 'draft_pr' | 'evidence' | 'handoff';
@@ -74,7 +80,19 @@ export function proposal(value: any): Proposal {
     projectPolicy(value.policy);
   } else {
     const task = value.task;
-    closed(task, ['repository','issue','branch','base_sha','head_sha','profile','workflow','executor_id','machine_id','expires_at','stages','provider_operations']);
+    closed(task, ['repository','issue','branch','base_sha','head_sha','profile','workflow','executor_id','machine_id','expires_at','stages','provider_operations', ...(task?.revision !== undefined ? ['revision'] : []), ...(task?.verification_recovery !== undefined ? ['verification_recovery'] : [])]);
+    if (task.verification_recovery !== undefined) {
+      closed(task.verification_recovery,['original_version','run_id','previous_head']);
+      const r = task.verification_recovery;
+      if (task.revision || !id(r.original_version) || r.original_version === value.version || !/^run-[a-f0-9-]{36}$/.test(r.run_id) ||
+          !sha(r.previous_head) || !sha(task.head_sha) || task.head_sha === r.previous_head || !Array.isArray(task.stages) || !task.stages.includes('deliver')) deny('verification_recovery_scope');
+    }
+    if (task.revision !== undefined) {
+      closed(task.revision,['original_version','run_id','pull_request','previous_head','review_id']);
+      const r = task.revision;
+      if (!id(r.original_version) || !/^run-[a-f0-9-]{36}$/.test(r.run_id) || !sha(r.previous_head) || !sha(task.head_sha) || task.head_sha === r.previous_head ||
+          ![r.pull_request,r.review_id].every(v => Number.isSafeInteger(v) && v > 0) || task.provider_operations.includes('draft_pr')) deny('revision_scope');
+    }
     if (!sha(task.base_sha) || task.head_sha !== null && (!sha(task.head_sha) || task.base_sha === task.head_sha) || !timestamp(task.expires_at) ||
         ![task.profile,task.workflow,task.executor_id,task.machine_id].every(id) || !Number.isSafeInteger(task.issue) || task.issue < 1 ||
         typeof task.repository !== 'string' || typeof task.branch !== 'string' || value.target_version !== null || value.policy !== null || !id(value.policy_version) ||
@@ -101,7 +119,7 @@ export function materialize(project: ProjectPolicy, task: Task, version: string)
       task.provider_operations.some(operation => project.permissions[operation === 'push' ? 'contents' : 'pull_requests'] !== 'write') ||
       (workflow.branch_mode === 'issue_prefix' ? task.branch !== workflow.branch + task.issue : task.branch !== workflow.branch || task.issue !== workflow.work_item.issue)) deny('task_scope');
   return { ...template, default_selection: { profile: task.profile, workflow: task.workflow }, profiles: [{ ...selected, workflows: [{ ...workflow,
-    version, branch: task.branch, branch_mode: 'fixed', work_item: { repo: task.repository, issue: task.issue },
+    version: task.revision?.original_version ?? version, branch: task.branch, branch_mode: 'fixed', work_item: { repo: task.repository, issue: task.issue },
     executor_restrictions: { executor_ids: [task.executor_id], machine_ids: [task.machine_id] } }] }] };
 }
 export function approval(value: any, trust: Trust, expectedProposal: string, expectedState: string | null, now: string, requireFresh: boolean): Approval {
@@ -178,6 +196,30 @@ export function approvedProject(trust: Trust, state: State, version: string, now
   if (index < 0 || state.entries.some(entry => entry.target_version === version)) deny('project_unapproved_or_revoked');
   return projectPolicy(readEntry(trust,state.entries[index]!,state.receipt_ids[index]!,now).policy);
 }
+/** Revision is a new immutable grant; its original task and policy remain independently readable. */
+export function revisionOriginal(trust: Trust, state: State, proposed: Proposal, now: string) {
+  const task = proposed.task!, r = task.revision;
+  if (!r) return null;
+  const i = state.entries.findIndex(e => e.version === r.original_version && e.action === 'grant');
+  if (i < 0 || state.entries.some(e => e.target_version === r.original_version)) deny('revision_original');
+  const original = readEntry(trust,state.entries[i]!,state.receipt_ids[i]!,now), first = original.proposed.task!;
+  if (first.revision || proposed.policy_version !== original.proposed.policy_version ||
+      ['repository','issue','branch','base_sha','profile','workflow','executor_id','machine_id'].some(k => task[k as keyof Task] !== first[k as keyof Task]) ||
+      !task.stages.every(s => first.stages.includes(s)) || !task.provider_operations.every(o => first.provider_operations.includes(o))) deny('revision_original');
+  return original;
+}
+/** A fixed-HEAD failure needs a new independently approved grant, never edited history. */
+export function verificationRecoveryOriginal(trust: Trust, state: State, proposed: Proposal, now: string) {
+  const task = proposed.task!, r = task.verification_recovery;
+  if (!r) return null;
+  const i = state.entries.findIndex(e => e.version === r.original_version && e.action === 'grant');
+  if (i < 0 || state.entries.some(e => e.target_version === r.original_version)) deny('verification_recovery_original');
+  const original = readEntry(trust,state.entries[i]!,state.receipt_ids[i]!,now), first = original.proposed.task!;
+  if (first.revision || first.head_sha !== r.previous_head || proposed.policy_version !== original.proposed.policy_version ||
+      ['repository','issue','branch','base_sha','profile','workflow','executor_id','machine_id'].some(k => task[k as keyof Task] !== first[k as keyof Task]) ||
+      !task.stages.every(s => first.stages.includes(s)) || !task.provider_operations.every(o => first.provider_operations.includes(o))) deny('verification_recovery_original');
+  return original;
+}
 export function managedContext(env: NodeJS.ProcessEnv = process.env, now = new Date().toISOString()) {
   if (!env.AWH_ADMIN_TRUST_FILE && !env.AWH_ADMIN_TRUST_SHA256 && !env.AWH_ADMIN_VERSION) return null;
   if (!timestamp(now)) deny('clock');
@@ -188,6 +230,8 @@ export function managedContext(env: NodeJS.ProcessEnv = process.env, now = new D
   const record = readEntry(context.trust, state.entries[index]!, state.receipt_ids[index]!, now);
   if (record.proposed.task!.expires_at <= now) deny('task_expired');
   const project = approvedProject(context.trust,state,record.proposed.policy_version!,now);
+  revisionOriginal(context.trust,state,record.proposed,now);
+  verificationRecoveryOriginal(context.trust,state,record.proposed,now);
   if (encode(materialize(project,record.proposed.task!,version)) !== encode(record.policy)) deny('task_scope');
   return { ...context, version, ...record, project };
 }

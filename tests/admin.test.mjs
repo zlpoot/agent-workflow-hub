@@ -32,6 +32,15 @@ function fixture(t) {
  const grant=(version='task-v1',changed=task)=>{const path=prepare(version,changed);pin(path);approveProposal(path);activate(version);return path;};
  return {root,project,policy,task,trustFile,file,pin,register,prepare,activate,grant};
 }
+
+test('managed revision grants are immutable and cannot expand or replace the original Work Item',t=>{
+ const f=fixture(t);f.register();f.grant();const before=readFileSync(join(f.root,'task-v1.policy.json'));
+ const revision={...f.task,head_sha:'c'.repeat(40),provider_operations:['push','evidence','handoff'],revision:{original_version:'task-v1',run_id:'run-11111111-1111-1111-1111-111111111111',pull_request:5,previous_head:'a'.repeat(40),review_id:8}};
+ f.grant('revision-v1',revision);assert.equal(loadTrustedPolicy().profiles[0].workflows[0].version,'task-v1');assert.deepEqual(readFileSync(join(f.root,'task-v1.policy.json')),before);
+ for(const[version,change]of Object.entries({missingHead:{head_sha:null},sameHead:{head_sha:'a'.repeat(40)},secondPR:{provider_operations:['push','draft_pr','evidence','handoff']},otherIssue:{issue:91,branch:'codex/task-91'},unknown:{revision:{...revision.revision,original_version:'unknown'}},recursive:{revision:{...revision.revision,original_version:'revision-v1'}}}))
+  assert.throws(()=>f.prepare('deny-'+version,{...revision,...change}));
+ assert.equal(inspectRegistry().generation,3);assert.deepEqual(readFileSync(join(f.root,'task-v1.policy.json')),before);
+});
 test('unapproved templates, proposals and self-prepared receipts confer no authority',async t=>{
  const f=fixture(t),path=f.file('unapproved.json');proposeProject(f.project,'project-v1',path);
  assert.equal(inspectProposal(path).authority_verified,false);assert.throws(()=>approveProposal(path),/independent_approval_pin_required/);

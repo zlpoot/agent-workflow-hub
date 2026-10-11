@@ -138,6 +138,8 @@ export function createControlPlaneServer(options: ServerOptions) {
           query(url, []); result = { enrollment: principal.enrollment ?? null };
         } else if (url.pathname === '/v1/capabilities') {
           query(url, []); result = { revision_linking: 'revision-link-v1', database_version: 2 };
+        } else if (url.pathname === '/v1/workflow-capabilities') {
+          query(url, []); result = { develop_to_pr: 'stage-v1', managed_revision: 'exact-grant-v1' };
         } else if (url.pathname === '/v1/profiles') {
           query(url, ['project_id']); const projectId = url.searchParams.get('project_id');
           if (!validId(projectId)) fail(400, 'invalid_id', 'A project_id is required');

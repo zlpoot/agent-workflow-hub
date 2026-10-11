@@ -9,35 +9,46 @@ export { REVISION_COMMAND } from '../profiles.js';
 import { clientFail, git, readJson, same } from './local.js';
 import { exclusiveRecoveryFile } from './recovery.js';
 import { validateHandoff } from '../validator.js';
+import { safeData, ControlPlaneError } from '../shared/security.js';
 
 export const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 export const revisionId = (run: string, task: TaskBinding, previous: string, head: string, pr: number) =>
   'revision-' + digest(JSON.stringify([run, task.fingerprint, previous, head, pr]));
 
-export function inspectRevision(root: string, original: string, previous: string, head: string, base: string, paths: readonly string[]) {
+export function inspectRevision(root: string, original: string, previous: string, head: string, base: string, paths: readonly string[] | null, baseRef = 'main') {
   if (previous === head || git(root, ['merge-base', '--is-ancestor', previous, head], true) !== '' ||
       git(root, ['merge-base', previous, head]) !== previous || git(root, ['merge-base', original, head]) !== original)
     clientFail('revision_ancestry', 'Revision must be a strict descendant of both the previous and original candidate');
-  if (git(root, ['rev-parse', 'origin/main']) !== base) clientFail('revision_base', 'Trusted origin/main must match the original PR base');
+  if (git(root, ['rev-parse', 'origin/' + baseRef]) !== base) clientFail('revision_base', 'Trusted base must match the original PR base');
   return [previous, original].map(from => {
-    const names = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', '-C', '--find-copies-harder', from, head, '--']).split('\0');
+    const names = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', ...(paths ? ['-M','-C','--find-copies-harder'] : ['--no-renames']), from, head, '--']).split('\0');
     if (names.at(-1) === '') names.pop();
-    if (!names.length || names.length % 2 || names.some((v, i) => i % 2 ? !paths.includes(v) : !['A','M'].includes(v)))
+    if (!names.length || names.length % 2 || names.some((v, i) => i % 2 ? paths && !paths.includes(v) : !(paths ? ['A','M'] : ['A','M','D']).includes(v)))
       clientFail('revision_paths', 'Both revision diffs must contain only added or modified allowlisted documents');
     // Disallow executable/symlink/submodule changes, even at an allowlisted document path.
     const raw = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--raw', '--no-abbrev', '--no-renames', from, head, '--']);
-    if (raw.split('\n').some(line => !/^:(?:000000|100644) 100644 [a-f0-9]{40} [a-f0-9]{40} [AM]\t/.test(line)))
+    if (raw.split('\n').some(line => !(paths ? /^:(?:000000|100644) 100644 [a-f0-9]{40} [a-f0-9]{40} [AM]\t/ : /^:(?:000000|100644|100755) (?:000000|100644|100755) [a-f0-9]{40} [a-f0-9]{40} [AMD]\t/).test(line)))
       clientFail('revision_paths', 'Revision documents must remain regular non-executable files');
     const diff = git(root, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', from, head, '--']);
-    if (!diff || diff.includes('GIT binary patch') || /^Binary files /m.test(diff)) clientFail('revision_paths', 'Revision requires an inspectable text diff');
+    if (!diff || paths && (diff.includes('GIT binary patch') || /^Binary files /m.test(diff))) clientFail('revision_paths', 'Revision requires an inspectable diff');
     return { from, head, name_status_sha256: digest(names.join('\0')), diff_sha256: digest(diff) };
   });
 }
 
 export interface RevisionEvidence { command: typeof REVISION_COMMAND; before_sha: string; after_sha: string; base_sha: string;
-  exit_code: 0; stdout: string; stderr: string; environment: Record<string, unknown>; started_at: string; finished_at: string }
-export function parseRevisionEvidence(body: string, actor: string, head: string, base: string): RevisionEvidence {
+  exit_code: 0; stdout: string; stderr: string; environment: Record<string, unknown>; started_at: string; finished_at: string; checks?: {command:string;exit_code:number}[] }
+export function parseRevisionEvidence(body: string, actor: string, head: string, base: string, commands?: readonly string[]): RevisionEvidence {
   const reject = () => clientFail('revision_evidence', 'Existing App evidence must contain exact-head clean verification, environment and raw output');
+  if (commands) {
+    let m: any;
+    try { const match = /^Builder evidence\n([\s\S]+)$/.exec(body); m = JSON.parse(match?.[1] ?? 'null'); } catch { return reject(); }
+    if (!m || m.actor !== actor || m.before_sha !== head || m.after_sha !== head || m.base_sha !== base || m.clean_before !== true || m.clean_after !== true ||
+        !Array.isArray(m.logs) || !same(m.logs.map((l:any) => l.command),commands) || m.logs.some((l:any) => l.exit_code !== 0 || typeof l.stdout !== 'string' || typeof l.stderr !== 'string') ||
+        !m.environment || !['platform','arch','node'].every(k => typeof m.environment[k] === 'string' && m.environment[k]) ||
+        ![m.started_at,m.finished_at].every(t => typeof t === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(t) && Number.isFinite(Date.parse(t))) || m.finished_at < m.started_at) return reject();
+    return {command:REVISION_COMMAND,before_sha:head,after_sha:head,base_sha:base,exit_code:0,stdout:JSON.stringify(m.logs),stderr:'',environment:m.environment,
+      started_at:m.started_at,finished_at:m.finished_at,checks:m.logs.map((l:any)=>({command:l.command,exit_code:l.exit_code}))};
+  }
   let metadata: Record<string, any>, v: Record<string, any>;
   try {
     const match = /^Builder evidence — documentation review correction\n```json\n([\s\S]+?)\n```\nRaw stdout: ([^\n]+)\nRaw stderr: ([^\n]+)/.exec(body);
@@ -57,6 +68,15 @@ export function parseRevisionEvidence(body: string, actor: string, head: string,
 
 // Each phase is exclusive and fsynced. Interrupted provider phases are never replayed.
 interface Phase { schema_version: '1.0'; revision_id: string; phase: number; previous_sha256: string | null; value: any }
+function safeReceiptData(value: unknown) {
+  try { safeData(value); }
+  catch (error) {
+    // safeData inspects credentials, shape and complexity before its final byte check.
+    // Only that final aggregate limit differs for the existing bounded local Receipt.
+    if (!(error instanceof ControlPlaneError) || error.code !== 'body_too_large' || error.status !== 413 ||
+        Buffer.byteLength(JSON.stringify(value)) > 256 * 1024) throw error;
+  }
+}
 export class RevisionReceipt {
   constructor(readonly directory: string, readonly id: string) {
     if (!/^revision-[a-f0-9]{64}$/.test(id)) clientFail('revision_receipt', 'Invalid revision receipt ID');
@@ -66,7 +86,8 @@ export class RevisionReceipt {
     const result: Phase[] = [];
     for (let phase = 0; phase <= 5; phase++) {
       if (!existsSync(this.file(phase))) continue;
-      const p = readJson(this.file(phase), 256 * 1024) as Phase;
+      const p = readJson(this.file(phase), 256 * 1024, false) as Phase;
+      safeReceiptData(p);
       if (phase !== result.length || !p || Object.keys(p).sort().join(',') !== 'phase,previous_sha256,revision_id,schema_version,value' ||
           p.schema_version !== '1.0' || p.revision_id !== this.id || p.phase !== phase ||
           p.previous_sha256 !== (phase ? digest(readFileSync(this.file(phase - 1))) : null))
@@ -78,8 +99,12 @@ export class RevisionReceipt {
   append(value: unknown) {
     const phases = this.phases(), phase = phases.length;
     if (phase > 5) clientFail('revision_receipt', 'Revision receipt is already complete');
-    exclusiveRecoveryFile(this.file(phase), JSON.stringify({ schema_version: '1.0', revision_id: this.id, phase,
-      previous_sha256: phase ? digest(readFileSync(this.file(phase - 1))) : null, value }, null, 2));
+    const record = { schema_version: '1.0', revision_id: this.id, phase,
+      previous_sha256: phase ? digest(readFileSync(this.file(phase - 1))) : null, value };
+    safeReceiptData(record);
+    const bytes = JSON.stringify(record, null, 2);
+    if (Buffer.byteLength(bytes) > 256 * 1024) clientFail('revision_receipt', 'Revision receipt exceeds its bounded file limit');
+    exclusiveRecoveryFile(this.file(phase), bytes);
   }
 }
 

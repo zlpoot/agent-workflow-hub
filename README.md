@@ -4,6 +4,8 @@ AWH is a Human-gated development workflow toolkit. It connects repository identi
 
 The Node.js 24+ / TypeScript / pnpm single package contains Protocol, SQLite Control Plane, Client/Resident, Dashboard/Viewer, Project Enrollment and an App-only Builder. Repository identity in a project manifest does not grant execution or Provider authority. There are no built-in business repositories, developer Issue mappings or machine defaults.
 
+The [develop-to-pr Stage contract and Codex adapter](docs/develop-to-pr.md) provide one controlled entry through Draft PR, exact-head Evidence, confirmed Handoff and acknowledged CP Run/Event facts, then stop for independent Review. Managed same-PR revisions require a separate exact old/new HEAD authorization.
+
 ## Build and verify
 
 ```powershell
