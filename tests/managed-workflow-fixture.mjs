@@ -1,6 +1,6 @@
 // SYNTHETIC ONLY: ephemeral administrator, Git repository, SQLite CP and GitHub App.
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,rmSync,realpathSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,rmSync,realpathSync,existsSync} from 'node:fs';
 import {tmpdir,hostname} from 'node:os';
 import {join,dirname} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -76,7 +76,7 @@ export async function managedHarness(t) {
   writeFileSync(join(evidence,base.split(/[\\/]/).at(-1)+'.json'),encode({kind:'synthetic_workflow_trace',live_provider:false,test:t.name,counts,token_requests:tokens,transports,
    runs:store.listRuns(principal,'workflow-code').map(run=>({run,events:store.listEvents(principal,run.id)})),comments:[...comments],branches:[...branches],
    local_audit:readdirSync(dirname(session())).filter(n=>n==='session.json'||n.endsWith('.delivery.json')||n.endsWith('.recovery.json')).map(n=>({name:n,record:JSON.parse(readFileSync(join(dirname(session()),n),'utf8'))})),
-   verification:readdirSync(join(repo,'.handoff')).filter(n=>n.startsWith('run-')).flatMap(n=>{const p=join(repo,'.handoff',n,'verification.json');try{return[{run:n,record:JSON.parse(readFileSync(p,'utf8'))}];}catch{return[];}})}));
+   verification:(existsSync(join(repo,'.handoff'))?readdirSync(join(repo,'.handoff')):[]).filter(n=>n.startsWith('run-')).flatMap(n=>{const p=join(repo,'.handoff',n,'verification.json');try{return[{run:n,record:JSON.parse(readFileSync(p,'utf8'))}];}catch{return[];}})}));
   store.close();for(const k of keys){if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k];}assert.equal(dirname(base),tmpdir());assert(base.startsWith(join(tmpdir(),'awh-stage-synthetic-')));rmSync(base,{recursive:true,force:true});});
  return {repo,base,git,commit,task,grant,activate,client,store,counts,deps,connect,comments,prs,branches,tokens,transports,session,revision,attempts,events:id=>store.listEvents(principal,id).map(v=>v.event),
   review:(pr,state='CHANGES_REQUESTED',id=900)=>prs.get(pr).reviews.push({id,commit_id:branches.get(prs.get(pr).branch),state,user:{login:'reviewer',id:321,type:'User'}}),
