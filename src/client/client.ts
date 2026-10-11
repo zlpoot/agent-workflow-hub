@@ -877,7 +877,7 @@ export class AwhClient {
       const rawSession = readFileSync(c.path), journalPath = join(dirname(c.path), fromRun + '.delivery.json');
       const journal = readJson(journalPath) as RecoveryJournal, rawJournal = readFileSync(journalPath);
       const evidencePath = join(c.identity.root, '.handoff', fromRun, 'verification.json');
-      const evidence = journal.stage === 'verification' ? readJson(evidencePath, 16 * 1024) : null;
+      const evidence = journal.stage === 'verification' ? readJson(evidencePath, 64 * 1024) : null;
       const evidenceJson = evidence === null ? null : readFileSync(evidencePath, 'utf8');
       const timeline = await this.timeline(fromRun);
       qualifyRecovery(s.initial, s.events, s.task_binding, !!s.pending || !!s.outbox?.length, journal, evidence, binding, timeline.run, timeline.events.map(e => e.event));
@@ -888,7 +888,7 @@ export class AwhClient {
       if (!same(inspectRepository(this.cwd), c.identity) || c.identity.dirty || !rawSession.equals(readFileSync(c.path)) || !rawJournal.equals(readFileSync(journalPath)) ||
           evidenceJson !== null && evidenceJson !== readFileSync(evidencePath, 'utf8'))
         clientFail('recovery', 'Recovery source or predecessor changed during qualification');
-      const now = new Date().toISOString(), initial: Run = { ...s.initial, id: 'run-' + randomUUID(), source: { ...s.initial.source, sha: binding.source_sha },
+      const now = new Date().toISOString(), initial: Run = { ...s.initial, id: 'run-' + randomUUID(), source: { ...s.initial.source, sha: binding.source_sha }, profile: { ref: binding.profile_ref, version: binding.profile_version },
         state: 'created', created_at: now, updated_at: now, started_at: null, completed_at: null };
       const link: RecoveryLink = { attempt_id: 'recovery-' + randomUUID(), predecessor_run_id: fromRun, old_sha: s.initial.source.sha, new_sha: binding.source_sha };
       const receipt: RecoveryRecord = { schema_version: '1.0', kind: 'verification_recovery', link, namespace_sha256: this.digest(dirname(c.path)),

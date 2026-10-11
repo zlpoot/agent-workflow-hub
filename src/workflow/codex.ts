@@ -58,7 +58,8 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
     if (current.run?.state === 'awaiting_review' && current.effective_candidate_head === head) return;
     if (t.revision) await this.revise();
     else await deliver(this.client,{...this.options,issue:t.issue,holdDraft:true,
-      ...(current.run?.state === 'failed' && current.run.source.sha !== head && t.head_sha === null ? {recoverFromRun:current.run.id} : {})},this.deps);
+      ...(t.verification_recovery && current.run?.id === t.verification_recovery.run_id ? {recoverFromRun:t.verification_recovery.run_id} :
+        current.run?.state === 'failed' && current.run.source.sha !== head && t.head_sha === null ? {recoverFromRun:current.run.id} : {})},this.deps);
   }
   private async revise() {
     const c = managedContext()!, t = c.proposed.task!, r = t.revision!, identity = inspectRepository(this.client.cwd), fixed = selectWorkflow();

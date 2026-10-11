@@ -11,7 +11,7 @@ import {connectBuilder} from '../dist/builder.js';
 import {policyFor} from './workflow-fixture.mjs';
 import {AwhClient} from '../dist/client/client.js';
 import {ControlPlaneStore} from '../dist/control-plane/store.js';
-export async function managedHarness(t) {
+export async function managedHarness(t, {fixedHead=false} = {}) {
  const keys=['AWH_ADMIN_TRUST_FILE','AWH_ADMIN_TRUST_SHA256','AWH_ADMIN_APPROVAL_FILE','AWH_ADMIN_APPROVAL_SHA256','AWH_ADMIN_VERSION','AWH_ADMIN_EXECUTOR_ID','AWH_ADMIN_MACHINE_ID','AWH_BUILDER_POLICY_FILE','AWH_BUILDER_POLICY_SHA256'];
  const saved=Object.fromEntries(keys.map(k=>[k,process.env[k]]));keys.forEach(k=>delete process.env[k]);
  const base=mkdtempSync(join(tmpdir(),'awh-stage-synthetic-')),repo=join(base,'repo'),registry=join(base,'registry'),state=join(base,'state');[repo,registry,state].forEach(p=>mkdirSync(p,{mode:0o700}));
@@ -26,13 +26,13 @@ export async function managedHarness(t) {
  const tf=join(base,'trust.json');writeFileSync(tf,encode(trust),{mode:0o600});process.env.AWH_ADMIN_TRUST_FILE=tf;process.env.AWH_ADMIN_TRUST_SHA256=digest(encode(trust));
  const approve=path=>{const v=JSON.parse(readFileSync(path)).version,rf=join(base,v+'.approval.json');prepareApproval(path,'receipt-'+v,'Synthetic test approval only',rf);process.env.AWH_ADMIN_APPROVAL_FILE=rf;process.env.AWH_ADMIN_APPROVAL_SHA256=digest(readFileSync(rf));approveProposal(path);};
  const pp=join(base,'project.json');proposeProject(project,'project-v1',pp);approve(pp);
- const task={repository,issue:90,branch:'codex/code-90',base_sha:baseSha,head_sha:null,profile:'code',workflow:'develop',executor_id:'codex-fixture',machine_id:'stage-machine',expires_at:new Date(Date.now()+86400000).toISOString(),stages:['observe','develop','deliver'],provider_operations:['push','draft_pr','evidence','handoff']};
+ const task={repository,issue:90,branch:'codex/code-90',base_sha:baseSha,head_sha:fixedHead?git(['rev-parse','HEAD']):null,profile:'code',workflow:'develop',executor_id:'codex-fixture',machine_id:'stage-machine',expires_at:new Date(Date.now()+86400000).toISOString(),stages:['observe','develop','deliver'],provider_operations:['push','draft_pr','evidence','handoff']};
  const activate=v=>{process.env.AWH_ADMIN_VERSION=v;process.env.AWH_ADMIN_EXECUTOR_ID=task.executor_id;process.env.AWH_ADMIN_MACHINE_ID=task.machine_id;};
  const grant=(v,changed=task)=>{const p=join(base,v+'.proposal.json');prepareGrant('project-v1',v,changed,p);approve(p);activate(v);return p;};
  grant('task-90');const p90=policyFor('code','develop');grant('task-91',{...task,issue:91,branch:'codex/code-91'});const p91=policyFor('code','develop');activate('task-90');
  const credential=join(base,'cp-token'),configPath=join(base,'client.json'),config={schema_version:'1.0',endpoint:'http://127.0.0.1:4310',credential_file:credential,state_directory:state,executor_id:task.executor_id,executor_type:'codex',profile_version:'task-90'};writeFileSync(credential,'awh_cp_'+randomBytes(32).toString('base64url'),{mode:0o600});writeFileSync(configPath,encode(config));writeFileSync(join(state,'machine.json'),encode({schema_version:'1.0',id:task.machine_id,name:'synthetic-machine',platform:process.platform==='win32'?'windows':'linux',arch:process.arch}));
  const p91Fresh={...p91,version:'task-91-current'};
- const client=new AwhClient(configPath,repo),principal={id:'test-client',project_ids:['workflow-code'],executor_ids:[task.executor_id]},store=new ControlPlaneStore(join(base,'cp.sqlite'),[p90,p91,p91Fresh],undefined,'initialize');let cpFault=null;const attempts=[];
+ const client=new AwhClient(configPath,repo),principal={id:'test-client',project_ids:['workflow-code'],executor_ids:[task.executor_id]},store=new ControlPlaneStore(join(base,'cp.sqlite'),[p90,p91,p91Fresh,{...p90,version:'task-90-recovery'}],undefined,'initialize');let cpFault=null;const attempts=[];
  client.request=async(c,path,method='GET',data)=>{const u=new URL(path,'http://fixture'),parts=u.pathname.split('/');let v;
   if(path==='/v1/workflow-capabilities')v={develop_to_pr:'stage-v1',managed_revision:'exact-grant-v1'};
   else if(path==='/v1/capabilities')v={revision_linking:'revision-link-v1',database_version:2};
@@ -79,6 +79,7 @@ export async function managedHarness(t) {
    verification:(existsSync(join(repo,'.handoff'))?readdirSync(join(repo,'.handoff')):[]).filter(n=>n.startsWith('run-')).flatMap(n=>{const p=join(repo,'.handoff',n,'verification.json');try{return[{run:n,record:JSON.parse(readFileSync(p,'utf8'))}];}catch{return[];}})}));
   store.close();for(const k of keys){if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k];}assert.equal(dirname(base),tmpdir());assert(base.startsWith(join(tmpdir(),'awh-stage-synthetic-')));rmSync(base,{recursive:true,force:true});});
  return {repo,base,git,commit,task,grant,activate,client,store,counts,deps,connect,comments,prs,branches,tokens,transports,session,revision,attempts,events:id=>store.listEvents(principal,id).map(v=>v.event),
+  selectVersion:version=>{config.profile_version=version;writeFileSync(configPath,encode(config));},
   review:(pr,state='CHANGES_REQUESTED',id=900)=>prs.get(pr).reviews.push({id,commit_id:branches.get(prs.get(pr).branch),state,user:{login:'reviewer',id:321,type:'User'}}),
   merge:pr=>{prs.get(pr).merged=true;const branch=git(['branch','--show-current']);git(['switch','main']);git(['merge','--no-ff',branch,'-m','Synthetic Human merge']);currentBase=git(['rev-parse','HEAD']);git(['update-ref','refs/remotes/origin/main',currentBase]);git(['switch',branch]);},fault:v=>providerFault=v,cpFault:v=>cpFault=v,failVerify:()=>verifyExit=1,passVerify:()=>verifyExit=0,
   next:()=>{git(['switch','-c','codex/code-91','main']);commit(91);grant('task-91-current',{...task,issue:91,branch:'codex/code-91',base_sha:currentBase});config.profile_version='task-91-current';writeFileSync(configPath,encode(config));}};

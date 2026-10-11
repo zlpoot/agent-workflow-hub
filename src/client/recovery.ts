@@ -2,7 +2,7 @@ import { openSync, writeFileSync, fsyncSync, closeSync } from 'node:fs';
 import type { Event, Run } from '../protocol/index.js';
 import { replayRun } from '../protocol/index.js';
 import { taskBinding, taskVerificationCommands, type TaskBinding } from '../profiles.js';
-import { managedContext, snapshot, readEntry } from '../admin/registry.js';
+import { managedContext, snapshot, readEntry, verificationRecoveryOriginal } from '../admin/registry.js';
 import { clientFail, same } from './local.js';
 
 export interface RecoveryLink { attempt_id: string; predecessor_run_id: string; old_sha: string; new_sha: string }
@@ -23,6 +23,16 @@ export function qualifyRecovery(initial: Run, events: Event[], binding: TaskBind
   const reject = () => clientFail('recovery', 'Recovery requires an unchanged CP-confirmed pre-provider failure, matching evidence and a different clean source');
   let expectedRefs: Record<string, unknown> = {};
   const managed = managedContext();
+  let nextVersion = binding?.profile_version;
+  if (managed && binding && binding.profile_version !== next.profile_version) {
+    const {state} = snapshot(managed.trust), i = state.entries.findIndex(e => e.action === 'grant' && e.version === next.profile_version);
+    if (i < 0) return reject();
+    const successor = readEntry(managed.trust,state.entries[i]!,state.receipt_ids[i]!,new Date().toISOString()), r = successor.proposed.task!.verification_recovery;
+    if (!r || r.original_version !== binding.profile_version || r.run_id !== initial.id || r.previous_head !== binding.source_sha ||
+        successor.proposed.task!.head_sha !== next.source_sha) return reject();
+    verificationRecoveryOriginal(managed.trust,state,successor.proposed,new Date().toISOString());
+    nextVersion = next.profile_version;
+  }
   if (managed && binding) {
     const {state} = snapshot(managed.trust), index = state.entries.findIndex(e => e.action === 'grant' && e.version === binding.profile_version);
     if (index < 0) return reject();
@@ -35,7 +45,7 @@ export function qualifyRecovery(initial: Run, events: Event[], binding: TaskBind
       journal.disposition !== 'stopped' || !['preflight','verification'].includes(journal.stage) ||
       !journal.refs || typeof journal.refs !== 'object' || Array.isArray(journal.refs) ||
       !(same(journal.refs,{}) || same(journal.refs,expectedRefs)) || !same(binding, journal.task_binding) ||
-      binding.source_sha === next.source_sha || !same({ ...binding, source_sha: next.source_sha, fingerprint: next.fingerprint }, next) ||
+      binding.source_sha === next.source_sha || !same({ ...binding, source_sha: next.source_sha, profile_version: nextVersion, fingerprint: next.fingerprint }, next) ||
       !same(taskBinding(nextData), next) || !same(replayRun(initial, events).run, cp) || cp.state !== 'failed' || !same(events, cpEvents)) reject();
   const expected = journal.stage === 'verification'
     ? ['RUN_STARTED','STEP_STARTED','STEP_COMPLETED','VERIFICATION_STARTED','VERIFICATION_FAILED']

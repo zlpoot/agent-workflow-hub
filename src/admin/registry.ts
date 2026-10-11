@@ -39,7 +39,9 @@ export interface Task {
   profile: string; workflow: string; executor_id: string; machine_id: string; expires_at: string;
   stages: Stage[]; provider_operations: ProviderOperation[];
   revision?: RevisionAuthorization;
+  verification_recovery?: VerificationRecoveryAuthorization;
 }
+export interface VerificationRecoveryAuthorization { original_version: string; run_id: string; previous_head: string }
 export interface RevisionAuthorization {
   original_version: string; run_id: string; pull_request: number; previous_head: string; review_id: number;
 }
@@ -78,7 +80,13 @@ export function proposal(value: any): Proposal {
     projectPolicy(value.policy);
   } else {
     const task = value.task;
-    closed(task, ['repository','issue','branch','base_sha','head_sha','profile','workflow','executor_id','machine_id','expires_at','stages','provider_operations', ...(task?.revision !== undefined ? ['revision'] : [])]);
+    closed(task, ['repository','issue','branch','base_sha','head_sha','profile','workflow','executor_id','machine_id','expires_at','stages','provider_operations', ...(task?.revision !== undefined ? ['revision'] : []), ...(task?.verification_recovery !== undefined ? ['verification_recovery'] : [])]);
+    if (task.verification_recovery !== undefined) {
+      closed(task.verification_recovery,['original_version','run_id','previous_head']);
+      const r = task.verification_recovery;
+      if (task.revision || !id(r.original_version) || r.original_version === value.version || !/^run-[a-f0-9-]{36}$/.test(r.run_id) ||
+          !sha(r.previous_head) || !sha(task.head_sha) || task.head_sha === r.previous_head || !Array.isArray(task.stages) || !task.stages.includes('deliver')) deny('verification_recovery_scope');
+    }
     if (task.revision !== undefined) {
       closed(task.revision,['original_version','run_id','pull_request','previous_head','review_id']);
       const r = task.revision;
@@ -200,6 +208,18 @@ export function revisionOriginal(trust: Trust, state: State, proposed: Proposal,
       !task.stages.every(s => first.stages.includes(s)) || !task.provider_operations.every(o => first.provider_operations.includes(o))) deny('revision_original');
   return original;
 }
+/** A fixed-HEAD failure needs a new independently approved grant, never edited history. */
+export function verificationRecoveryOriginal(trust: Trust, state: State, proposed: Proposal, now: string) {
+  const task = proposed.task!, r = task.verification_recovery;
+  if (!r) return null;
+  const i = state.entries.findIndex(e => e.version === r.original_version && e.action === 'grant');
+  if (i < 0 || state.entries.some(e => e.target_version === r.original_version)) deny('verification_recovery_original');
+  const original = readEntry(trust,state.entries[i]!,state.receipt_ids[i]!,now), first = original.proposed.task!;
+  if (first.revision || first.head_sha !== r.previous_head || proposed.policy_version !== original.proposed.policy_version ||
+      ['repository','issue','branch','base_sha','profile','workflow','executor_id','machine_id'].some(k => task[k as keyof Task] !== first[k as keyof Task]) ||
+      !task.stages.every(s => first.stages.includes(s)) || !task.provider_operations.every(o => first.provider_operations.includes(o))) deny('verification_recovery_original');
+  return original;
+}
 export function managedContext(env: NodeJS.ProcessEnv = process.env, now = new Date().toISOString()) {
   if (!env.AWH_ADMIN_TRUST_FILE && !env.AWH_ADMIN_TRUST_SHA256 && !env.AWH_ADMIN_VERSION) return null;
   if (!timestamp(now)) deny('clock');
@@ -211,6 +231,7 @@ export function managedContext(env: NodeJS.ProcessEnv = process.env, now = new D
   if (record.proposed.task!.expires_at <= now) deny('task_expired');
   const project = approvedProject(context.trust,state,record.proposed.policy_version!,now);
   revisionOriginal(context.trust,state,record.proposed,now);
+  verificationRecoveryOriginal(context.trust,state,record.proposed,now);
   if (encode(materialize(project,record.proposed.task!,version)) !== encode(record.policy)) deny('task_scope');
   return { ...context, version, ...record, project };
 }

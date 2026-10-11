@@ -59,6 +59,27 @@ test('managed pre-provider verification recovery qualifies a new commit and pres
  h.passVerify();h.commit(2);const result=published(await developToPR(h.client,options,h.deps));assert.notEqual(result.run,old);assert.equal(h.counts.push,1);assert.equal(h.counts.pr,1);
  assert.deepEqual(readFileSync(join(dirname(h.session()),old+'.json')),bytes);assert.deepEqual(readFileSync(journal),oldJournal);assert.equal((await h.client.timeline(old)).run.state,'failed');
 });
+for (const lostAck of [false,true]) test('fixed HEAD failure recovers only through an exact new independently approved version'+(lostAck?' with lost successor ACK':''),{timeout:180000},async t=>{
+ const h=await managedHarness(t,{fixedHead:true}),large={...h.deps,verify:async command=>({command,exit_code:1,stdout:'Synthetic failure '.repeat(1500),stderr:'synthetic toolchain incomplete',elapsed_ms:1})};
+ const failed=await developToPR(h.client,options,large);assert.equal(failed.code,'stage_verification_failed');assert.equal(h.counts.push,0);
+ const bytes=readFileSync(h.session()),old=JSON.parse(bytes).initial.id,journal=join(dirname(h.session()),old+'.delivery.json'),oldJournal=readFileSync(journal),events=h.events(old);
+ const evidence=join(h.repo,'.handoff',old,'verification.json'),oldEvidence=readFileSync(evidence);assert(oldEvidence.length>16*1024);
+ const head=h.commit(2),recovery={original_version:'task-90',run_id:old,previous_head:h.task.head_sha};
+ assert.throws(()=>h.grant('same-head-refused',{...h.task,verification_recovery:recovery}),/verification_recovery_scope/);
+ assert.throws(()=>h.grant('wrong-original-refused',{...h.task,head_sha:head,verification_recovery:{...recovery,previous_head:'f'.repeat(40)}}),/verification_recovery_original/);
+ h.grant('task-90-recovery',{...h.task,head_sha:head,verification_recovery:recovery});h.selectVersion('task-90-recovery');
+ if(lostAck){h.cpFault('RUN_STARTED');assert.equal((await developToPR(h.client,options,h.deps)).status,'BLOCKED');assert.equal(h.counts.push,0);}
+ const result=published(await developToPR(h.client,options,h.deps));assert.notEqual(result.run,old);assert.equal(h.counts.push,1);assert.equal(h.counts.pr,1);
+ assert.deepEqual(readFileSync(join(dirname(h.session()),old+'.json')),bytes);assert.deepEqual(readFileSync(journal),oldJournal);assert.deepEqual(readFileSync(evidence),oldEvidence);assert.deepEqual(h.events(old),events);
+ const timeline=await h.client.timeline();assert.equal(timeline.run.profile.version,'task-90-recovery');assert.equal(timeline.events[0].event.payload.extensions.verification_recovery.predecessor_run_id,old);
+ const before=writes(h);published(await developToPR(h.client,options,h.deps));assert.deepEqual(writes(h),before);
+});
+for(const grant of ['missing-recovery','wrong-run'])test('fixed HEAD failure rejects '+grant+' successor before Provider writes',async t=>{
+ const h=await managedHarness(t,{fixedHead:true});h.failVerify();assert.equal((await developToPR(h.client,options,h.deps)).code,'stage_verification_failed');
+ const bytes=readFileSync(h.session()),head=h.commit(2);
+ h.grant('task-90-recovery',{...h.task,head_sha:head,...(grant==='wrong-run'?{verification_recovery:{original_version:'task-90',run_id:'run-'+ '0'.repeat(8)+'-'+ '0'.repeat(4)+'-'+ '0'.repeat(4)+'-'+ '0'.repeat(4)+'-'+ '0'.repeat(12),previous_head:h.task.head_sha}}:{})});h.selectVersion('task-90-recovery');h.passVerify();
+ assert.equal((await developToPR(h.client,options,h.deps)).status,'BLOCKED');assert.equal(h.counts.push,0);assert.equal(h.counts.pr,0);assert.deepEqual(readFileSync(h.session()),bytes);
+});
 test('initial PR ACK loss preserves uncertain Journal; repeating stage never replays Provider writes',async t=>{
  const h=await managedHarness(t);h.fault('pr');assert.equal((await developToPR(h.client,options,h.deps)).status,'BLOCKED');const before=writes(h);
  assert.equal((await developToPR(h.client,options,h.deps)).status,'BLOCKED');assert.deepEqual(writes(h),before);assert.equal(h.prs.size,1);

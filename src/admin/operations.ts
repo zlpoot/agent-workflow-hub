@@ -2,7 +2,7 @@ import { closeSync, existsSync, fsyncSync, openSync, readdirSync, renameSync, un
 import { join } from 'node:path';
 import { validateBuilderPolicy, type ApprovedPolicy } from '../profiles.js';
 import { externalPath } from '../shared/external-files.js';
-import { approval, approvedProject, deny, digest, encode, hash, id, managedContext, materialize, parse, projectPolicy, proposal, read, readEntry, revisionOriginal, snapshot, trustContext,
+import { approval, approvedProject, deny, digest, encode, hash, id, managedContext, materialize, parse, projectPolicy, proposal, read, readEntry, revisionOriginal, verificationRecoveryOriginal, snapshot, trustContext,
   type Entry, type Proposal, type ProjectPolicy, type State, type Task } from './registry.js';
 
 // Same bounded grammar as the existing Deliver executor. Never execute proposed commands.
@@ -23,6 +23,7 @@ export function checkedGrant(value: Proposal): ApprovedPolicy {
   const { trust } = trustContext(), { state } = snapshot(trust);
   const project = checkedProject(approvedProject(trust,state,value.policy_version!,new Date().toISOString()));
   revisionOriginal(trust,state,value,new Date().toISOString());
+  verificationRecoveryOriginal(trust,state,value,new Date().toISOString());
   return validateBuilderPolicy(materialize(project,value.task,value.version));
 }
 function freshWrite(path: string, bytes: string): void {

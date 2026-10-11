@@ -18,7 +18,11 @@ export interface DeliveryDependencies {
   verify: (command: string, root: string) => Promise<VerificationLog>;
 }
 export class DeliveryError extends Error {
-  constructor(readonly original: unknown, readonly stage: string) { super('Delivery stopped; original operation failure retained, pending Events require explicit retry'); }
+  readonly code: string;
+  constructor(readonly original: unknown, readonly stage: string) {
+    super('Delivery stopped; original operation failure retained, pending Events require explicit retry');
+    this.code = stage === 'verification' ? 'stage_verification_failed' : 'stage_delivery_operation';
+  }
 }
 const credentialOutput = (value: string) => /-----BEGIN[^\r\n]*PRIVATE KEY-----|\b(?:gh[psuor]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|awh_cp_[A-Za-z0-9_-]+)\b|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|authorization\s*:\s*(?:basic|bearer)\s+\S+/i.test(value);
 const statistic = (output: string, label: string): number | null => {
