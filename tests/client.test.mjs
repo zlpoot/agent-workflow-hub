@@ -143,6 +143,23 @@ test('worktree-specific overrides remain refused before callbacks or substituted
   git(repo,['config','--add','extensions.worktreeConfig','false']); assert.throws(() => inspectRepository(linked),errorCode('origin'));
 });
 
+test('fresh registration persists a diagnostic Session and repeated registration preserves retained state', async t => {
+  const h = await harness(t);
+  await h.client.register();
+  assert(existsSync(h.sessionPath()), 'Fresh registration must persist its initial Session');
+  const initial = readFileSync(h.sessionPath());
+  const diagnostics = h.client.inspectLocalDiagnostics();
+  assert.equal(diagnostics.run, null); assert.equal(diagnostics.pending_events, 0);
+  assert.equal(diagnostics.journal_count, 0);
+  await h.client.register(); assert.deepEqual(readFileSync(h.sessionPath()), initial);
+  await h.client.start(21); const active = readFileSync(h.sessionPath());
+  await h.client.register(); assert.deepEqual(readFileSync(h.sessionPath()), active);
+  writeFileSync(h.sessionPath(), 'corrupted retained Session');
+  await h.client.register();
+  assert.equal(readFileSync(h.sessionPath(), 'utf8'), 'corrupted retained Session');
+  assert.throws(() => h.client.inspectLocalDiagnostics());
+});
+
 test('native Client registers metadata/heartbeat and reports exact source, ordered Events, status and explicit failed finish', async t => {
   const h = await harness(t), before = git(h.repo,['rev-parse','HEAD']);
   const registered = await h.client.register(); assert.equal(registered.client.client_version,CLIENT_VERSION); assert.equal(registered.client.executor_type,'codex');

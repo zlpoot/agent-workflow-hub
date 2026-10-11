@@ -206,6 +206,9 @@ export class AwhClient {
         clientFail('response_binding', 'Executor registration response does not match this Client');
       const heartbeat = await this.request(c, '/v1/executors/' + encodeURIComponent(c.executor.id) + '/heartbeat', 'POST', {}); keys(heartbeat, ['executor','client','last_seen']);
       if (!same(checked('executor', heartbeat.executor), c.executor) || !same(assertClientMetadata(heartbeat.client), c.metadata) || !timestamp(heartbeat.last_seen)) clientFail('response_binding', 'Invalid heartbeat response');
+      // Registration establishes the initial diagnostic binding only after all CP acknowledgments.
+      // Never overwrite a retained Session, including one that requires operator recovery.
+      if (!existsSync(c.path)) this.save(c, this.empty(c));
       return { project: p, executor: c.executor, client: c.metadata, last_seen: heartbeat.last_seen, authority_verified: false };
     });
   }
