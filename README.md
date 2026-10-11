@@ -19,7 +19,7 @@ The build removes its own previous dist output before compiling, so deleted modu
 
 Start with a new external deployment directory, database, credentials, machine home and approved configuration. See [configuration](config/README.md), [Control Plane](docs/control-plane.md), [Client](docs/client.md), [Project Enrollment](docs/project-enrollment.md) and [Viewer](docs/windows-product.md). Normal startup requires the current schema and does not migrate or seed an existing database.
 
-`pnpm client:pack` and `pnpm viewer:pack` build standalone bundled npm tarballs. `pnpm ui:pack` produces the static UI ZIP. These commands do not publish to a registry, install a service, create a GitHub Release or upgrade an existing deployment. Component package identities are maintained in src/client/version.ts.
+`pnpm release:pack --output <new-directory>` builds Client, Control Plane, Viewer and Builder Node tarballs plus the UI ZIP from one clean HEAD in one controlled build. The structured version map, Release Manifest, SHA256SUMS, archive verifier and PowerShell 5.1/7 installation/stop/recovery instructions are described in [Windows release kit](docs/release-windows.md). `pnpm release:validate <kit> --expected-head <sha>` verifies the actual archives; `pnpm release:smoke <kit> --expected-head <sha> --evidence <new-directory>` performs isolated Windows acceptance. These commands do not publish to a registry, install a service, create a GitHub Release or upgrade an existing deployment. The individual `client:pack`, `viewer:pack` and `ui:pack` commands remain available for component development; use the unified command for a release kit.
 
 ## Approved delivery
 
