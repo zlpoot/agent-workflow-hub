@@ -51,7 +51,8 @@ test('actual archive audit rejects credentials, business SQLite, fixtures, retir
   for(const path of ['fixture/x.json','tests/x.js','examples/x.json','credentials/key.pem','dist/state.sqlite-wal','dist/session-host.js','dist/viewer-cli.js','dist/addon.node']) {
     const a=asset('awh-builder',f=>f[path]=Buffer.from('synthetic'));assert.throws(()=>checkArtifact(a.bytes,a.record,source),path);
   }
-  for(const text of ['-----BEGIN PRIVATE KEY-----','ghp_'+'a'.repeat(36),'awh_cp_'+'a'.repeat(43)])assert.throws(()=>auditFiles(new Map([['dist/hidden.json',{body:Buffer.from(text)}]])));
+  for(const text of ['-----BEGIN PRIVATE KEY-----','-----BEGIN CERTIFICATE-----\n'+'A'.repeat(64)+'\n-----END CERTIFICATE-----','ghp_'+'a'.repeat(36),'awh_cp_'+'a'.repeat(43)])assert.throws(()=>auditFiles(new Map([['dist/hidden.json',{body:Buffer.from(text)}]])));
+  auditFiles(new Map([['dist/validation.js',{body:Buffer.from('/-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\\r\\n]+-----END CERTIFICATE-----/') }]]));
 });
 test('dependency closure rejects hidden imports, native metadata and lifecycle scripts',()=>{
   for(const text of ["require('./missing')",'require(variable)',"import('unknown')"]) {

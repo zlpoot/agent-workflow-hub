@@ -126,6 +126,6 @@ export function auditFiles(archive) {
     assert(!/(?:^|\/)\.env(?:\.|$)|\.(?:pem|key|token|jwt|sqlite(?:-wal|-shm)?|db)$/i.test(path),'Secret/data path: '+path);
     assert(!path.endsWith('.ps1') || path==='dist/dashboard/owner-confirm.ps1','Undeclared platform helper');
     const text=body.toString('utf8');
-    assert(!/-----BEGIN (?:[A-Z ]*PRIVATE KEY|CERTIFICATE)-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|awh_cp_[A-Za-z0-9_-]{40,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/.test(text),'Credential material in '+path);
+    assert(!/-----BEGIN [A-Z ]*PRIVATE KEY-----|-----BEGIN CERTIFICATE-----\r?\n[A-Za-z0-9+/=\r\n]{32,}-----END CERTIFICATE-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|awh_cp_[A-Za-z0-9_-]{40,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/.test(text),'Credential material in '+path);
   }
 }
