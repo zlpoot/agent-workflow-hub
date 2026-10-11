@@ -1,3 +1,5 @@
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, randomBytes } from 'node:crypto';
@@ -15,8 +17,6 @@ import { createControlPlaneServer, createAuthenticator, ControlPlaneStore } from
 import { createDashboardGateway } from '../dist/dashboard/gateway.js';
 import { createLocalOnboarding } from '../dist/dashboard/onboarding.js';
 import { readViewerConfig } from '../dist/dashboard-cli.js';
-import { wizardModel } from '../dashboard/wizard-model.mjs';
-import { diagnosisContract, matchLocalBinding } from '../dashboard/onboarding.mjs';
 import Ajv2020 from 'ajv/dist/2020.js';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -25,12 +25,12 @@ function git(cwd, args) { const r=spawnSync('git',['-c','commit.gpgsign=false','
   {cwd,env:{...env,GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_CONFIG_NOSYSTEM:'1'},encoding:'utf8',windowsHide:true}); assert.equal(r.status,0,'Fixture Git failed');return r.stdout.trim(); }
 async function setup(t) {
   const base=mkdtempSync(join(tmpdir(),'awh-windows-product-')),repo=join(base,'consumer');mkdirSync(repo);
-  git(repo,['init','-b','codex/awh-c07-webskill-bootstrap']);git(repo,['config','user.name','Fixture']);git(repo,['config','user.email','fixture@example.invalid']);
-  git(repo,['remote','add','origin','https://github.com/zlpoot/webskill.git']);writeFileSync(join(repo,'fixture.txt'),'unchanged');git(repo,['add','.']);git(repo,['commit','-m','fixture']);
-  initManifest(inspectRepository(repo),'webskill','webskill/bootstrap');git(repo,['add','.']);git(repo,['commit','-m','identity']);
-  const fixture=JSON.parse(readFileSync(new URL('../examples/protocol/webskill.json',import.meta.url))), token='awh_cp_'+randomBytes(32).toString('base64url');
-  const principal={id:'fixture-client',project_ids:['webskill'],executor_ids:['fixture-executor']};
-  const store=new ControlPlaneStore(join(base,'fixture.sqlite'),[{...fixture.profile_policy,ref:'webskill/bootstrap'}]);
+  git(repo,['init','-b','codex/awh-flow-03-project-beta-bootstrap']);git(repo,['config','user.name','Fixture']);git(repo,['config','user.email','fixture@example.invalid']);
+  git(repo,['remote','add','origin','https://github.com/example-org/project-beta.git']);writeFileSync(join(repo,'fixture.txt'),'unchanged');git(repo,['add','.']);git(repo,['commit','-m','fixture']);
+  initManifest(inspectRepository(repo),'project-beta','project-beta/bootstrap');git(repo,['add','.']);git(repo,['commit','-m','identity']);
+  const fixture=JSON.parse(readFileSync(new URL('../examples/protocol/project-beta.json',import.meta.url))), token='awh_cp_'+randomBytes(32).toString('base64url');
+  const principal={id:'fixture-client',project_ids:['project-beta'],executor_ids:['fixture-executor']};
+  const store=fixtureStore(join(base,'fixture.sqlite'),[{...fixture.profile_policy,ref:'project-beta/bootstrap'}]);
   const service=createControlPlaneServer({store,authenticate:createAuthenticator([{...principal,token_sha256:digest(token)}])});
   await new Promise(resolve=>service.server.listen(0,'127.0.0.1',resolve));
   const residents=[];
@@ -81,42 +81,32 @@ test('resident reports temporary CP outage and reconnects only to the original e
   await new Promise(resolve=>h.service.server.listen(port,'127.0.0.1',resolve));await until(()=>resident.status().online);await resident.close();assert.deepEqual(bytes(h.config.state_directory),before);
 });
 test('ordinary browser bootstrap is explicit scoped loopback navigation; APIs, foreign origins and expired sessions cannot bootstrap',async t=>{
-  const h=await setup(t),viewer={id:'local-viewer',project_ids:['webskill']};let now=Date.now();
+  const h=await setup(t),viewer={id:'local-viewer',project_ids:['project-beta']};let now=Date.now();
   const gateway=createDashboardGateway({enabled:true,store:h.store,assets:'dist/dashboard-ui',localBrowserViewer:viewer,now:()=>now});
   await new Promise(resolve=>gateway.server.listen(0,'127.0.0.1',resolve));t.after(()=>gateway.close());const root='http://127.0.0.1:'+gateway.server.address().port;
   assert.equal((await fetch(root+'/dashboard')).status,401);assert.equal((await fetch(root+'/dashboard/v1/snapshot')).status,401);
   const headers={'Sec-Fetch-Site':'none','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'};
   const navigate=await new Promise((resolve,reject)=>{const req=request(root+'/dashboard',{headers},res=>{res.resume();res.on('end',()=>resolve({status:res.statusCode,cookie:res.headers['set-cookie']?.[0]}));});req.on('error',reject);req.end();});
   assert.equal(navigate.status,200);const cookie=navigate.cookie;assert(cookie.includes('HttpOnly; SameSite=Strict; Path=/dashboard'));
-  const auth={Cookie:cookie.split(';')[0]};const snapshot=await (await fetch(root+'/dashboard/v1/snapshot',{headers:auth})).json();assert.deepEqual(snapshot.projects.map(p=>p.id),['webskill']);
+  const auth={Cookie:cookie.split(';')[0]};const snapshot=await (await fetch(root+'/dashboard/v1/snapshot',{headers:auth})).json();assert.deepEqual(snapshot.projects.map(p=>p.id),['project-beta']);
   assert.equal((await fetch(root+'/dashboard',{headers:{...headers,Origin:'https://evil.invalid'}})).status,401);
   assert.equal((await fetch(root+'/dashboard',{headers:{...headers,Host:'localhost:'+gateway.server.address().port}})).status,401);
   assert.equal((await fetch(root+'/dashboard',{headers:{...headers,Authorization:'Bearer invalid'}})).status,401);
-  assert.equal((await fetch(root+'/dashboard/onboarding/v1/doctor/webskill',{headers:auth,method:'POST'})).status,405);
+  assert.equal((await fetch(root+'/dashboard/onboarding/v1/doctor/project-beta',{headers:auth,method:'POST'})).status,405);
   now+=3600001;assert.equal((await fetch(root+'/dashboard/v1/snapshot',{headers:auth})).status,401);
   const renewed=await new Promise((resolve,reject)=>{const req=request(root+'/dashboard',{headers},res=>{res.resume();res.on('end',()=>resolve({status:res.statusCode,cookie:res.headers['set-cookie']?.[0]}));});req.on('error',reject);req.end();});
   assert.equal(renewed.status,200);assert.notEqual(renewed.cookie,cookie);
 });
 test('unavailable local installation is a current timestamped blocker, scoped IDs and configuration overrides fail closed',async t=>{
-  const h=await setup(t),binding={id:'local-webskill',project_id:'webskill',repository:'zlpoot/webskill',worktree:h.repo,client_entry:join(h.base,'missing/dist/client/cli.js'),client_entry_sha256:'a'.repeat(64),config_file:h.configPath};
+  const h=await setup(t),binding={id:'local-project-beta',project_id:'project-beta',repository:'example-org/project-beta',worktree:h.repo,client_entry:join(h.base,'missing/dist/client/cli.js'),client_entry_sha256:'a'.repeat(64),config_file:h.configPath};
   const channel=createLocalOnboarding([binding]);assert.equal(channel.list({id:'v',project_ids:['foreign']}).length,0);
   assert.throws(()=>channel.diagnose({id:'v',project_ids:['foreign']},binding.id),/outside/);
-  const diagnosis=await channel.diagnose({id:'v',project_ids:['webskill']},binding.id);assert.equal(diagnosis.status,'blocked');assert.equal(diagnosis.approved_version,null);assert(Number.isFinite(Date.parse(diagnosis.observed_at)));
+  const diagnosis=await channel.diagnose({id:'v',project_ids:['project-beta']},binding.id);assert.equal(diagnosis.status,'blocked');assert.equal(diagnosis.approved_version,null);assert(Number.isFinite(Date.parse(diagnosis.observed_at)));
   assert(!JSON.stringify(diagnosis).includes(h.base));assert(!JSON.stringify(diagnosis).includes(h.config.endpoint));
   assert.throws(()=>createLocalOnboarding([{...binding,command:'arbitrary'}]));assert.throws(()=>createLocalOnboarding([binding,binding]));
-  assert.equal(matchLocalBinding([binding],'zlpoot/webskill',h.repo).id,binding.id);assert.equal(matchLocalBinding([binding],'evil/repo',h.repo),null);
-  assert.throws(()=>diagnosisContract({...diagnosis,authority_verified:true}));
-});
-test('wizard current diagnosis overrides no historical facts, and unknown worktrees never become approved',()=>{
-  const state={snapshot:{projects:[{id:'p',repository:'zlpoot/webskill',profile_ref:'webskill/bootstrap'}],runs:[],cursor:0},phase:'live',lastRefresh:1,events:[]};
-  const diagnosis={id:'binding',project_id:'p',repository:'zlpoot/webskill',source:'installed_client_offline',status:'blocked',client_version:CLIENT_VERSION,approved_version:null,observed_at:new Date().toISOString(),authority_verified:false,
-    checks:[{id:'configuration',status:'passed',code:'external_config_valid',source:'external_config',safe_next_step:'preserve'},{id:'branch',status:'blocked',code:'branch_profile_conflict',source:'checked_in_profile',safe_next_step:'request policy'}]};
-  const model=wizardModel(state,'reader:p',false,diagnosis);assert.equal(model.currentDoctor,'blocked');assert.equal(model.configuration,'passed');assert.equal(model.installedVersion,CLIENT_VERSION);assert.equal(model.approvedVersion,null);
-  assert.equal(wizardModel(state,'reader:p',false,{...diagnosis,repository:'evil/repo'}).currentDoctor,'not_checked');
-  const history=wizardModel(state,'history:future-ui',false,diagnosis);assert.equal(history.currentDoctor,'not_checked');assert.equal(history.checks.length,22);
 });
 test('viewer deployment config separates read database and trusted local bindings, rejecting extra rights and unspecific scope',async t=>{
-  const h=await setup(t),path=join(h.base,'viewer.json'),value={schema_version:'1.0',mode:'local_browser_direct',database:join(h.base,'fixture.sqlite'),port:4311,viewer:{id:'local-viewer',project_ids:['webskill']},local_bindings:[]};
+  const h=await setup(t),path=join(h.base,'viewer.json'),value={schema_version:'1.0',mode:'local_browser_direct',database:join(h.base,'fixture.sqlite'),port:4311,viewer:{id:'local-viewer',project_ids:['project-beta']},local_bindings:[]};
   writeFileSync(path,JSON.stringify(value));assert.equal(readViewerConfig(path).mode,'local_browser_direct');
   const schema=JSON.parse(readFileSync(new URL('../docs/local-viewer.schema.json',import.meta.url))), validate=new Ajv2020({strict:true}).compile(schema);
   assert.equal(validate(value),true);assert.equal(validate({...value,viewer:{...value.viewer,project_ids:[]}}),false);assert.equal(validate({...value,command:'arbitrary'}),false);

@@ -1,3 +1,4 @@
+import { PROFILES, DEFAULT_SELECTION, REPEATABLE_VERSION, BRANCH, REPO, CORE_REPO, ALPHA_REPO, BETA_REPO, catalog, refreshPolicy } from './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { generateKeyPairSync, verify } from 'node:crypto';
@@ -6,8 +7,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { connectBuilder, createJwt, BRANCH, REPO, publicationDiagnostic } from '../dist/builder.js';
-import { PROFILES, DEFAULT_SELECTION, taskBinding, REPEATABLE_VERSION, selectWorkflow, allowedInstallation, HUB_REPO, FUTURE_REPO, WEBSKILL_REPO } from '../dist/profiles.js';
+import { connectBuilder, createJwt, publicationDiagnostic } from '../dist/builder.js';
+import { taskBinding, selectWorkflow, allowedInstallation } from '../dist/profiles.js';
 
 // Ephemeral key generated in memory; no real credential and no saved key fixture.
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -31,7 +32,7 @@ function fake(overrides = {}) {
   const requests = [], git = [];
   const targetRepo = overrides.repository ?? REPO;
   const targetBranch = overrides.branch ?? BRANCH;
-  const bootstrapDocument = targetBranch === 'codex/awh-v01-acceptance' ? 'docs/management/awh-v01-acceptance.md' : 'docs/management/agent-workflow-hub.md';
+  const bootstrapDocument = targetBranch === 'codex/fixed-document' ? 'docs/management/fixed-document.md' : 'docs/management/agent-workflow-hub.md';
   const installed = overrides.installed ?? [REPO];
   let clock = now, ready = false;
   const deps = {
@@ -52,7 +53,7 @@ function fake(overrides = {}) {
       assert(options.signal instanceof AbortSignal);
       let data;
       if (url.endsWith('/app')) data = { id: 123, slug: 'test-builder' };
-      else if (url.endsWith('/installation')) data = { id: 456, app_id: 123, account: { login: 'zlpoot' }, repository_selection: 'selected', suspended_at: null, permissions };
+      else if (url.endsWith('/installation')) data = { id: 456, app_id: 123, account: { login: 'example-org' }, repository_selection: 'selected', suspended_at: null, permissions };
       else if (url.endsWith('/access_tokens')) {
         const inspect = !Object.hasOwn(JSON.parse(options.body), 'repositories');
         data = { token: inspect ? 'fake-inspection-secret' : 'fake-installation-secret',
@@ -88,70 +89,19 @@ function fake(overrides = {}) {
   return { deps, requests, git, advance: ms => { clock += ms; } };
 }
 
-test('C1-I publication stays fixed to Hub #32/main/current branch with single-repository App credentials', async () => {
-  const selection = { profile: 'hub', workflow: 'c1i' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c1i', branch: 'codex/c1i-doctor-prototype', work_item: { repo: HUB_REPO, issue: 32 },
-    verification_commands: ['pnpm build', 'node --test tests/doctor.test.mjs', 'node --test tests/client.test.mjs'], bootstrap_paths: null });
-  assert.deepEqual(DEFAULT_SELECTION, { profile: 'hub', workflow: 'c05' });
-  assert.equal(selectWorkflow({ profile: 'hub', workflow: 'c1h' }).workflow.work_item.issue, 31);
-  assert.equal(selectWorkflow({ profile: 'hub', workflow: 'c1h-b0' }).workflow.work_item.issue, 31);
-  for (const extra of [{ repository: WEBSKILL_REPO }, { branch: 'main' }, { issue: 31 }, { base: 'untrusted' }, { command: 'pnpm check' }])
-    assert.throws(() => selectWorkflow({ ...selection, ...extra }));
-  const f = fake({ branch: workflow.branch, installed: [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/agent-desktop'] });
-  const b = await connectBuilder(f.deps, selection); await b.push();
-  const p = await b.createPR('Client Doctor prototype', 'Refs #32; awaiting independent exact-head Review.');
-  assert.equal(p.draft, true); assert.equal(p.head, head);
-  const tokens = f.requests.filter(r => r.url.endsWith('/access_tokens')).map(r => JSON.parse(r.body));
-  assert.deepEqual(tokens, [{ permissions: inspectionPermissions }, { repositories: ['agent-workflow-hub'],
-    permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } }]);
-  const create = f.requests.find(r => r.url.endsWith('/pulls') && r.method === 'POST');
-  assert.equal(JSON.parse(create.body).base, 'main'); assert.equal(JSON.parse(create.body).head, workflow.branch);
-  assert.equal(JSON.parse(create.body).draft, true);
-  assert(!f.requests.some(r => r.url.endsWith('/graphql') || /\/reviews(?:\?|$)|\/merge$/.test(r.url)));
-  const foreignBranch = fake({ branch: 'codex/c1h-b0-security' });
-  await assert.rejects((await connectBuilder(foreignBranch.deps, selection)).push());
-  assert(!foreignBranch.git.some(r => r[1].includes('push')));
-});
-
-test('#58 publication is fixed Hub/main/branch/Issue, scoped App credentials and Draft only at creation', async () => {
-  const selection = { profile: 'hub', workflow: 'issue58' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'issue58', branch: 'codex/issue58-windows-product', work_item: { repo: HUB_REPO, issue: 58 },
-    verification_commands: [
-      'pnpm --config.verifyDepsBeforeRun=false run build',
-      'pnpm --config.verifyDepsBeforeRun=false run typecheck',
-      'node --test tests/windows-product.test.mjs tests/dashboard-gateway.test.mjs tests/dashboard-wizard.test.mjs tests/dashboard-ui.test.mjs tests/doctor.test.mjs tests/client.test.mjs',
-      'node --test tests/builder.test.mjs tests/validator.test.mjs tests/cli.test.mjs',
-      'node scripts/windows-product-smoke.mjs', 'node scripts/dashboard-smoke.mjs',
-    ], bootstrap_paths: null });
-  assert.deepEqual(DEFAULT_SELECTION, { profile: 'hub', workflow: 'c05' });
-  assert.equal(selectWorkflow({ profile: 'hub', workflow: 'c07' }).workflow.work_item.issue, 8);
-  for (const key of ['repo','repository','base','branch','work_item','verification_commands','bootstrap_paths','api','url','git','gh'])
-    assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
-  assert.throws(() => { workflow.verification_commands.push('arbitrary'); });
-  assert.throws(() => selectWorkflow({ profile: 'future-ui', workflow: 'issue58' }));
-  assert.throws(() => selectWorkflow({ profile: 'webskill', workflow: 'issue58' }));
-  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
-  const f = fake({ branch: workflow.branch, installed: [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/agent-desktop'] });
-  const builder = await connectBuilder(f.deps, selection); await builder.push();
-  const candidate = await builder.createPR('Windows local product', 'Refs #58; Draft, independent Review pending.');
-  assert.equal(candidate.draft, true); assert.equal(candidate.head, head);
-  assert.deepEqual(f.requests.filter(r => r.url.endsWith('/access_tokens')).map(r => JSON.parse(r.body)), [
-    { permissions: inspectionPermissions }, { repositories: ['agent-workflow-hub'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } },
-  ]);
-  const create = JSON.parse(f.requests.find(r => r.url.endsWith('/pulls') && r.method === 'POST').body);
-  assert.equal(create.head, workflow.branch); assert.equal(create.base, 'main'); assert.equal(create.draft, true);
-  const handoff = structuredClone(record); handoff.work_item.issue = 58;
-  handoff.verification.checks = [...workflow.verification_commands].reverse().map(command => ({ command, exit_code: 0 }));
-  await assert.rejects(builder.ready(5, head, handoff, 10), /verification commands/);
-  assert(!f.requests.some(r => r.url.endsWith('/graphql') || /\/reviews(?:\?|$)|\/merge$/.test(r.url)));
-  for (const key of ['approve','review','merge','request','fetch','token']) assert.equal(builder[key], undefined);
-  const foreign = fake({ branch: 'codex/c07-webskill-profile' });
-  await assert.rejects((await connectBuilder(foreign.deps, selection)).push());
-  assert(!foreign.git.some(r => r[1].includes('push')));
+test('approved dotted repository names bind exact evidence URLs, not regex lookalikes',async()=>{
+  const saved=structuredClone(catalog),target='example-org/core.repo';
+  try {
+    catalog.profiles.find(p=>p.id===DEFAULT_SELECTION.profile).repository=target;
+    catalog.installation.selected_repository_sets=catalog.installation.selected_repository_sets.map(s=>s.map(r=>r===REPO?target:r));refreshPolicy();
+    const value=structuredClone(record);value.verification.evidence_refs=['https://github.com/example-org/coreXrepo/pull/5#issuecomment-9'];
+    const render=()=>`AWH-HANDOFF v0.1\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\`\n${JSON.stringify(validation)}`;
+    const f=fake({repository:target,installed:[target],handoffBody:render()}),b=await connectBuilder(f.deps);
+    await assert.rejects(b.ready(5,head,value,10),/Evidence must reference/);assert(!f.requests.some(r=>r.url.endsWith('/graphql')));
+    value.verification.evidence_refs=['https://github.com/'+target+'/pull/5#issuecomment-9'];
+    const valid=await connectBuilder(fake({repository:target,installed:[target],handoffBody:render()}).deps);
+    assert.equal((await valid.ready(5,head,value,10)).draft,false);
+  } finally {Object.assign(catalog,saved);refreshPolicy();}
 });
 
 test('Adapter Draft restoration is fixed App-owned exact-head and read back', async () => {
@@ -200,7 +150,7 @@ test('automatic installation resolution, exact request headers/body and narrowed
     assert.match(r.headers.Authorization, /^Bearer eyJ/);
   }
   assert.deepEqual(JSON.parse(f.requests[2].body), { permissions: { metadata: 'read' } });
-  assert.deepEqual(JSON.parse(f.requests[4].body), { repositories: ['agent-workflow-hub'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
+  assert.deepEqual(JSON.parse(f.requests[4].body), { repositories: ['workflow-core'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
   assert.equal(f.requests[3].headers.Authorization, 'Bearer fake-inspection-secret');
   assert(!JSON.stringify(b.preflight()).includes('fake-installation-secret'));
 });
@@ -230,8 +180,8 @@ for (const [name, mutate] of [
 });
 
 test('actual installation repository list is checked before narrowing', async () => {
-  for (const response of [{ total_count: 2, repositories: [{ full_name: REPO }, { full_name: 'zlpoot/other' }] },
-    { total_count: 1, repositories: [{ full_name: 'zlpoot/other' }] }]) {
+  for (const response of [{ total_count: 2, repositories: [{ full_name: REPO }, { full_name: 'example-org/other' }] },
+    { total_count: 1, repositories: [{ full_name: 'example-org/other' }] }]) {
     const f = fake({ response: (url, _, v) => url.includes('/installation/repositories') ? response : v });
     await assert.rejects(connectBuilder(f.deps), /repository set is not allowed/);
     assert.equal(f.requests.length, 4);
@@ -368,7 +318,7 @@ test('Builder exposes only fixed operations, requires App bot for PR/comments, r
   for (const text of [pem, 'fake-installation-secret', 'ghs_fakeToken', createJwt('123', pem, now)])
     await assert.rejects(b.createPR('Title', text), /Secret-like/);
   await assert.rejects(b.readPR(-1), /number/);
-  for (const mutate of [v => ({ ...v, user: { login: 'zlpoot', type: 'User' } }), v => ({ ...v, head: { ...v.head, ref: 'main' } })])
+  for (const mutate of [v => ({ ...v, user: { login: 'example-org', type: 'User' } }), v => ({ ...v, head: { ...v.head, ref: 'main' } })])
     await assert.rejects((await connectBuilder(fake({ response: (url, _, v) => url.endsWith('/pulls/5') ? mutate(v) : v }).deps)).readPR(5), /mismatch/);
   const reflected = await connectBuilder(fake({ response: (url, _, v) => url.endsWith('/issues/comments/9') ? { ...v, body: 'fake-installation-secret' } : v }).deps);
   await assert.rejects(reflected.readComment(5, 9), /Secret-like/);
@@ -386,7 +336,7 @@ test('Ready requires confirmed published Handoff, bot evidence and exact remote 
   for (const mutation of [
     (url, v) => url.endsWith('/pulls/5') ? { ...v, head: { ...v.head, sha: base } } : v,
     (url, v) => url.endsWith('/issues/comments/10') ? { ...v, body: handoffBody.replace('confirmed', 'pending') } : v,
-    (url, v) => url.endsWith('/issues/comments/9') ? { ...v, user: { login: 'zlpoot', type: 'User' } } : v,
+    (url, v) => url.endsWith('/issues/comments/9') ? { ...v, user: { login: 'example-org', type: 'User' } } : v,
   ]) {
     const g = fake({ response: (url, _, v) => mutation(url, v) });
     await assert.rejects((await connectBuilder(g.deps)).ready(5, head, record, 10));
@@ -398,12 +348,12 @@ test('real wrapper CLI rejects forbidden operations before key read/network and 
   const cli = new URL('../dist/builder-cli.js', import.meta.url);
   for (const op of ['approve', 'merge', 'review', 'request', 'administration', 'workflow', 'api', 'gh', 'push --force', 'toString']) {
     const child = spawnSync(process.execPath, [cli.pathname.replace(/^\/(\w:)/, '$1'), op, pem],
-      { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+      { encoding: 'utf8', env: { PATH: process.env.PATH, AWH_BUILDER_POLICY_FILE:process.env.AWH_BUILDER_POLICY_FILE,AWH_BUILDER_POLICY_SHA256:process.env.AWH_BUILDER_POLICY_SHA256 }, timeout: 10000 });
     assert.equal(child.status, 2); assert.equal(child.stdout, '');
     assert.deepEqual(JSON.parse(child.stderr), { error: 'Unsupported Builder operation or arguments' });
   }
   const child = spawnSync(process.execPath, [cli.pathname.replace(/^\/(\w:)/, '$1'), 'preflight'],
-    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    { encoding: 'utf8', env: { PATH: process.env.PATH, AWH_BUILDER_POLICY_FILE:process.env.AWH_BUILDER_POLICY_FILE,AWH_BUILDER_POLICY_SHA256:process.env.AWH_BUILDER_POLICY_SHA256 }, timeout: 10000 });
   assert.equal(child.status, 2); assert.equal(child.stdout, ''); assert(!child.stderr.includes('BEGIN'));
 });
 
@@ -418,13 +368,16 @@ test('successful real CLI never prints PEM, signed JWT, token or API response ex
     const realpath = fs.realpath;
     fs.realpath = async path => String(path).endsWith('generated-memory-key.pem') ? path : realpath(path);
     fs.readFile = async () => Buffer.from(key);
+    import fixtureCp from 'node:child_process';
+    const fixtureSpawn = fixtureCp.spawnSync;
+    fixtureCp.spawnSync = (cmd,args,opts) => args.includes('remote.origin.url') && args.includes('--get') ? {status:0,stdout:'https://github.com/${REPO}.git'} : fixtureSpawn(cmd,args,opts);
     syncBuiltinESMExports();
     process.env.AWH_GITHUB_APP_ID = '123';
     process.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH = join(tmpdir(), 'generated-memory-key.pem');
     const permissions = ${JSON.stringify(permissions)};
     globalThis.fetch = async (url, options) => {
       let v = url.endsWith('/app') ? {id:123,slug:'test-builder'} : url.endsWith('/installation') ?
-        {id:456,app_id:123,account:{login:'zlpoot'},repository_selection:'selected',suspended_at:null,permissions} :
+        {id:456,app_id:123,account:{login:'example-org'},repository_selection:'selected',suspended_at:null,permissions} :
         url.includes('/installation/repositories') ? {total_count:1,repositories:[{full_name:'${REPO}'}]} :
         {token:'fake-installation-secret',expires_at:new Date(Date.now()+3599000).toISOString(),permissions:JSON.parse(options.body).repositories?permissions:{metadata:'read'},repositories:[{full_name:'${REPO}'}]};
       return new Response(JSON.stringify({...v,untrusted_echo:key}));
@@ -433,7 +386,7 @@ test('successful real CLI never prints PEM, signed JWT, token or API response ex
     await import('./dist/builder-cli.js');
   `;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script],
-    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    { encoding: 'utf8', env: { PATH: process.env.PATH, AWH_BUILDER_POLICY_FILE:process.env.AWH_BUILDER_POLICY_FILE,AWH_BUILDER_POLICY_SHA256:process.env.AWH_BUILDER_POLICY_SHA256 }, timeout: 10000 });
   assert.equal(child.status, 0); assert.equal(child.stderr, '');
   assert.equal(child.stdout.trim().split('\n').length, 1);
   assert.equal(JSON.parse(child.stdout).actor, actor);
@@ -449,6 +402,9 @@ test('real CLI from a nested directory resolves the Git root and refuses an in-r
     const actualRealpath = fs.realpath;
     fs.realpath = async path => path === ${JSON.stringify(keyPath)} ? path : actualRealpath(path);
     fs.readFile = async () => { throw new Error('Key read must not occur'); };
+    import fixtureCp from 'node:child_process';
+    const fixtureSpawn = fixtureCp.spawnSync;
+    fixtureCp.spawnSync = (cmd,args,opts) => args.includes('remote.origin.url') && args.includes('--get') ? {status:0,stdout:'https://github.com/${REPO}.git'} : fixtureSpawn(cmd,args,opts);
     syncBuiltinESMExports();
     process.env.AWH_GITHUB_APP_ID = '123';
     process.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH = ${JSON.stringify(keyPath)};
@@ -457,7 +413,7 @@ test('real CLI from a nested directory resolves the Git root and refuses an in-r
     await import(${JSON.stringify(cli)});
   `;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script],
-    { cwd: join(repoRoot, 'src'), encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    { cwd: join(repoRoot, 'src'), encoding: 'utf8', env: { PATH: process.env.PATH, AWH_BUILDER_POLICY_FILE:process.env.AWH_BUILDER_POLICY_FILE,AWH_BUILDER_POLICY_SHA256:process.env.AWH_BUILDER_POLICY_SHA256 }, timeout: 10000 });
   assert.equal(child.status, 2); assert.equal(child.stdout, '');
   assert.deepEqual(JSON.parse(child.stderr), { error: 'Private key must be outside the repository' });
 });
@@ -479,25 +435,25 @@ test('uncertain Ready mutation restores and reads back Draft', async () => {
 });
 
 test('fixed immutable Profiles reject arbitrary repository/base/workflow overrides', () => {
-  assert.equal(selectWorkflow().profile.repository, HUB_REPO);
-  const future = selectWorkflow({ profile: 'future-ui', workflow: 'bootstrap' });
-  assert.equal(future.profile.repository, FUTURE_REPO); assert.equal(future.profile.base, 'main');
+  assert.equal(selectWorkflow().profile.repository, CORE_REPO);
+  const future = selectWorkflow({ profile: 'project-alpha', workflow: 'bootstrap' });
+  assert.equal(future.profile.repository, ALPHA_REPO); assert.equal(future.profile.base, 'main');
   assert.deepEqual(future.workflow.bootstrap_paths, ['docs/management/agent-workflow-hub.md']);
   assert.deepEqual(future.workflow.verification_commands, ['pnpm lint', 'pnpm typecheck', 'pnpm test']);
-  for (const selection of [{ profile: 'evil/repo', workflow: 'bootstrap' }, { profile: 'hub', workflow: 'merge' },
-    { profile: 'future-ui', workflow: 'c05' }, { profile: 'hub', workflow: 'c06', repo: 'evil/repo' },
-    { profile: 'hub', workflow: 'c06', base: 'evil' }]) assert.throws(() => selectWorkflow(selection));
+  for (const selection of [{ profile: 'evil/repo', workflow: 'bootstrap' }, { profile: 'core', workflow: 'merge' },
+    { profile: 'project-alpha', workflow: 'flow-01' }, { profile: 'core', workflow: 'flow-02', repo: 'evil/repo' },
+    { profile: 'core', workflow: 'flow-02', base: 'evil' }]) assert.throws(() => selectWorkflow(selection));
   assert.throws(() => { PROFILES[0].repository = 'evil/repo'; });
   assert.throws(() => { future.workflow.bootstrap_paths.push('packages/evil.ts'); });
 });
 
 for (const [profile, workflow, repository, branch] of [
-  ['hub', 'c06', HUB_REPO, 'codex/c06-project-profiles'],
-  ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
+  ['core', 'flow-02', CORE_REPO, 'codex/flow-02-project-profiles'],
+  ['project-alpha', 'bootstrap', ALPHA_REPO, 'codex/awh-flow-02-bootstrap'],
 ]) test(`${profile} in dual selected scope mints only a single-repository write token and binds API/Git`, async () => {
-  const f = fake({ repository, branch, installed: [FUTURE_REPO, HUB_REPO] });
+  const f = fake({ repository, branch, installed: [ALPHA_REPO, CORE_REPO] });
   const b = await connectBuilder(f.deps, { profile, workflow });
-  assert.deepEqual(b.preflight().repositories, [HUB_REPO, FUTURE_REPO].sort());
+  assert.deepEqual(b.preflight().repositories, [CORE_REPO, ALPHA_REPO].sort());
   const tokens = f.requests.filter(r => r.url.endsWith('/access_tokens'));
   assert.equal(tokens.length, 2);
   assert.deepEqual(JSON.parse(tokens[0].body), { permissions: { metadata: 'read' } });
@@ -512,30 +468,30 @@ for (const [profile, workflow, repository, branch] of [
   assert.deepEqual(JSON.parse(create.body), { title: 'Title', body: 'Implements Hub #6', head: branch, base: 'main', draft: true });
 });
 
-test('Hub c06 remains usable with only the original single-repository installation', async () => {
-  const f = fake({ branch: 'codex/c06-project-profiles' });
-  const b = await connectBuilder(f.deps, { profile: 'hub', workflow: 'c06' });
-  assert.deepEqual(b.preflight().repositories, [HUB_REPO]);
+test('Hub flow-02 remains usable with only the original single-repository installation', async () => {
+  const f = fake({ branch: 'codex/flow-02-project-profiles' });
+  const b = await connectBuilder(f.deps, { profile: 'core', workflow: 'flow-02' });
+  assert.deepEqual(b.preflight().repositories, [CORE_REPO]);
   assert.equal((await b.createPR('Title', 'Phase A')).actor, actor);
 });
 
-test('missing future-ui installation stops before its write token (Human Gate)', async () => {
-  const f = fake({ repository: FUTURE_REPO, branch: 'codex/awh-c06-bootstrap' });
-  await assert.rejects(connectBuilder(f.deps, { profile: 'future-ui', workflow: 'bootstrap' }), /Human Gate/);
+test('missing project-alpha installation stops before its write token (Human Gate)', async () => {
+  const f = fake({ repository: ALPHA_REPO, branch: 'codex/awh-flow-02-bootstrap' });
+  await assert.rejects(connectBuilder(f.deps, { profile: 'project-alpha', workflow: 'bootstrap' }), /Human Gate/);
   assert.equal(f.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
 });
 
 test('wrong, extra, duplicate or future-only selected sets never produce a write token', async () => {
-  for (const installed of [[HUB_REPO, FUTURE_REPO, 'zlpoot/other'], [FUTURE_REPO], [HUB_REPO, HUB_REPO], []]) {
+  for (const installed of [[CORE_REPO, ALPHA_REPO, 'example-org/other'], [ALPHA_REPO], [CORE_REPO, CORE_REPO], []]) {
     const f = fake({ installed });
-    await assert.rejects(connectBuilder(f.deps, { profile: 'hub', workflow: 'c06' }), /set is not allowed/);
+    await assert.rejects(connectBuilder(f.deps, { profile: 'core', workflow: 'flow-02' }), /set is not allowed/);
     const tokens = f.requests.filter(r => r.url.endsWith('/access_tokens'));
     assert.equal(tokens.length, 1); assert.deepEqual(JSON.parse(tokens[0].body).permissions, { metadata: 'read' });
   }
 });
 
 test('effective write-token response must also authorize exactly the selected repository', async () => {
-  for (const repos of [[{ full_name: FUTURE_REPO }], [{ full_name: HUB_REPO }, { full_name: FUTURE_REPO }], []]) {
+  for (const repos of [[{ full_name: ALPHA_REPO }], [{ full_name: CORE_REPO }, { full_name: ALPHA_REPO }], []]) {
     const f = fake({ response: (url, options, v) => url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
       ? { ...v, repositories: repos } : v });
     await assert.rejects(connectBuilder(f.deps), /Write token must authorize only/);
@@ -544,36 +500,36 @@ test('effective write-token response must also authorize exactly the selected re
 
 test('selected Profile cannot authenticate from a different repository worktree', async () => {
   const f = fake();
-  await assert.rejects(connectBuilder(f.deps, { profile: 'future-ui', workflow: 'bootstrap' }), /worktree root/);
+  await assert.rejects(connectBuilder(f.deps, { profile: 'project-alpha', workflow: 'bootstrap' }), /worktree root/);
   assert.equal(f.requests.length, 0);
 });
 
-test('future-ui bootstrap blocks product/dependency paths before authenticated push or PR creation', async () => {
+test('project-alpha bootstrap blocks product/dependency paths before authenticated push or PR creation', async () => {
   for (const path of ['packages/ui/index.ts', 'pnpm-lock.yaml', 'docs/management/grant.md']) {
-    const f = fake({ repository: FUTURE_REPO, branch: 'codex/awh-c06-bootstrap', installed: [HUB_REPO, FUTURE_REPO] });
+    const f = fake({ repository: ALPHA_REPO, branch: 'codex/awh-flow-02-bootstrap', installed: [CORE_REPO, ALPHA_REPO] });
     const realSpawn = f.deps.spawn;
     f.deps.spawn = (...args) => args[1][0] === 'diff' ? { status: 0, stdout: path + '\0' } : realSpawn(...args);
-    const b = await connectBuilder(f.deps, { profile: 'future-ui', workflow: 'bootstrap' });
+    const b = await connectBuilder(f.deps, { profile: 'project-alpha', workflow: 'bootstrap' });
     await assert.rejects(b.push(), /push failed/);
     assert(!f.git.some(([, args]) => args.includes('push')));
-    const g = fake({ repository: FUTURE_REPO, branch: 'codex/awh-c06-bootstrap', installed: [HUB_REPO, FUTURE_REPO],
+    const g = fake({ repository: ALPHA_REPO, branch: 'codex/awh-flow-02-bootstrap', installed: [CORE_REPO, ALPHA_REPO],
       response: (url, _, v) => url.includes('/compare/') ? { status: 'ahead', files: [{ filename: path, status: 'modified' }] } : v });
-    await assert.rejects((await connectBuilder(g.deps, { profile: 'future-ui', workflow: 'bootstrap' })).createPR('Title', 'Body'), /docs-only/);
+    await assert.rejects((await connectBuilder(g.deps, { profile: 'project-alpha', workflow: 'bootstrap' })).createPR('Title', 'Body'), /docs-only/);
     assert(!g.requests.some(r => r.method === 'POST' && r.url.endsWith('/pulls')));
   }
 });
 
-test('future-ui Ready binds the Hub work item, full verification command set and future-ui evidence', async () => {
+test('project-alpha Ready binds the Hub work item, full verification command set and project-alpha evidence', async () => {
   const handoff = structuredClone(record);
   handoff.work_item.issue = 6;
   handoff.verification.checks = ['pnpm lint', 'pnpm typecheck', 'pnpm test'].map(command => ({ command, exit_code: 0 }));
-  handoff.verification.evidence_refs = [`https://github.com/${FUTURE_REPO}/pull/5#issuecomment-9`];
+  handoff.verification.evidence_refs = [`https://github.com/${ALPHA_REPO}/pull/5#issuecomment-9`];
   const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
-  const f = fake({ repository: FUTURE_REPO, branch: 'codex/awh-c06-bootstrap', installed: [HUB_REPO, FUTURE_REPO], handoffBody: body });
-  const b = await connectBuilder(f.deps, { profile: 'future-ui', workflow: 'bootstrap' });
+  const f = fake({ repository: ALPHA_REPO, branch: 'codex/awh-flow-02-bootstrap', installed: [CORE_REPO, ALPHA_REPO], handoffBody: body });
+  const b = await connectBuilder(f.deps, { profile: 'project-alpha', workflow: 'bootstrap' });
   const missing = structuredClone(handoff); missing.verification.checks = [{ command: 'pnpm check', exit_code: 0 }];
   await assert.rejects(b.ready(5, head, missing, 10), /verification commands/);
-  const wrongRepo = structuredClone(handoff); wrongRepo.work_item.repo = FUTURE_REPO;
+  const wrongRepo = structuredClone(handoff); wrongRepo.work_item.repo = ALPHA_REPO;
   await assert.rejects(b.ready(5, head, wrongRepo, 10), /work item/);
   assert.equal((await b.ready(5, head, handoff, 10)).draft, false);
 });
@@ -582,55 +538,20 @@ test('Profile CLI rejects arbitrary repo and forbidden actions before credential
   const cli = fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url));
   for (const args of [
     ['--profile', 'evil/repo', '--workflow', 'bootstrap', 'preflight'],
-    ['--profile', 'hub', '--workflow', 'merge', 'preflight'],
-    ['--profile', 'hub', '--workflow', 'c06', 'approve'],
-    ['--profile', 'hub', '--workflow', 'c06', 'push', '--repo', 'evil/repo'],
+    ['--profile', 'core', '--workflow', 'merge', 'preflight'],
+    ['--profile', 'core', '--workflow', 'flow-02', 'approve'],
+    ['--profile', 'core', '--workflow', 'flow-02', 'push', '--repo', 'evil/repo'],
   ]) {
-    const child = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    const child = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: { PATH: process.env.PATH, AWH_BUILDER_POLICY_FILE:process.env.AWH_BUILDER_POLICY_FILE,AWH_BUILDER_POLICY_SHA256:process.env.AWH_BUILDER_POLICY_SHA256 }, timeout: 10000 });
     assert.equal(child.status, 2); assert.equal(child.stdout, '');
     assert(!child.stderr.includes('environment')); assert(!child.stderr.includes('evil/repo'));
   }
 });
 
-test('webskill/bootstrap fixes every boundary without an Agent or local clone path', () => {
-  const webskill = selectWorkflow({ profile: 'webskill', workflow: 'bootstrap' });
-  assert.deepEqual(webskill, { profile: { id: 'webskill', repository: WEBSKILL_REPO, base: 'main', workflows: [webskill.workflow] },
-    workflow: { id: 'bootstrap', branch: 'codex/awh-c07-webskill-bootstrap', work_item: { repo: HUB_REPO, issue: 8 },
-      verification_commands: ['pnpm check:foundations', 'pnpm lint', 'pnpm typecheck'],
-      bootstrap_paths: ['docs/management/agent-workflow-hub.md'] } });
-  const hub = selectWorkflow({ profile: 'hub', workflow: 'c07' });
-  assert.equal(hub.workflow.branch, 'codex/c07-webskill-profile');
-  assert.deepEqual(hub.workflow.work_item, { repo: HUB_REPO, issue: 8 });
-  assert.deepEqual(hub.workflow.verification_commands, ['pnpm check']);
-  for (const key of ['repository', 'base', 'branch', 'work_item', 'verification_commands', 'bootstrap_paths', 'url', 'api', 'git'])
-    assert.throws(() => selectWorkflow({ profile: 'webskill', workflow: 'bootstrap', [key]: 'override' }));
-  assert.throws(() => { webskill.profile.base = 'other'; });
-  assert.throws(() => { webskill.workflow.branch = 'other'; });
-  assert.throws(() => { webskill.workflow.work_item.issue = 147; });
-  assert.throws(() => { webskill.workflow.verification_commands.reverse(); });
-  assert.throws(() => { webskill.workflow.bootstrap_paths.push('AGENTS.md'); });
-});
-
-const dormantRepo = 'zlpoot/agent-desktop';
-const selectedSets = [[HUB_REPO], [HUB_REPO, FUTURE_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO],
-  [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, dormantRepo]];
-const workflows = [
-  ['hub', 'c05', HUB_REPO, BRANCH],
-  ['hub', 'c06', HUB_REPO, 'codex/c06-project-profiles'],
-  ['hub', 'c07', HUB_REPO, 'codex/c07-webskill-profile'],
-  ['hub', 'c07-r1', HUB_REPO, 'codex/c07-r1-git-transport'],
-  ['hub', 'c07-r2', HUB_REPO, 'codex/c07-r2-receive-pack'],
-  ['hub', 'c07-r3', HUB_REPO, 'codex/c07-r3-scoped-helper'],
-  ['hub', 'c1a', HUB_REPO, 'codex/c1a-protocol'],
-  ['hub', 'c1b', HUB_REPO, 'codex/c1b-control-plane'],
-  ['hub', 'c1c', HUB_REPO, 'codex/c1c-client'],
-  ['hub', 'c1e', HUB_REPO, 'codex/c1e-dashboard-api-contract'],
-  ['hub', 'c1g', HUB_REPO, 'codex/c1g-dashboard-readonly'],
-  ['hub', 'c1h', HUB_REPO, 'codex/c12-trusted-onboarding'],
-  ['hub', 'c1d', HUB_REPO, 'codex/c1d-builder-adapter'],
-  ['future-ui', 'bootstrap', FUTURE_REPO, 'codex/awh-c06-bootstrap'],
-  ['webskill', 'bootstrap', WEBSKILL_REPO, 'codex/awh-c07-webskill-bootstrap'],
-];
+const dormantRepo = 'example-org/project-gamma';
+const selectedSets = [[CORE_REPO], [CORE_REPO, ALPHA_REPO], [CORE_REPO, ALPHA_REPO, BETA_REPO],
+  [CORE_REPO, ALPHA_REPO, BETA_REPO, dormantRepo]];
+const workflows = PROFILES.flatMap(p => p.workflows.filter(w=>w.branch_mode==='fixed').map(w=>[p.id,w.id,p.repository,w.branch]));
 for (const installed of selectedSets) for (const [profile, workflow, repository, branch] of workflows) {
   test(`selected-set ${installed.length} repositories / ${profile}/${workflow} narrows writes or stops at Human Gate`, async () => {
     const f = fake({ repository, branch, installed: [...installed].reverse() });
@@ -662,31 +583,31 @@ for (const installed of selectedSets) for (const [profile, workflow, repository,
 }
 
 test('selected-set permits exactly four complete sets and rejects partial, unexpected and malformed lists', async () => {
-  for (const installed of [[], [FUTURE_REPO], [WEBSKILL_REPO], [FUTURE_REPO, WEBSKILL_REPO],
-    [HUB_REPO, WEBSKILL_REPO], [HUB_REPO, HUB_REPO], [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'zlpoot/other'],
-    [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, WEBSKILL_REPO], [HUB_REPO, FUTURE_REPO, 'other/webskill'],
-    [HUB_REPO, dormantRepo], [HUB_REPO, FUTURE_REPO, dormantRepo],
-    [...selectedSets[3], 'zlpoot/unknown-fifth'], [...selectedSets[3], dormantRepo],
-    [HUB_REPO, FUTURE_REPO, WEBSKILL_REPO, 'other/agent-desktop']]) {
+  for (const installed of [[], [ALPHA_REPO], [BETA_REPO], [ALPHA_REPO, BETA_REPO],
+    [CORE_REPO, BETA_REPO], [CORE_REPO, CORE_REPO], [CORE_REPO, ALPHA_REPO, BETA_REPO, 'example-org/other'],
+    [CORE_REPO, ALPHA_REPO, BETA_REPO, BETA_REPO], [CORE_REPO, ALPHA_REPO, 'other/project-beta'],
+    [CORE_REPO, dormantRepo], [CORE_REPO, ALPHA_REPO, dormantRepo],
+    [...selectedSets[3], 'example-org/unknown-fifth'], [...selectedSets[3], dormantRepo],
+    [CORE_REPO, ALPHA_REPO, BETA_REPO, 'other/project-gamma']]) {
     const f = fake({ installed });
-    await assert.rejects(connectBuilder(f.deps, { profile: 'hub', workflow: 'c07' }), /set is not allowed/);
+    await assert.rejects(connectBuilder(f.deps, { profile: 'core', workflow: 'flow-02' }), /set is not allowed/);
     assert.equal(f.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
   }
-  for (const [repositories, total] of [[null, 0], [[{}], 1], [[{ full_name: HUB_REPO }], 2],
-    [[{ full_name: HUB_REPO }], '1']]) assert.equal(allowedInstallation(repositories, total), false);
+  for (const [repositories, total] of [[null, 0], [[{}], 1], [[{ full_name: CORE_REPO }], 2],
+    [[{ full_name: CORE_REPO }], '1']]) assert.equal(allowedInstallation(repositories, total), false);
   const incomplete = fake({ installed: selectedSets[2], response: (url, _, v) => url.includes('/installation/repositories')
     ? { ...v, total_count: 4 } : v });
   await assert.rejects(connectBuilder(incomplete.deps), /set is not allowed/);
   assert.equal(incomplete.requests.filter(r => r.url.endsWith('/access_tokens')).length, 1);
 });
 
-test('dormant agent-desktop has no Profile or write path in the four-repository installation', async () => {
-  assert.deepEqual(PROFILES.map(p => p.id), ['hub', 'future-ui', 'webskill']);
+test('dormant project-gamma has no Profile or write path in the four-repository installation', async () => {
+  assert.deepEqual(PROFILES.map(p => p.id), ['core', 'project-alpha', 'project-beta']);
   assert(PROFILES.every(p => p.repository !== dormantRepo));
-  for (const profile of ['agent-desktop', dormantRepo]) for (const workflow of ['bootstrap', 'c07']) {
+  for (const profile of ['project-gamma', dormantRepo]) for (const workflow of ['bootstrap', 'flow-03']) {
     const f = fake({ installed: selectedSets[3] });
-    assert.throws(() => selectWorkflow({ profile, workflow }), /Unsupported profile/);
-    await assert.rejects(connectBuilder(f.deps, { profile, workflow }), /Unsupported profile/);
+    assert.throws(() => selectWorkflow({ profile, workflow }), /approved Builder policy/);
+    await assert.rejects(connectBuilder(f.deps, { profile, workflow }), /approved Builder policy/);
     assert.equal(f.requests.length, 0); assert.equal(f.git.length, 0);
   }
   for (const [profile, workflow, repository, branch] of workflows) {
@@ -707,12 +628,12 @@ test('dormant agent-desktop has no Profile or write path in the four-repository 
   }
 });
 
-test('triple installation rejects metadata inspection escalation and multi-repository WebSkill write response', async () => {
-  for (const repositoryResponse of [[HUB_REPO], [WEBSKILL_REPO, FUTURE_REPO], selectedSets[2], []]) {
-    const f = fake({ repository: WEBSKILL_REPO, installed: selectedSets[2], response: (url, options, v) =>
+test('triple installation rejects metadata inspection escalation and multi-repository Project Beta write response', async () => {
+  for (const repositoryResponse of [[CORE_REPO], [BETA_REPO, ALPHA_REPO], selectedSets[2], []]) {
+    const f = fake({ repository: BETA_REPO, installed: selectedSets[2], response: (url, options, v) =>
       url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
         ? { ...v, repositories: repositoryResponse.map(full_name => ({ full_name })) } : v });
-    await assert.rejects(connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' }), /Write token must authorize only/);
+    await assert.rejects(connectBuilder(f.deps, { profile: 'project-beta', workflow: 'bootstrap' }), /Write token must authorize only/);
   }
   const escalated = fake({ installed: selectedSets[2], response: (url, options, v) =>
     url.endsWith('/access_tokens') && !JSON.parse(options.body).repositories
@@ -722,56 +643,56 @@ test('triple installation rejects metadata inspection escalation and multi-repos
   assert(!escalated.requests.some(r => r.url.includes('/installation/repositories')));
 });
 
-test('WebSkill bootstrap denies product and management-boundary changes locally and remotely', async () => {
+test('Project Beta bootstrap denies product and management-boundary changes locally and remotely', async () => {
   for (const path of ['AGENTS.md', 'package.json', 'pnpm-lock.yaml', 'packages/runtime/index.ts', 'docs/management/grant.md']) {
-    const f = fake({ repository: WEBSKILL_REPO, branch: 'codex/awh-c07-webskill-bootstrap', installed: selectedSets[2] });
+    const f = fake({ repository: BETA_REPO, branch: 'codex/awh-flow-03-project-beta-bootstrap', installed: selectedSets[2] });
     const spawn = f.deps.spawn;
     f.deps.spawn = (...args) => args[1][0] === 'diff' ? { status: 0, stdout: path + '\0' } : spawn(...args);
-    await assert.rejects((await connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' })).push(), /push failed/);
+    await assert.rejects((await connectBuilder(f.deps, { profile: 'project-beta', workflow: 'bootstrap' })).push(), /push failed/);
     assert(!f.git.some(([, args]) => args.includes('push')));
   }
   for (const files of [[], [{ filename: 'packages/runtime/index.ts', status: 'added' }],
     [{ filename: 'docs/management/agent-workflow-hub.md', status: 'removed' }],
     [{ filename: 'docs/management/agent-workflow-hub.md', status: 'renamed' }],
     [{ filename: 'docs/management/agent-workflow-hub.md', status: 'added' }, { filename: 'AGENTS.md', status: 'modified' }]]) {
-    const f = fake({ repository: WEBSKILL_REPO, branch: 'codex/awh-c07-webskill-bootstrap', installed: selectedSets[2],
+    const f = fake({ repository: BETA_REPO, branch: 'codex/awh-flow-03-project-beta-bootstrap', installed: selectedSets[2],
       response: (url, _, v) => url.includes('/compare/') ? { status: 'ahead', files } : v });
-    await assert.rejects((await connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' })).createPR('Title', 'Body'), /docs-only/);
+    await assert.rejects((await connectBuilder(f.deps, { profile: 'project-beta', workflow: 'bootstrap' })).createPR('Title', 'Body'), /docs-only/);
     assert(!f.requests.some(r => r.method === 'POST' && r.url.endsWith('/pulls')));
   }
 });
 
-test('WebSkill Ready binds Hub #8, ordered verification, bot evidence and exact head', async () => {
+test('Project Beta Ready binds approved tracking Issue, ordered verification, bot evidence and exact head', async () => {
   const handoff = structuredClone(record);
   handoff.work_item.issue = 8;
   const commands = ['pnpm check:foundations', 'pnpm lint', 'pnpm typecheck'];
   handoff.verification.checks = commands.map(command => ({ command, exit_code: 0 }));
-  handoff.verification.evidence_refs = [`https://github.com/${WEBSKILL_REPO}/pull/5#issuecomment-9`];
+  handoff.verification.evidence_refs = [`https://github.com/${BETA_REPO}/pull/5#issuecomment-9`];
   const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
-  const f = fake({ repository: WEBSKILL_REPO, branch: 'codex/awh-c07-webskill-bootstrap', installed: selectedSets[2], handoffBody: body });
-  const b = await connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' });
+  const f = fake({ repository: BETA_REPO, branch: 'codex/awh-flow-03-project-beta-bootstrap', installed: selectedSets[2], handoffBody: body });
+  const b = await connectBuilder(f.deps, { profile: 'project-beta', workflow: 'bootstrap' });
   for (const checks of [commands.slice(1), [...commands].reverse(), ['pnpm check'], [...commands, 'pnpm test']]) {
     const invalid = structuredClone(handoff);
     invalid.verification.checks = checks.map(command => ({ command, exit_code: 0 }));
     await assert.rejects(b.ready(5, head, invalid, 10), /verification commands/);
   }
-  for (const work_item of [{ repo: HUB_REPO, issue: 6 }, { repo: WEBSKILL_REPO, issue: 8 }, { repo: WEBSKILL_REPO, issue: 147 }])
+  for (const work_item of [{ repo: CORE_REPO, issue: 6 }, { repo: BETA_REPO, issue: 8 }, { repo: BETA_REPO, issue: 147 }])
     await assert.rejects(b.ready(5, head, { ...handoff, work_item }, 10), /work item/);
   await assert.rejects(b.ready(5, base, handoff, 10), /Confirmed Handoff/);
   assert(!f.requests.some(r => r.url.endsWith('/graphql')));
   assert.equal((await b.ready(5, head, handoff, 10)).draft, false);
 });
 
-test('WebSkill CLI cannot pass through arbitrary repo/base/branch/API/URL/Git before credentials', () => {
+test('Project Beta CLI cannot pass through arbitrary repo/base/branch/API/URL/Git before credentials', () => {
   const cli = fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url));
   for (const extra of ['--repo', '--base', '--branch', '--api', '--url', '--git']) {
-    const child = spawnSync(process.execPath, [cli, '--profile', 'webskill', '--workflow', 'bootstrap', 'push', extra, 'override'],
-      { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    const child = spawnSync(process.execPath, [cli, '--profile', 'project-beta', '--workflow', 'bootstrap', 'push', extra, 'override'],
+      { encoding: 'utf8', env: { PATH: process.env.PATH, AWH_BUILDER_POLICY_FILE:process.env.AWH_BUILDER_POLICY_FILE,AWH_BUILDER_POLICY_SHA256:process.env.AWH_BUILDER_POLICY_SHA256 }, timeout: 10000 });
     assert.equal(child.status, 2); assert.equal(child.stdout, '');
     assert.deepEqual(JSON.parse(child.stderr), { error: 'Unsupported Builder operation or arguments' });
   }
   const f = fake();
-  return assert.rejects(connectBuilder(f.deps, { profile: 'webskill', workflow: 'bootstrap' }), /worktree root/)
+  return assert.rejects(connectBuilder(f.deps, { profile: 'project-beta', workflow: 'bootstrap' }), /worktree root/)
     .then(() => assert.equal(f.requests.length, 0));
 });
 
@@ -952,7 +873,7 @@ for (const [name, keys] of [
 for (const key of [
   'credential.helper', 'credential.username', 'credential.useHttpPath',
   'credential.https://github.com.username', 'credential.https://github.com.useHttpPath',
-  'credential.https://github.com/zlpoot/webskill.git.helper', 'credential.https://github.com/any-path.helper',
+  'credential.https://github.com/example-org/beta.git.helper', 'credential.https://github.com/any-path.helper',
   'credential.https://github.com/.helper', 'credential.https://gitlab.com.helper',
   'credential.http://github.com.helper', 'credential.https://github.com:443.helper',
   'credential.https://github.com.evil.helper', 'credential.https://github.com.helper.extra',
@@ -996,141 +917,23 @@ test('real Git precedence: generic reset leaves duplicate scoped helpers visible
     }
     genericEnv.GIT_CONFIG_COUNT = String(config.length);
     config.forEach(([k, v], i) => Object.assign(genericEnv, { [`GIT_CONFIG_KEY_${i}`]: k, [`GIT_CONFIG_VALUE_${i}`]: v }));
-    const query = ['config', '--get-urlmatch', 'credential.helper', 'https://github.com/zlpoot/webskill.git'];
+    const query = ['config', '--get-urlmatch', 'credential.helper', 'https://github.com/example-org/beta.git'];
     assert.equal(git(query, genericEnv).trim(), 'awh-dummy-helper-two', 'generic empty helper cannot reset the local host scope');
     assert.equal(git(query).trim(), '', 'same-scope Builder empty helper wins over both local entries');
     assert.equal(readFileSync(configPath, 'utf8'), before, 'resolution must not mutate fixture config');
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('C1-A fixed workflow binds Hub #19, exact-head Ready and unchanged installation boundaries', async () => {
-  const selection = { profile: 'hub', workflow: 'c1a' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c1a', branch: 'codex/c1a-protocol', work_item: { repo: HUB_REPO, issue: 19 },
-    verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const handoff = structuredClone(record); handoff.work_item.issue = 19;
-  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
-  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
-  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
-  assert.deepEqual(PROFILES.map(p => p.id), ['hub', 'future-ui', 'webskill']);
-  for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh'])
-    assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
-});
-
-test('C1-B fixed workflow binds Hub #20 and preserves exact-head Handoff, scopes and forbidden operations', async () => {
-  const selection = { profile: 'hub', workflow: 'c1b' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c1b', branch: 'codex/c1b-control-plane', work_item: { repo: HUB_REPO, issue: 20 },
-    verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const handoff = structuredClone(record); handoff.work_item.issue = 20;
-  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
-  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
-  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
-  for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
-  for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh']) assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
-});
-
-test('C1-C fixed workflow binds Hub #21 and preserves exact-head Handoff, scopes and forbidden operations', async () => {
-  const selection = { profile: 'hub', workflow: 'c1c' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c1c', branch: 'codex/c1c-client', work_item: { repo: HUB_REPO, issue: 21 },
-    verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const handoff = structuredClone(record); handoff.work_item.issue = 21;
-  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
-  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
-  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
-  for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
-  for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh']) assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
-});
-
-test('C1-E fixed workflow binds Hub #23 without bypassing App, scope, exact-head or work-item gates', async () => {
-  const selection = { profile: 'hub', workflow: 'c1e' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c1e', branch: 'codex/c1e-dashboard-api-contract', work_item: { repo: HUB_REPO, issue: 23 },
-    verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const f = fake({ branch: workflow.branch, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  const handoff = structuredClone(record); handoff.work_item.issue = 23;
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
-  const wrongChecks = structuredClone(handoff); wrongChecks.verification.checks[0].command = 'arbitrary command';
-  await assert.rejects(builder.ready(5, head, wrongChecks, 10), /verification commands/);
-  const tokens = f.requests.filter(request => request.url.endsWith('/access_tokens')).map(request => JSON.parse(request.body));
-  assert.deepEqual(tokens[0], { permissions: inspectionPermissions });
-  assert.deepEqual(tokens[1], { repositories: ['agent-workflow-hub'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
-  for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
-  for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh']) assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
-});
-
-test('C1-G fixed workflow binds Hub #30 with single-repository App scope and rejects broad delivery overrides', async () => {
-  const selection = { profile: 'hub', workflow: 'c1g' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c1g', branch: 'codex/c1g-dashboard-readonly', work_item: { repo: HUB_REPO, issue: 30 }, verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const f = fake({ branch: workflow.branch, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  const handoff = structuredClone(record); handoff.work_item.issue = 30;
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
-  const wrongChecks = structuredClone(handoff); wrongChecks.verification.checks[0].command = 'arbitrary command';
-  await assert.rejects(builder.ready(5, head, wrongChecks, 10), /verification commands/);
-  const tokens = f.requests.filter(request => request.url.endsWith('/access_tokens')).map(request => JSON.parse(request.body));
-  assert.deepEqual(tokens[0], { permissions: inspectionPermissions });
-  assert.deepEqual(tokens[1], { repositories: ['agent-workflow-hub'], permissions: { contents: 'write', issues: 'write', pull_requests: 'write' } });
-  for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
-  for (const key of ['repo', 'base', 'branch', 'api', 'url', 'git', 'gh']) assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
-});
-
-test('C1-H fixed workflow binds offline Hub #31 and refuses work-item, head, checks and target overrides', async () => {
-  const selection = { profile: 'hub', workflow: 'c1h' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c1h', branch: 'codex/c12-trusted-onboarding',
-    work_item: { repo: HUB_REPO, issue: 31 }, verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const f = fake({ branch: workflow.branch, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  const handoff = structuredClone(record); handoff.work_item.issue = 31;
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  await assert.rejects(builder.ready(5, 'c'.repeat(40), handoff, 10), /Confirmed Handoff validation failed/);
-  const wrongChecks = structuredClone(handoff); wrongChecks.verification.checks[0].command = 'arbitrary command';
-  await assert.rejects(builder.ready(5, head, wrongChecks, 10), /verification commands/);
-  assert.equal(f.requests.some(r => r.url.endsWith('/graphql')), false);
-  for (const key of ['approve', 'review', 'merge', 'request', 'fetch', 'token']) assert.equal(builder[key], undefined);
-  for (const key of ['repo', 'repository', 'base', 'branch', 'work_item', 'verification_commands', 'bootstrap_paths', 'api', 'url', 'git', 'gh'])
-    assert.throws(() => selectWorkflow({ ...selection, [key]: 'untrusted' }));
-  assert.throws(() => { workflow.work_item.issue = 30; });
-  assert.throws(() => { workflow.verification_commands.push('other'); });
-  for (const option of ['--url', '--ref', '--git-args', '--dry-run', '--force', '--repo', '--base', '--branch']) {
-    const child = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url)),
-      '--profile', 'hub', '--workflow', 'c1h', 'push', option, 'untrusted'],
-    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
-    assert.equal(child.status, 2); assert.match(child.stderr, /Unsupported Builder operation/);
-  }
-});
-
 test('C1-H and B0 refuse malformed installation scope and broader write tokens before delivery', async () => {
- for(const workflowId of ['c1h','c1h-b0']) {
-  const selection = { profile: 'hub', workflow: workflowId };
+ for(const workflowId of ['flow-01','flow-02']) {
+  const selection = { profile: 'core', workflow: workflowId };
   for (const response of [
     (url, _, v) => url.endsWith('/installation') ? { ...v, repository_selection: 'all' } : v,
     (url, _, v) => url.includes('/installation/repositories') ? { ...v, total_count: v.total_count + 1 } : v,
-    (url, _, v) => url.includes('/installation/repositories') ? { total_count: 5, repositories: [...v.repositories, { full_name: 'zlpoot/fifth' }] } : v,
+    (url, _, v) => url.includes('/installation/repositories') ? { total_count: 5, repositories: [...v.repositories, { full_name: 'example-org/fifth' }] } : v,
     (url, _, v) => url.includes('/installation/repositories') ? { total_count: 4, repositories: [...v.repositories.slice(0, 3), v.repositories[0]] } : v,
     (url, options, v) => url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
-      ? { ...v, repositories: [{ full_name: HUB_REPO }, { full_name: FUTURE_REPO }] } : v,
+      ? { ...v, repositories: [{ full_name: CORE_REPO }, { full_name: ALPHA_REPO }] } : v,
     (url, options, v) => url.endsWith('/access_tokens') && JSON.parse(options.body).repositories
       ? { ...v, permissions: { ...v.permissions, administration: 'write' } } : v,
   ]) {
@@ -1142,66 +945,6 @@ test('C1-H and B0 refuse malformed installation scope and broader write tokens b
  }
 });
 
-test('B0 fixed workflow binds only the authorized branch and ordered checks; defaults and Phase A stay frozen', async () => {
-  const selection={profile:'hub',workflow:'c1h-b0'}, {profile,workflow}=selectWorkflow(selection);
-  assert.equal(profile.repository,HUB_REPO);assert.equal(profile.base,'main');
-  assert.deepEqual(workflow,{id:'c1h-b0',branch:'codex/c1h-b0-security',work_item:{repo:HUB_REPO,issue:31},
-    verification_commands:['pnpm build','node --test tests/onboarding.test.mjs tests/builder.test.mjs'],bootstrap_paths:null});
-  assert.deepEqual(DEFAULT_SELECTION,{profile:'hub',workflow:'c05'});
-  assert.equal(selectWorkflow().workflow.branch,'codex/c05-github-app-builder');
-  assert.deepEqual(selectWorkflow({profile:'hub',workflow:'c1h'}).workflow.verification_commands,['pnpm check']);
-  assert.equal(selectWorkflow({profile:'hub',workflow:'c1h'}).workflow.branch,'codex/c12-trusted-onboarding');
-  const f=fake({branch:workflow.branch,installed:selectedSets[3]}), builder=await connectBuilder(f.deps,selection);
-  const handoff=structuredClone(record);handoff.work_item.issue=31;
-  handoff.verification.checks=workflow.verification_commands.map(command=>({command,exit_code:0}));
-  await assert.rejects(builder.ready(5,head,record,10),/work item/);
-  for(const commands of [['pnpm check'],[...workflow.verification_commands].reverse(),[...workflow.verification_commands,'arbitrary command']]){
-    const wrong=structuredClone(handoff);wrong.verification.checks=commands.map(command=>({command,exit_code:0}));
-    await assert.rejects(builder.ready(5,head,wrong,10),/verification commands/);
-  }
-  await assert.rejects(builder.ready(5,'c'.repeat(40),handoff,10),/Confirmed Handoff validation failed/);
-  assert.equal(f.requests.some(r=>r.url.endsWith('/graphql')),false);
-  assert.equal(f.git.some(g=>g[1][0]==='push'),false);
-  for(const key of ['approve','review','merge','request','fetch','token'])assert.equal(builder[key],undefined);
-  for(const key of ['repo','repository','base','branch','work_item','verification_commands','bootstrap_paths','api','url','git','gh'])
-    assert.throws(()=>selectWorkflow({...selection,[key]:'untrusted'}));
-  assert.throws(()=>{workflow.verification_commands.push('pnpm check');});
-  assert.throws(()=>{workflow.work_item.issue=32;});
-  assert.throws(()=>selectWorkflow({profile:'future-ui',workflow:'c1h-b0'}));
-  assert(PROFILES.every(p=>p.id!=='agent-desktop'));
-  for(const option of ['--repo','--base','--branch','--url','--ref','--git-args','--force']){
-    const child=spawnSync(process.execPath,[fileURLToPath(new URL('../dist/builder-cli.js',import.meta.url)),
-      '--profile','hub','--workflow','c1h-b0','push',option,'untrusted'],{encoding:'utf8',env:{PATH:process.env.PATH},timeout:10000});
-    assert.equal(child.status,2);assert.match(child.stderr,/Unsupported Builder operation/);
-  }
-  const created=await builder.createPR('B0 offline candidate','Refs #31; CODE_SCOPE_ONLY');assert.equal(created.draft,true);
-  const request=f.requests.find(r=>r.url.endsWith('/pulls')&&r.method==='POST');
-  assert.deepEqual(JSON.parse(request.body),{title:'B0 offline candidate',body:'Refs #31; CODE_SCOPE_ONLY',
-    head:'codex/c1h-b0-security',base:'main',draft:true});
-});
-
-test('scoped-helper repair workflow binds Hub #16 and exact-head Ready; arbitrary transport options refused', async () => {
-  const selection = { profile: 'hub', workflow: 'c07-r3' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c07-r3', branch: 'codex/c07-r3-scoped-helper', work_item: { repo: HUB_REPO, issue: 16 },
-    verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const handoff = structuredClone(record); handoff.work_item.issue = 16;
-  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
-  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
-  for (const option of ['--url', '--ref', '--git-args', '--dry-run', '--force', '--repo', '--base', '--branch']) {
-    const child = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url)),
-      '--profile', 'hub', '--workflow', 'c07-r3', 'push', option, 'untrusted'],
-    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
-    assert.equal(child.status, 2); assert.equal(child.stdout, '');
-    assert.deepEqual(JSON.parse(child.stderr), { error: 'Unsupported Builder operation or arguments' });
-  }
-  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
-});
-
 test('transport: expired token after authenticated read cannot dispatch push', async () => {
   const f = fake(), spawn = f.deps.spawn;
   f.deps.spawn = (...args) => {
@@ -1211,21 +954,6 @@ test('transport: expired token after authenticated read cannot dispatch push', a
   };
   await assert.rejects((await connectBuilder(f.deps)).push(), /token expired/);
   assert.equal(transportCalls(f).length, 1);
-});
-
-test('transport repair workflow binds Hub #10 and exact-head Ready without changing external Profiles', async () => {
-  const selection = { profile: 'hub', workflow: 'c07-r1' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c07-r1', branch: 'codex/c07-r1-git-transport',
-    work_item: { repo: HUB_REPO, issue: 10 }, verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const handoff = structuredClone(record); handoff.work_item.issue = 10;
-  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
-  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
-  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
 });
 
 function transportCLI(mode, stage = 'dry-run') {
@@ -1257,6 +985,9 @@ function transportCLI(mode, stage = 'dry-run') {
       if (mode === 'spawn') throw new Error('fake-installation-secret Authentication failed');
       return {status:mode === 'success' || mode === 'secret-success' ? 0 : 128,stdout:mode === 'secret-success' ? 'fake-installation-secret' : leaked || 'untrusted-success-output',stderr:leaked ? 'Authentication failed' : mode === 'success' || mode === 'secret-success' ? '' : mode};
     };
+    import fixtureCp from 'node:child_process';
+    const fixtureSpawn = fixtureCp.spawnSync;
+    fixtureCp.spawnSync = (cmd,args,opts) => args.includes('remote.origin.url') && args.includes('--get') ? {status:0,stdout:'https://github.com/${REPO}.git'} : fixtureSpawn(cmd,args,opts);
     syncBuiltinESMExports();
     process.env.AWH_GITHUB_APP_ID = '123';
     process.env.AWH_GITHUB_APP_PRIVATE_KEY_PATH = join(tmpdir(), 'generated-memory-key.pem');
@@ -1264,7 +995,7 @@ function transportCLI(mode, stage = 'dry-run') {
     globalThis.fetch = async (url, options) => {
       if (url.endsWith('/app')) jwt = options.headers.Authorization.slice(7);
       const v = url.endsWith('/app') ? {id:123,slug:'test-builder'} : url.endsWith('/installation') ?
-        {id:456,app_id:123,account:{login:'zlpoot'},repository_selection:'selected',suspended_at:null,permissions} :
+        {id:456,app_id:123,account:{login:'example-org'},repository_selection:'selected',suspended_at:null,permissions} :
         url.includes('/installation/repositories') ? {total_count:1,repositories:[{full_name:'${REPO}'}]} :
         url.includes('/git/ref/heads/') ? {ref:'refs/heads/${BRANCH}',url:'https://api.github.com/repos/${REPO}/git/refs/heads/${BRANCH}',
           object:{type:'commit',sha:'${head}',url:'https://api.github.com/repos/${REPO}/git/commits/${head}'}} :
@@ -1275,7 +1006,7 @@ function transportCLI(mode, stage = 'dry-run') {
     await import('./dist/builder-cli.js');
   `;
   return spawnSync(process.execPath, ['--input-type=module', '-e', script],
-    { cwd: repoRoot, encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
+    { cwd: repoRoot, encoding: 'utf8', env: { PATH: process.env.PATH, AWH_BUILDER_POLICY_FILE:process.env.AWH_BUILDER_POLICY_FILE,AWH_BUILDER_POLICY_SHA256:process.env.AWH_BUILDER_POLICY_SHA256 }, timeout: 10000 });
 }
 
 test('transport real CLI emits only fixed error, stage and machine-readable category for all six classes', () => {
@@ -1416,8 +1147,8 @@ test('transport CLI secret raw never appears on either stream for all three fixe
   }
 });
 
-test('fixed receive-pack URL/ref and WebSkill-only write token across all existing Profiles', async () => {
-  for (const profile of PROFILES) for (const workflow of profile.workflows.filter(w => w.id !== 'repeatable-docs')) {
+test('fixed receive-pack URL/ref and Project Beta-only write token across all existing Profiles', async () => {
+  for (const profile of PROFILES) for (const workflow of profile.workflows.filter(w => w.id !== 'repeatable')) {
     const f = fake({ repository: profile.repository, branch: workflow.branch, installed: selectedSets[3] });
     await (await connectBuilder(f.deps, { profile: profile.id, workflow: workflow.id })).push();
     const [read, dry, push] = transportCalls(f);
@@ -1427,30 +1158,8 @@ test('fixed receive-pack URL/ref and WebSkill-only write token across all existi
     const mint = f.requests.filter(r => r.url.endsWith('/access_tokens'));
     assert.deepEqual(JSON.parse(mint[0].body), { permissions: { metadata: 'read' } });
     assert.deepEqual(JSON.parse(mint[1].body).repositories, [profile.repository.split('/')[1]]);
-    if (profile.id === 'webskill') assert.deepEqual(JSON.parse(mint[1].body).repositories, ['webskill']);
+    if (profile.id === 'project-beta') assert.deepEqual(JSON.parse(mint[1].body).repositories, ['project-beta']);
   }
-});
-
-test('receive-pack repair workflow binds Hub #13 and exact-head Ready; arbitrary transport options refused', async () => {
-  const selection = { profile: 'hub', workflow: 'c07-r2' };
-  const { profile, workflow } = selectWorkflow(selection);
-  assert.equal(profile.repository, HUB_REPO); assert.equal(profile.base, 'main');
-  assert.deepEqual(workflow, { id: 'c07-r2', branch: 'codex/c07-r2-receive-pack', work_item: { repo: HUB_REPO, issue: 13 },
-    verification_commands: ['pnpm check'], bootstrap_paths: null });
-  const handoff = structuredClone(record); handoff.work_item.issue = 13;
-  const body = `AWH-HANDOFF v0.1\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n${JSON.stringify(validation)}`;
-  const f = fake({ branch: workflow.branch, handoffBody: body, installed: selectedSets[3] });
-  const builder = await connectBuilder(f.deps, selection);
-  await assert.rejects(builder.ready(5, head, record, 10), /work item/);
-  assert.equal((await builder.ready(5, head, handoff, 10)).draft, false);
-  for (const option of ['--url', '--ref', '--git-args', '--dry-run', '--force', '--repo', '--base', '--branch']) {
-    const child = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/builder-cli.js', import.meta.url)),
-      '--profile', 'hub', '--workflow', 'c07-r2', 'push', option, 'untrusted'],
-    { encoding: 'utf8', env: { PATH: process.env.PATH }, timeout: 10000 });
-    assert.equal(child.status, 2); assert.equal(child.stdout, '');
-    assert.deepEqual(JSON.parse(child.stderr), { error: 'Unsupported Builder operation or arguments' });
-  }
-  assert(PROFILES.every(p => p.id !== 'agent-desktop'));
 });
 
 const fixedRefResponse = (repository = REPO, branch = BRANCH, commit = head) => ({
@@ -1558,7 +1267,7 @@ test('ref-state gate: token expiry during either ref read, JSON decode or after 
 });
 
 test('ref-state gate: each Profile always uses its fixed repository/feature branch and single write token', async () => {
-  for (const profile of PROFILES) for (const workflow of profile.workflows.filter(w => w.id !== 'repeatable-docs')) {
+  for (const profile of PROFILES) for (const workflow of profile.workflows.filter(w => w.id !== 'repeatable')) {
     const f = refGate([absentRef, absentRef], { repository: profile.repository, branch: workflow.branch, installed: selectedSets[3] });
     const b = await connectBuilder(f.deps, { profile: profile.id, workflow: workflow.id });
     assert.equal(b.readFeatureRefState, undefined); assert.equal(b.refState, undefined);
@@ -1586,7 +1295,7 @@ test('ref-state gate: read or dry-run failure skips the after-ref read and real 
 });
 
 
-const nativeReview = (id, state = 'APPROVED', commit = head, login = 'independent-reviewer') => ({ id, state, commit_id: commit, user: { login, type: 'User' } });
+const nativeReview = (id, state = 'APPROVED', commit = head, login = 'independent-reviewer') => ({ id, state, commit_id: commit, user: { login, type: 'User', id:1002 } });
 function lifecycleFixture(reviews = [], { merged = false, issueClosed = false, mutate } = {}) {
   return fake({ response: (url, options, value) => {
     if (url.includes('/reviews?')) value = reviews;
@@ -1595,37 +1304,37 @@ function lifecycleFixture(reviews = [], { merged = false, issueClosed = false, m
     return mutate ? mutate(url, value) : value;
   } });
 }
-test('MVP provider closeout reads exact native approval, merged PR and closed Issue without mutations', async () => {
+test('fixed delivery provider closeout reads exact native approval, merged PR and closed Issue without mutations', async () => {
   const f=lifecycleFixture([nativeReview(101)],{merged:true,issueClosed:true});
   const b=await connectBuilder(f.deps),r=await b.readLifecycle(5,head);
   assert.equal(r.review.id,101);assert(r.merged&&r.issue_closed);assert.equal(r.merge_sha,'c'.repeat(40));assert.equal(r.authority_verified,false);
   assert(f.requests.filter(x=>!x.url.endsWith('/access_tokens')).every(x=>x.method==='GET'));
 });
-test('MVP wrong-head, dismissed, bot and superseded approvals cannot complete; change requests block',async()=>{
+test('fixed delivery wrong-head, dismissed, bot and superseded approvals cannot complete; change requests block',async()=>{
   for(const reviews of [[nativeReview(1,'APPROVED',base)], [nativeReview(1),nativeReview(2,'DISMISSED')], [nativeReview(1),nativeReview(2,'CHANGES_REQUESTED')], [{...nativeReview(1),user:{login:actor,type:'Bot'}}]]) {
     const f=lifecycleFixture(reviews,{merged:true,issueClosed:true});const r=await(await connectBuilder(f.deps)).readLifecycle(5,head);assert.equal(r.review,null);
   }
   const f=lifecycleFixture([nativeReview(1),nativeReview(2,'COMMENTED')]);assert.equal((await(await connectBuilder(f.deps)).readLifecycle(5,head)).review.id,1);
 });
-test('MVP provider read refuses wrong head, malformed Review and changing merge state',async()=>{
+test('fixed delivery provider read refuses wrong head, malformed Review and changing merge state',async()=>{
   let reads=0;
   for(const mutate of [(url,v)=>url.endsWith('/pulls/5')?{...v,head:{...v.head,sha:base}}:v, (url,v)=>url.includes('/reviews?')?[{id:1,state:'APPROVED'}]:v, (url,v)=>url.endsWith('/pulls/5')&&++reads===2?{...v,state:'closed',merged:true,merge_commit_sha:base}:v]) {
     const f=lifecycleFixture([],{mutate});await assert.rejects((await connectBuilder(f.deps)).readLifecycle(5,head));
   }
 });
-test('fixed MVP selections preserve separate repositories, work items and docs-only verification',()=>{
-  const hub=selectWorkflow({profile:'hub',workflow:'v01-mvp'}),future=selectWorkflow({profile:'future-ui',workflow:'mvp-docs'});
-  assert.deepEqual(hub.workflow.work_item,{repo:HUB_REPO,issue:39});assert.equal(hub.workflow.branch,'codex/v01-mvp');
-  assert.deepEqual(future.workflow.work_item,{repo:FUTURE_REPO,issue:88});assert.equal(future.workflow.branch,'codex/awh-v01-acceptance');
+test('fixed fixed delivery selections preserve separate repositories, work items and docs-only verification',()=>{
+  const hub=selectWorkflow({profile:'core',workflow:'fixed-workflow'}),future=selectWorkflow({profile:'project-alpha',workflow:'docs'});
+  assert.deepEqual(hub.workflow.work_item,{repo:CORE_REPO,issue:39});assert.equal(hub.workflow.branch,'codex/fixed-workflow');
+  assert.deepEqual(future.workflow.work_item,{repo:ALPHA_REPO,issue:88});assert.equal(future.workflow.branch,'codex/fixed-document');
   assert.deepEqual(future.workflow.verification_commands,['git diff --check origin/main...HEAD']);assert(!future.workflow.bootstrap_paths.includes('package.json'));
 });
 
-const repeatableBinding = () => taskBinding({ repository:FUTURE_REPO,issue:90,branch:'codex/awh-task-90',source_sha:head,
-  profile_ref:'future-ui/c1c-acceptance',profile_version:REPEATABLE_VERSION,executor_id:'c1c-future-ui-windows',machine_id:'fixture-machine' });
-function repeatableFake({issue={},paths=['docs/management/awh-repeatable-workflow.md'],readPermissions=null,consumed=false}={}) {
-  const f=fake({repository:FUTURE_REPO,branch:'codex/awh-task-90',installed:[REPO,FUTURE_REPO],response:(url,o,data)=>{
+const repeatableBinding = () => taskBinding({ repository:ALPHA_REPO,issue:90,branch:'codex/awh-task-90',source_sha:head,
+  profile_ref:'project-alpha/repeatable',profile_version:REPEATABLE_VERSION,executor_id:'alpha-executor',machine_id:'fixture-machine' });
+function repeatableFake({issue={},paths=['docs/management/task-document.md'],readPermissions=null,consumed=false}={}) {
+  const f=fake({repository:ALPHA_REPO,branch:'codex/awh-task-90',installed:[REPO,ALPHA_REPO],response:(url,o,data)=>{
     if(url.endsWith('/access_tokens')){const q=JSON.parse(o.body);return {...data,permissions:{...q.permissions,metadata:'read',...(q.permissions.contents==='read'&&readPermissions?readPermissions:{})}};}
-    if(url.endsWith('/issues/90'))return {number:90,state:'open',html_url:'https://github.com/zlpoot/future-ui/issues/90',...issue};
+    if(url.endsWith('/issues/90'))return {number:90,state:'open',html_url:'https://github.com/example-org/project-alpha/issues/90',...issue};
     if(url.endsWith('/git/ref/heads/main'))return {object:{sha:base}};
     if(url.includes('/compare/'))return {status:'ahead',total_commits:1,files:paths.map(filename=>({filename,status:'added'}))};
     return data;
@@ -1638,10 +1347,10 @@ function repeatableFake({issue={},paths=['docs/management/awh-repeatable-workflo
 
 test('0.4.3 revision mode mints only single-repo PR-comment scope and refuses push/PR/Ready/old-comment edits',async()=>{
  const f=repeatableFake({consumed:true});
- const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
+ const b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'revision');
  assert.deepEqual(b.preflight().permissions,{contents:'read',issues:'read',metadata:'read',pull_requests:'write'});
  const tokens=f.requests.filter(r=>r.url.endsWith('/access_tokens')).map(r=>JSON.parse(r.body));
- assert.deepEqual(tokens.at(-1),{repositories:['future-ui'],permissions:{contents:'read',issues:'read',pull_requests:'write'}});
+ assert.deepEqual(tokens.at(-1),{repositories:['project-alpha'],permissions:{contents:'read',issues:'read',pull_requests:'write'}});
  await assert.rejects(b.push());await assert.rejects(b.createPR('Forbidden','Forbidden'));await assert.rejects(b.updatePR(5,'Forbidden','Forbidden'));
  await assert.rejects(b.ready(5,head,record,10));await assert.rejects(b.restoreDraft(5,head));
  await assert.rejects(b.editComment(5,10,'Do not edit old history'));
@@ -1653,7 +1362,7 @@ test('0.4.3 revision mode mints only single-repo PR-comment scope and refuses pu
 for(const [status,category]of [[401,'authentication'],[403,'permission_or_policy'],[429,'rate_limit'],[503,'server']])
 test('revision comment POST HTTP '+status+' exposes only typed safe diagnostics',async()=>{
  const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>o.method==='POST'&&u.endsWith('/comments')?new Response('secret remote body',{status,headers:{'X-GitHub-Request-Id':'ABC:123:DEF','X-Accepted-GitHub-Permissions':'issues=write,pull_requests=write','Authorization':'Bearer sensitive'}}):fetch(u,o);
- const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
+ const b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'revision');
  await assert.rejects(b.createComment(5,'private body'),e=>{assert.deepEqual(publicationDiagnostic(e),{code:'github_revision',message:'Revision GitHub operation failed',diagnostic:{stage:'revision.comment-post',category,http_status:status,github_request_id:'ABC:123:DEF',accepted_github_permissions:'issues=write,pull_requests=write'}});assert(!JSON.stringify(e).includes('sensitive'));return true;});
 });
 for(const stage of ['pr-read','compare-read','comment-post','comment-parse','comment-confirm-patch','readback'])
@@ -1662,79 +1371,79 @@ test('revision diagnostic locates '+stage+' without printing network/raw JSON/id
  f.deps.fetch=async(u,o)=>{
   const matched=enabled&&(stage==='pr-read'&&u.endsWith('/pulls/5')||stage==='compare-read'&&u.includes('/compare/')||['comment-post','comment-parse'].includes(stage)&&o.method==='POST'&&u.endsWith('/comments')||stage==='comment-confirm-patch'&&o.method==='PATCH'||stage==='readback'&&u.endsWith('/issues/comments/11'));
   if(matched){if(stage==='comment-post')throw Error('Bearer fake-installation-secret');if(stage==='comment-parse')return new Response('invalid sensitive JSON');return new Response('private',{status:403,headers:{'X-GitHub-Request-Id':'fake-installation-secret','X-Accepted-GitHub-Permissions':'issues=write; token=fake-installation-secret'}});}
-  if(u.endsWith('/issues/comments/11'))return new Response(JSON.stringify(comment(11,o.method==='PATCH'?JSON.parse(o.body).body:createdBody,FUTURE_REPO)));
+  if(u.endsWith('/issues/comments/11'))return new Response(JSON.stringify(comment(11,o.method==='PATCH'?JSON.parse(o.body).body:createdBody,ALPHA_REPO)));
   const r=await fetch(u,o);if(o.method==='POST'&&u.endsWith('/comments'))createdBody=JSON.parse(o.body).body;return r;
  };
- const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
+ const b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'revision');
  if(['comment-confirm-patch','readback'].includes(stage))await b.createComment(5,'pending');enabled=true;
  const operation=stage==='comment-confirm-patch'?()=>b.editComment(5,11,'confirmed'):stage==='readback'?()=>b.readComment(5,11):()=>b.createComment(5,'pending');
  await assert.rejects(operation(),e=>{const d=publicationDiagnostic(e).diagnostic;assert.equal(d.stage,'revision.'+stage);assert(!('github_request_id'in d));assert(!('accepted_github_permissions'in d));assert(!JSON.stringify(e).includes('fake-installation-secret'));return true;});
 });
 test('revision response identity conflict has semantic parse diagnostic with status and safe request ID',async()=>{
- const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>o.method==='POST'&&u.endsWith('/comments')?new Response(JSON.stringify(comment(11,'pending',HUB_REPO)),{status:201,headers:{'X-GitHub-Request-Id':'ABC:123'}}):fetch(u,o);
- const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision');
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>o.method==='POST'&&u.endsWith('/comments')?new Response(JSON.stringify(comment(11,'pending',CORE_REPO)),{status:201,headers:{'X-GitHub-Request-Id':'ABC:123'}}):fetch(u,o);
+ const b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'revision');
  await assert.rejects(b.createComment(5,'pending'),e=>{assert.deepEqual(publicationDiagnostic(e).diagnostic,{stage:'revision.comment-parse',category:'invalid_response',http_status:201,github_request_id:'ABC:123'});return true;});
 });
 for(const mutation of ['old-permissions','extra-repository','extra-permission'])test('revision mint fails closed '+mutation,async()=>{
- const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{const r=await fetch(u,o);if(u.endsWith('/access_tokens')&&JSON.parse(o.body).permissions.pull_requests==='write'){const v=await r.json();if(mutation==='old-permissions')v.permissions={contents:'read',issues:'write',metadata:'read',pull_requests:'read'};if(mutation==='extra-repository')v.repositories.push({full_name:HUB_REPO});if(mutation==='extra-permission')v.permissions.administration='write';return new Response(JSON.stringify(v));}return r;};
- await assert.rejects(connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision'));assert(!f.requests.some(r=>r.url.endsWith('/comments')));
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{const r=await fetch(u,o);if(u.endsWith('/access_tokens')&&JSON.parse(o.body).permissions.pull_requests==='write'){const v=await r.json();if(mutation==='old-permissions')v.permissions={contents:'read',issues:'write',metadata:'read',pull_requests:'read'};if(mutation==='extra-repository')v.repositories.push({full_name:CORE_REPO});if(mutation==='extra-permission')v.permissions.administration='write';return new Response(JSON.stringify(v));}return r;};
+ await assert.rejects(connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'revision'));assert(!f.requests.some(r=>r.url.endsWith('/comments')));
 });
 for(const limit of ['complete','full-ten','duplicate','malformed','page-missing','short-next'])test('read-only reconciliation comment pagination '+limit,async()=>{
- const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{const m=/comments\?per_page=100&page=(\d+)$/.exec(u);if(!m)return fetch(u,o);const page=Number(m[1]);if(limit==='page-missing'&&page===2)return new Response('{}',{status:403});const n=limit==='malformed'?101:limit==='short-next'||limit==='complete'&&page===2?1:100;return new Response(JSON.stringify(Array.from({length:n},(_,i)=>comment(limit==='duplicate'?1:(page-1)*100+i+1,'unrelated',FUTURE_REPO))),limit==='short-next'?{headers:{Link:'<https://api.github.com/repos/zlpoot/future-ui/issues/5/comments?per_page=100&page=2>; rel="next"'}}:{});};
- const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'observe');
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{const m=/comments\?per_page=100&page=(\d+)$/.exec(u);if(!m)return fetch(u,o);const page=Number(m[1]);if(limit==='page-missing'&&page===2)return new Response('{}',{status:403});const n=limit==='malformed'?101:limit==='short-next'||limit==='complete'&&page===2?1:100;return new Response(JSON.stringify(Array.from({length:n},(_,i)=>comment(limit==='duplicate'?1:(page-1)*100+i+1,'unrelated',ALPHA_REPO))),limit==='short-next'?{headers:{Link:'<https://api.github.com/repos/example-org/project-alpha/issues/5/comments?per_page=100&page=2>; rel="next"'}}:{});};
+ const b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'observe');
  if(limit==='complete')assert.equal((await b.listComments(5)).length,101);else await assert.rejects(b.listComments(5));
  assert.equal(f.requests.filter(r=>r.url.endsWith('/access_tokens')).length,2);assert(!f.requests.some(r=>r.url.endsWith('/comments')&&r.method==='POST'));
 });
 test('adoption permits only receipt-bound existing comment PATCH, no second POST; Human gate reads fixed owner identity',async()=>{
- const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>u.endsWith('/issues/comments/12')?new Response(JSON.stringify({...comment(12,'gate',FUTURE_REPO),user:{login:'zlpoot',type:'User',id:36036483}})):fetch(u,o);
+ const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>u.endsWith('/issues/comments/12')?new Response(JSON.stringify({...comment(12,'gate',ALPHA_REPO),user:{login:'example-owner',type:'User',id:1003}})):fetch(u,o);
  const {createHash}=await import('node:crypto');const body='existing';const adoption={pr:5,comment:10,body_sha256:createHash('sha256').update(body).digest('hex')};
- const previous=f.deps.fetch;f.deps.fetch=async(u,o)=>u.endsWith('/issues/comments/10')?new Response(JSON.stringify(comment(10,o.method==='PATCH'?JSON.parse(o.body).body:body,FUTURE_REPO))):previous(u,o);
- const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'revision',adoption);
+ const previous=f.deps.fetch;f.deps.fetch=async(u,o)=>u.endsWith('/issues/comments/10')?new Response(JSON.stringify(comment(10,o.method==='PATCH'?JSON.parse(o.body).body:body,ALPHA_REPO))):previous(u,o);
+ const b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'revision',adoption);
  assert.equal((await b.adoptComment()).id,10);await b.editComment(5,10,'confirmed');await assert.rejects(b.createComment(5,'never POST'));await assert.rejects(b.editComment(5,11,'foreign'));
- assert.equal((await b.readAuthorization(5,12)).actor,'zlpoot');await assert.rejects(b.readAuthorization(5,10));assert(!f.requests.some(r=>r.url.endsWith('/comments')&&r.method==='POST'));
+ assert.equal((await b.readAuthorization(5,12)).actor,'example-owner');await assert.rejects(b.readAuthorization(5,10));assert(!f.requests.some(r=>r.url.endsWith('/comments')&&r.method==='POST'));
 });
-test('v0.2 App Issue inspection uses single-repo read-only token before write mint; canonical branch push once',async()=>{
-  const f=repeatableFake(),b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding());
+test('repeatable App Issue inspection uses single-repo read-only token before write mint; canonical branch push once',async()=>{
+  const f=repeatableFake(),b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding());
   assert.equal(b.preflight().issue_state,'open');const tokens=f.requests.filter(r=>r.url.endsWith('/access_tokens')).map(r=>JSON.parse(r.body));
-  assert.deepEqual(tokens,[{permissions:{metadata:'read'}},{repositories:['future-ui'],permissions:{contents:'read',issues:'read',pull_requests:'read'}},{repositories:['future-ui'],permissions:{contents:'write',issues:'write',pull_requests:'write'}}]);
+  assert.deepEqual(tokens,[{permissions:{metadata:'read'}},{repositories:['project-alpha'],permissions:{contents:'read',issues:'read',pull_requests:'read'}},{repositories:['project-alpha'],permissions:{contents:'write',issues:'write',pull_requests:'write'}}]);
   const issue=f.requests.find(r=>r.url.endsWith('/issues/90'));assert.equal(issue.headers.Authorization,'Bearer fake-installation-secret');
   await b.push();assert(f.git.some(r=>r[1].includes('HEAD:refs/heads/codex/awh-task-90')));
 });
-for(const options of [{issue:{pull_request:{url:'foreign'}}},{issue:{number:91}},{issue:{html_url:'https://github.com/zlpoot/webskill/issues/90'}},{paths:['src/product.ts']},{readPermissions:{administration:'write'}}])
- test('v0.2 unsafe Issue/path/read permissions fail before write token and Git writes '+JSON.stringify(options),async()=>{
-  const f=repeatableFake(options);await assert.rejects(connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding()));
+for(const options of [{issue:{pull_request:{url:'foreign'}}},{issue:{number:91}},{issue:{html_url:'https://github.com/example-org/project-beta/issues/90'}},{paths:['src/product.ts']},{readPermissions:{administration:'write'}}])
+ test('repeatable unsafe Issue/path/read permissions fail before write token and Git writes '+JSON.stringify(options),async()=>{
+  const f=repeatableFake(options);await assert.rejects(connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding()));
   assert(!f.requests.some(r=>r.url.endsWith('/access_tokens')&&JSON.parse(r.body).permissions.contents==='write'));assert(!f.git.some(r=>r[1].includes('push')));
  });
-test('v0.2 consumed remote Task branch refuses replay before transport; old fixed policy remains push-compatible',async()=>{
-  const f=repeatableFake({consumed:true}),b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding());
+test('repeatable consumed remote Task branch refuses replay before transport; old fixed policy remains push-compatible',async()=>{
+  const f=repeatableFake({consumed:true}),b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding());
   await assert.rejects(b.push(),/consumed/);assert(!f.git.some(r=>r[1].includes('push')));
 });
 
-test('v0.2 post-merge sync uses read-only token on original Task even after main advances; mutations fail',async()=>{
+test('repeatable post-merge sync uses read-only token on original Task even after main advances; mutations fail',async()=>{
  const f=repeatableFake({issue:{state:'closed'},paths:['src/new-main-product.ts'],consumed:true}),fetch=f.deps.fetch;
  f.deps.fetch=async(u,o)=>{
-  if(u.includes('/reviews?')){f.requests.push({url:u,...o});return new Response(JSON.stringify([{id:91,commit_id:head,user:{login:'native-reviewer',type:'User'},state:'APPROVED'}]));}
+  if(u.includes('/reviews?')){f.requests.push({url:u,...o});return new Response(JSON.stringify([{id:91,commit_id:head,user:{login:'reviewer',type:'User',id:1001},state:'APPROVED'}]));}
   const response=await fetch(u,o);
   if(u.endsWith('/pulls/5'))return new Response(JSON.stringify({...await response.json(),state:'closed',merged:true,merge_commit_sha:base}));
   return response;
  };
- const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'observe');
+ const b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'observe');
  assert.equal(b.preflight().permissions.contents,'read');const result=await b.readLifecycle(5,head);assert(result.merged&&result.issue_closed&&result.review.subject_sha===head);
  assert.equal(f.requests.filter(r=>r.url.endsWith('/access_tokens')).length,2);assert(!f.requests.some(r=>r.url.endsWith('/access_tokens')&&JSON.parse(r.body).permissions.contents==='write'));
  await assert.rejects(b.push(),/cannot push/);await assert.rejects(b.createComment(5,'Mutation prohibited'),/cannot mutate/);assert(!f.git.some(r=>r[1].includes('diff')||r[1].includes('push')));
 });
 
-test('0.4.1 recovery inspection checks docs, open Issue, absent ref and all-state PRs with read-only scope; refuses mutations',async()=>{
+test('verification recovery inspection checks docs, open Issue, absent ref and all-state PRs with read-only scope; refuses mutations',async()=>{
  const f=repeatableFake(),fetch=f.deps.fetch;f.deps.fetch=async(u,o)=>{if(u.includes('/pulls?state=all&head=')){f.requests.push({url:u,...o});return new Response('[]');}return fetch(u,o);};
- const b=await connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'recover');
+ const b=await connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'recover');
  assert.deepEqual(b.preflight().recovery_inspection,{remote_branch_absent:true,same_branch_pr_absent:true});assert.equal(b.preflight().permissions.contents,'read');
- const tokens=f.requests.filter(x=>x.url.endsWith('/access_tokens')).map(x=>JSON.parse(x.body));assert.deepEqual(tokens,[{permissions:{metadata:'read'}},{repositories:['future-ui'],permissions:{contents:'read',issues:'read',pull_requests:'read'}}]);
- assert(f.requests.some(x=>x.url.endsWith('/git/ref/heads/codex/awh-task-90')));assert(f.requests.some(x=>x.url.endsWith('/pulls?state=all&head=zlpoot%3Acodex%2Fawh-task-90&per_page=100&page=1')));
+ const tokens=f.requests.filter(x=>x.url.endsWith('/access_tokens')).map(x=>JSON.parse(x.body));assert.deepEqual(tokens,[{permissions:{metadata:'read'}},{repositories:['project-alpha'],permissions:{contents:'read',issues:'read',pull_requests:'read'}}]);
+ assert(f.requests.some(x=>x.url.endsWith('/git/ref/heads/codex/awh-task-90')));assert(f.requests.some(x=>x.url.endsWith('/pulls?state=all&head=example-org%3Acodex%2Fawh-task-90&per_page=100&page=1')));
  await assert.rejects(b.push(),/cannot push/);await assert.rejects(b.createComment(5,'Forbidden'),/cannot mutate/);await assert.rejects(b.createPR('Forbidden','Forbidden'),/cannot mutate/);assert(!f.git.some(x=>x[1].includes('push')));
 });
-for(const drift of ['remote-ref','existing-pr','malformed-pr-list','closed-issue','product-path','broad-read-token','ref-network','pr-network'])test('0.4.1 read-only recovery inspector refuses '+drift,async()=>{
+for(const drift of ['remote-ref','existing-pr','malformed-pr-list','closed-issue','product-path','broad-read-token','ref-network','pr-network'])test('verification read-only recovery inspector refuses '+drift,async()=>{
  const f=repeatableFake({...drift==='remote-ref'?{consumed:true}:{},...drift==='closed-issue'?{issue:{state:'closed'}}:{},...drift==='product-path'?{paths:['src/product.ts']}:{},...drift==='broad-read-token'?{readPermissions:{contents:'write'}}:{}}),fetch=f.deps.fetch;
  f.deps.fetch=async(u,o)=>{if(drift==='ref-network'&&u.endsWith('/git/ref/heads/codex/awh-task-90'))throw Error('Fixture upstream secret');if(u.includes('/pulls?state=all&head=')){f.requests.push({url:u,...o});if(drift==='pr-network')throw Error('Fixture upstream secret');return new Response(JSON.stringify(drift==='existing-pr'?[{number:99}]:drift==='malformed-pr-list'?{}:[]));}return fetch(u,o);};
- await assert.rejects(connectBuilder(f.deps,{profile:'future-ui',workflow:'repeatable-docs'},repeatableBinding(),'recover'));
+ await assert.rejects(connectBuilder(f.deps,{profile:'project-alpha',workflow:'repeatable'},repeatableBinding(),'recover'));
  assert(!f.requests.some(x=>x.url.endsWith('/access_tokens')&&JSON.parse(x.body).permissions.contents==='write'));assert(!f.git.some(x=>x[1].includes('push')));
 });

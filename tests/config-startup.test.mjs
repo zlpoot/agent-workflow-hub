@@ -1,3 +1,4 @@
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
@@ -14,11 +15,11 @@ import { readRuntimeConfig, readTrustedConfig } from '../dist/control-plane/conf
 import { validateExistingDatabase } from '../dist/control-plane/store.js';
 import { readExternalFile, externalPath } from '../dist/shared/external-files.js';
 import { safeData, ControlPlaneError } from '../dist/shared/security.js';
-import * as legacy from '../dist/control-plane/security.js';
-const policy = JSON.parse(readFileSync(new URL('../examples/protocol/webskill.json', import.meta.url))).profile_policy;
+import * as cpSecurity from '../dist/control-plane/security.js';
+const policy = JSON.parse(readFileSync(new URL('../examples/protocol/project-beta.json', import.meta.url))).profile_policy;
 const cli = new URL('../dist/control-plane-cli.js', import.meta.url);
 const token = 'awh_cp_' + 'F'.repeat(43); // Disposable offline credential; never real material.
-const trusted = { clients: [{ id: 'scratch-client', project_ids: ['webskill'], executor_ids: ['scratch-executor'], token_sha256: createHash('sha256').update(token).digest('hex') }], profiles: [policy] };
+const trusted = { clients: [{ id: 'scratch-client', project_ids: ['project-beta'], executor_ids: ['scratch-executor'], token_sha256: createHash('sha256').update(token).digest('hex') }], profiles: [policy] };
 function scratch(t) {
   const dir = mkdtempSync(join(tmpdir(), 'awh-issue47-'));
   t.after(() => { assert.equal(dirname(resolve(dir)), resolve(tmpdir())); assert(dir.startsWith(join(tmpdir(), 'awh-issue47-'))); rmSync(dir, { recursive: true, force: true }); });
@@ -87,16 +88,16 @@ test('scratch CLI init → serve → authenticated query and restart preserves e
     finally { clearTimeout(timer); }
     return { child, exit };
   };
-  for (const args of [['serve','--runtime-config',h.runtime], ['--database',h.database,'--config',h.config,'--port',String(port)]]) {
+  for (const args of [['serve','--runtime-config',h.runtime]]) {
     const service = await start(args), response = await fetch(`http://127.0.0.1:${port}/v1/projects`, { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(5000) });
     assert.equal(response.status, 200); const body = await response.json(); assert.equal(body.authority_verified, false); assert.deepEqual(body.projects, []);
     service.child.kill(); await service.exit;
   }
   assert.equal(validateExistingDatabase(h.database, [policy]), h.database);
 });
-test('shared security retains the old Error class and exported validation functions', () => {
-  assert.equal(legacy.ControlPlaneError, ControlPlaneError); assert.equal(legacy.safeData, safeData);
-  assert.throws(() => safeData({ token: 'offline' }), e => e instanceof legacy.ControlPlaneError && e.code === 'credential_data');
+test('shared security shares the Error class and exported validation functions', () => {
+  assert.equal(cpSecurity.ControlPlaneError, ControlPlaneError); assert.equal(cpSecurity.safeData, safeData);
+  assert.throws(() => safeData({ token: 'offline' }), e => e instanceof cpSecurity.ControlPlaneError && e.code === 'credential_data');
 });
 test('Client config flag cannot silently override a different environment source', () => {
   const result = spawnSync(process.execPath, ['dist/client/cli.js','--config','/different.json','status'], { encoding: 'utf8', windowsHide: true, env: { ...process.env, AWH_CLIENT_CONFIG: '/original.json' } });

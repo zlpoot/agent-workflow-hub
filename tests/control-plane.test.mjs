@@ -1,3 +1,5 @@
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, randomBytes } from 'node:crypto';
@@ -11,7 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { once } from 'node:events';
 import { createAuthenticator, createControlPlaneServer, ControlPlaneStore, MAX_BODY_BYTES, MAX_PAYLOAD_BYTES, safeData } from '../dist/control-plane/index.js';
 const fixture = name => JSON.parse(readFileSync(new URL(`../examples/protocol/${name}.json`, import.meta.url)));
-const sample = fixture('webskill'), other = fixture('future-ui');
+const sample = fixture('project-beta'), other = fixture('project-alpha');
 const principal = { id: 'mac-client', project_ids: [sample.project.id], executor_ids: [sample.executor.id] };
 const foreign = { id: 'windows-client', project_ids: [other.project.id], executor_ids: [other.executor.id] };
 const observer = { id: 'observer', project_ids: [sample.project.id], executor_ids: ['observer-executor'] };
@@ -23,8 +25,8 @@ function populate(store, p = principal, f = sample) {
   store.registerProject(p, f.manifest); store.registerExecutor(p, f.executor); store.registerWorkItem(p, f.work_item); store.createRun(p, f.run);
 }
 function database(t, policies = [sample.profile_policy, other.profile_policy]) {
-  const dir = mkdtempSync(join(tmpdir(), 'awh-c1b-')), path = join(dir, 'runtime.sqlite');
-  const stores = [], open = () => { const s = new ControlPlaneStore(path, policies); stores.push(s); return s; };
+  const dir = mkdtempSync(join(tmpdir(), 'awh-flow-08-')), path = join(dir, 'runtime.sqlite');
+  const stores = [], open = () => { const s = fixtureStore(path, policies); stores.push(s); return s; };
   t.after(() => { for (const s of stores) { try { s.close(); } catch {} } rmSync(dir, { recursive: true, force: true }); });
   return { dir, path, open, store: open() };
 }
@@ -54,13 +56,13 @@ async function frame(reader) {
 test('revision capability is authenticated read-only, bounded and has no DB mutation', async t => {
   const h = await httpService(t), before = h.store.latestCursor();
   assert.equal((await h.call('/v1/capabilities','GET',undefined,null)).status,401);
-  assert.deepEqual((await h.call('/v1/capabilities')).body,{revision_linking:'v021-docs-v1',database_version:2,authority_verified:false});
+  assert.deepEqual((await h.call('/v1/capabilities')).body,{revision_linking:'revision-link-v1',database_version:2,authority_verified:false});
   assert.equal((await h.call('/v1/capabilities?anything=1')).status,400);
   assert.equal((await h.call('/v1/capabilities','POST',{})).status,404);
   assert.equal(h.store.latestCursor(),before);
 });
 
-test('SQLite migration is repeatable, versioned, and preserves every registry and runtime after restart', t => {
+test('New SQLite initialization is versioned, and preserves every registry and runtime after restart', t => {
   const db = database(t); populate(db.store); const appended = db.store.append(principal, sample.run.id, event());
   db.store.heartbeat(principal, sample.executor.id); const lastSeen = db.store.listExecutors(principal)[0].last_seen;
   db.store.close(); const restored = db.open();
@@ -79,17 +81,6 @@ test('future SQLite versions fail closed without downgrading the database', t =>
   assert.throws(() => db.open(), e => e.code === 'database_version');
   const check = new DatabaseSync(db.path); assert.equal(check.prepare('PRAGMA user_version').get().user_version, 3); check.close();
 });
-test('C1-B version 1 migrates to version 2 without replacing existing records or Events', t => {
-  const db = database(t); populate(db.store); db.store.append(principal, sample.run.id, event()); db.store.close();
-  const raw = new DatabaseSync(db.path); raw.exec('DROP TABLE executor_clients; PRAGMA user_version = 1'); raw.close();
-  const restored = db.open(); assert.deepEqual(restored.getProject(principal, sample.project.id), sample.project);
-  assert.equal(restored.getRun(principal, sample.run.id).state, 'running'); assert.equal(restored.listEvents(principal, sample.run.id).length, 1);
-  assert.equal(restored.listExecutors(principal)[0].client, undefined);
-  const metadata = { schema_version: '1.0', executor_type: 'codex', machine_name: 'mini', arch: 'arm64', client_version: '0.1.0' };
-  assert.deepEqual(restored.registerExecutor(principal, sample.executor, metadata).client, metadata); restored.close();
-  const again = db.open(); assert.deepEqual(again.listExecutors(principal)[0].client, metadata);
-  const check = new DatabaseSync(db.path); assert.equal(check.prepare('PRAGMA user_version').get().user_version, 2); check.close();
-});
 test('optional Client metadata is closed, owner scoped, upgradeable and returned by heartbeat', async t => {
   const h = await httpService(t, false), client = { schema_version: '1.0', executor_type: 'codex', machine_name: 'mini', arch: 'arm64', client_version: '0.1.0' };
   assert.equal((await h.call('/v1/executors/register', 'POST', sample.executor)).status, 201);
@@ -103,17 +94,18 @@ test('optional Client metadata is closed, owner scoped, upgradeable and returned
   assert.deepEqual((await h.call('/v1/executors')).body.executors[0].client, upgraded);
   assert.equal((await h.call('/v1/executors', 'GET', undefined, h.windows.token)).body.executors.length, 0);
 });
-test('trusted Profile versions are immutable and new versions preserve old Run bindings', t => {
+test('Trusted Profile versions are immutable; normal restart cannot seed a new version', t => {
   const db = database(t); populate(db.store);
-  assert.throws(() => new ControlPlaneStore(db.path, [{ ...sample.profile_policy, base: 'develop' }]), e => e.code === 'profile_conflict');
-  assert.throws(() => new ControlPlaneStore(db.path, [{ ...sample.profile_policy, version: 'fixture-v2', repository: 'evil/repo' }]), e => e.code === 'profile_conflict');
-  const newer = new ControlPlaneStore(db.path, [{ ...sample.profile_policy, version: 'fixture-v2' }]);
+  assert.throws(() => fixtureStore(db.path, [{ ...sample.profile_policy, base: 'develop' }]), e => e.code === 'profile_conflict');
+  assert.throws(() => fixtureStore(db.path, [{ ...sample.profile_policy, version: 'fixture-v2', repository: 'evil/repo' }]), e => e.code === 'profile_conflict');
+  assert.throws(() => fixtureStore(db.path, [{ ...sample.profile_policy, version: 'fixture-v2' }]), e => e.code === 'profile_conflict');
+  const newer = db.open();
   assert.equal(newer.getRun(principal, sample.run.id).profile.version, 'fixture-v1');
-  assert.equal(newer.listProfiles(principal, sample.project.id).length, 2); newer.close();
+  assert.equal(newer.listProfiles(principal, sample.project.id).length, 1); newer.close();
 });
 test('Project identity comes only from Manifest bound to trusted registry and is immutable', t => {
   const { store } = database(t);
-  assert.throws(() => store.registerProject(principal, { ...sample.manifest, profile: { ref: 'webskill/arbitrary' } }), e => e.code === 'profile_binding');
+  assert.throws(() => store.registerProject(principal, { ...sample.manifest, profile: { ref: 'project-beta/arbitrary' } }), e => e.code === 'profile_binding');
   assert.throws(() => store.registerProject(principal, { ...sample.manifest, project: { ...sample.manifest.project, repository: 'evil/repo' } }), e => e.code === 'profile_binding');
   assert.throws(() => store.registerProject(principal, { ...sample.manifest, profile: { ...sample.manifest.profile, policy: sample.profile_policy } }), e => e.code === 'schema');
   assert.equal(store.registerProject(principal, sample.manifest).disposition, 'created');
@@ -204,8 +196,8 @@ test('HTTP registration, registry reads, Work Item and Run creation expose runti
   for (const [path, value] of [['/v1/projects/register', sample.manifest], ['/v1/executors/register', sample.executor], ['/v1/work-items/register', sample.work_item], ['/v1/runs', sample.run]]) {
     assert.equal((await h.call(path, 'POST', value)).status, 201); assert.equal((await h.call(path, 'POST', value)).status, 200);
   }
-  for (const path of ['/v1/projects', '/v1/projects/webskill', '/v1/executors', '/v1/profiles?project_id=webskill', '/v1/work-items/' + sample.work_item.id,
-    '/v1/runs?project_id=webskill', '/v1/runs/' + sample.run.id, '/v1/runs/' + sample.run.id + '/events']) {
+  for (const path of ['/v1/projects', '/v1/projects/project-beta', '/v1/executors', '/v1/profiles?project_id=project-beta', '/v1/work-items/' + sample.work_item.id,
+    '/v1/runs?project_id=project-beta', '/v1/runs/' + sample.run.id, '/v1/runs/' + sample.run.id + '/events']) {
     const result = await h.call(path); assert.equal(result.status, 200, path); assert.equal(result.body.authority_verified, false);
   }
   assert.equal((await h.call(`/v1/executors/${sample.executor.id}/heartbeat`, 'POST', {})).status, 200);
@@ -218,7 +210,7 @@ test('HTTP rejects missing, wrong and repository credentials on every read/write
 });
 test('HTTP scopes prevent cross-project reads/writes, forged Executor ownership and observer Event writes', async t => {
   const h = await httpService(t); populate(h.store, foreign, other);
-  for (const path of ['/v1/projects/webskill', '/v1/runs/' + sample.run.id, '/v1/runs/' + sample.run.id + '/events', '/v1/work-items/' + sample.work_item.id])
+  for (const path of ['/v1/projects/project-beta', '/v1/runs/' + sample.run.id, '/v1/runs/' + sample.run.id + '/events', '/v1/work-items/' + sample.work_item.id])
     assert.equal((await h.call(path, 'GET', undefined, h.windows.token)).status, 403);
   assert.deepEqual((await h.call('/v1/projects', 'GET', undefined, h.windows.token)).body.projects, [other.project]);
   assert.equal((await h.call('/v1/executors/register', 'POST', sample.executor, h.windows.token)).status, 403);
@@ -304,7 +296,8 @@ test('CLI is locally startable with dedicated config, survives process restart a
   const portService = createControlPlaneServer({ store: db.open(), authenticate: createAuthenticator([auth.client]) });
   await new Promise(resolve => portService.server.listen(0, '127.0.0.1', resolve)); const port = portService.server.address().port; await portService.close();
   const start = async () => {
-    const child = spawn(process.execPath, ['dist/control-plane-cli.js', '--database', db.path, '--config', config, '--port', String(port)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const runtime=join(db.dir,'runtime.json');writeFileSync(runtime,JSON.stringify({schema_version:'1.0',database:db.path,trusted_config_file:config,port}));
+    const child = spawn(process.execPath, ['dist/control-plane-cli.js', 'serve', '--runtime-config', runtime], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     t.after(() => { if (child.exitCode === null) child.kill(); });
     const exit = once(child, 'exit'); let output = '';
     await Promise.race([new Promise(resolve => child.stdout.on('data', data => { output += data; if (output.includes('listening')) resolve(); })), exit.then(() => { throw new Error('CLI exited before listening'); })]);

@@ -1,3 +1,4 @@
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';

@@ -14,7 +14,7 @@ import { setupMachine, enrollmentPreview, submitEnrollment, finishEnrollment, br
 
 export async function main(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
-  if (args.length === 1 && args[0] === '--help') return { commands: ['setup --machine-config <external-file> --home <external-directory> --endpoint <trusted-CP> --project-root <directory> [--ca <external-public-CA>] [--policy-trust <external-anchor>] [--reuse-machine-state <existing-directory>]',
+  if (args.length === 1 && args[0] === '--help') return { commands: ['setup --machine-config <external-file> --home <external-directory> --endpoint <trusted-CP> --project-root <directory> [--ca <external-public-CA>] [--policy-trust <external-anchor>]',
     'init --machine-config <external-file> --directory <Git-root> [--mode observe|develop --confirm] [--complete --confirm]',
     'doctor --machine-config <external-file> --directory <Git-root> [--json] [--probe-cp] [--repair [--confirm]]',
     'resident start|status|stop', 'doctor [--json] [--probe-cp] [--policy-trust <external-file> --work-item <id> --work-item-version <version> --observations <json-file>]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
@@ -32,16 +32,16 @@ export async function main(args: string[]): Promise<unknown> {
     if (configPath) clientFail('configuration','Machine initialization cannot override an existing Client config source');
     for (let i = 0; i < rest.length; i++) {
       const key = rest[i]!;
-      if (!['--machine-config','--directory','--mode','--confirm','--complete','--repair','--json','--browse','--policies','--endpoint','--home','--project-root','--ca','--policy-trust','--reuse-machine-state','--work-item','--work-item-version','--probe-cp'].includes(key) || options.has(key)) clientFail('arguments','Invalid initialization option');
+      if (!['--machine-config','--directory','--mode','--confirm','--complete','--repair','--json','--browse','--policies','--endpoint','--home','--project-root','--ca','--policy-trust','--work-item','--work-item-version','--probe-cp'].includes(key) || options.has(key)) clientFail('arguments','Invalid initialization option');
       if (['--confirm','--complete','--repair','--json','--browse','--probe-cp','--policies'].includes(key)) { options.set(key,'true'); continue; }
       const value = rest[++i]; if (!value || value.startsWith('--')) clientFail('arguments','Missing initialization value'); options.set(key,value);
     }
     const path = options.get('--machine-config'); if (!path) clientFail('arguments','Explicit machine setup required');
     if (command === 'setup') {
-      if (!['--endpoint','--home','--project-root'].every(k => options.has(k)) || [...options.keys()].some(k => !['--machine-config','--endpoint','--home','--project-root','--ca','--policy-trust','--reuse-machine-state'].includes(k))) clientFail('arguments','Invalid machine setup');
-      return setupMachine({path,endpoint:options.get('--endpoint')!,home:options.get('--home')!,projectRoot:options.get('--project-root')!,clientEntry:realpathSync(process.argv[1]!),ca:options.get('--ca'),policyTrust:options.get('--policy-trust'),existingMachineState:options.get('--reuse-machine-state')});
+      if (!['--endpoint','--home','--project-root'].every(k => options.has(k)) || [...options.keys()].some(k => !['--machine-config','--endpoint','--home','--project-root','--ca','--policy-trust'].includes(k))) clientFail('arguments','Invalid machine setup');
+      return setupMachine({path,endpoint:options.get('--endpoint')!,home:options.get('--home')!,projectRoot:options.get('--project-root')!,clientEntry:realpathSync(process.argv[1]!),ca:options.get('--ca'),policyTrust:options.get('--policy-trust')});
     }
-    if ([...options.keys()].some(k => ['--endpoint','--home','--project-root','--ca','--policy-trust','--reuse-machine-state'].includes(k))) clientFail('arguments','Machine setup cannot be overridden by project input');
+    if ([...options.keys()].some(k => ['--endpoint','--home','--project-root','--ca','--policy-trust'].includes(k))) clientFail('arguments','Machine setup cannot be overridden by project input');
     if (command === 'init' && options.has('--browse')) {
       if ([...options.keys()].some(k => !['--machine-config','--directory','--browse'].includes(k))) clientFail('arguments','Invalid directory browse');
       return browseDirectories(path,options.get('--directory'));

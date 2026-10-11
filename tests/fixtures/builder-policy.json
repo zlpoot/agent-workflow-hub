@@ -1,0 +1,336 @@
+{
+  "schema_version": "1.0",
+  "kind": "builder_policy",
+  "default_selection": {
+    "profile": "core",
+    "workflow": "flow-01"
+  },
+  "installation": {
+    "app_id": 123,
+    "installation_id": 456,
+    "account_login": "example-org",
+    "app_slug": "test-builder",
+    "selected_repository_sets": [
+      [
+        "example-org/workflow-core"
+      ],
+      [
+        "example-org/workflow-core",
+        "example-org/project-alpha"
+      ],
+      [
+        "example-org/workflow-core",
+        "example-org/project-alpha",
+        "example-org/project-beta"
+      ],
+      [
+        "example-org/project-gamma",
+        "example-org/workflow-core",
+        "example-org/project-alpha",
+        "example-org/project-beta"
+      ]
+    ],
+    "reviewers": [
+      {
+        "login": "reviewer",
+        "id": 1001
+      },
+      {
+        "login": "independent-reviewer",
+        "id": 1002
+      }
+    ],
+    "authorization_actors": [
+      {
+        "login": "example-owner",
+        "id": 1003
+      }
+    ]
+  },
+  "profiles": [
+    {
+      "id": "core",
+      "repository": "example-org/workflow-core",
+      "base": "main",
+      "workflows": [
+        {
+          "id": "flow-01",
+          "branch": "codex/flow-01-github-app-builder",
+          "work_item": {
+            "repo": "example-org/workflow-core",
+            "issue": 4
+          },
+          "verification_commands": [
+            "pnpm check"
+          ],
+          "bootstrap_paths": null,
+          "version": "fixture-v1",
+          "branch_mode": "fixed",
+          "executor_restrictions": {
+            "executor_ids": [
+              "alpha-executor",
+              "client-executor",
+              "fixture-windows-builder",
+              "fixture-macos-builder",
+              "scratch-executor",
+              "fixture-mac-builder",
+              "delivery-executor"
+            ],
+            "machine_ids": [
+              "fixture-machine",
+              "fixture-windows",
+              "fixture-macos",
+              "fixture-mac"
+            ]
+          }
+        },
+        {
+          "id": "flow-02",
+          "branch": "codex/flow-02-project-profiles",
+          "work_item": {
+            "repo": "example-org/workflow-core",
+            "issue": 6
+          },
+          "verification_commands": [
+            "pnpm check"
+          ],
+          "bootstrap_paths": null,
+          "version": "fixture-v1",
+          "branch_mode": "fixed",
+          "executor_restrictions": {
+            "executor_ids": [
+              "alpha-executor",
+              "client-executor",
+              "fixture-windows-builder",
+              "fixture-macos-builder",
+              "scratch-executor",
+              "fixture-mac-builder",
+              "delivery-executor"
+            ],
+            "machine_ids": [
+              "fixture-machine",
+              "fixture-windows",
+              "fixture-macos",
+              "fixture-mac"
+            ]
+          }
+        },
+        {
+          "id": "fixed-workflow",
+          "branch": "codex/fixed-workflow",
+          "work_item": {
+            "repo": "example-org/workflow-core",
+            "issue": 39
+          },
+          "verification_commands": [
+            "pnpm check"
+          ],
+          "bootstrap_paths": null,
+          "version": "fixture-v1",
+          "branch_mode": "fixed",
+          "executor_restrictions": {
+            "executor_ids": [
+              "alpha-executor",
+              "client-executor",
+              "fixture-windows-builder",
+              "fixture-macos-builder",
+              "scratch-executor",
+              "fixture-mac-builder",
+              "delivery-executor"
+            ],
+            "machine_ids": [
+              "fixture-machine",
+              "fixture-windows",
+              "fixture-macos",
+              "fixture-mac"
+            ]
+          }
+        },
+        {
+          "id": "flow-19",
+          "branch": "codex/flow-19-builder-adapter",
+          "work_item": {
+            "repo": "example-org/workflow-core",
+            "issue": 22
+          },
+          "verification_commands": [
+            "pnpm check"
+          ],
+          "bootstrap_paths": null,
+          "version": "fixture-v1",
+          "branch_mode": "fixed",
+          "executor_restrictions": {
+            "executor_ids": [
+              "alpha-executor",
+              "client-executor",
+              "fixture-windows-builder",
+              "fixture-macos-builder",
+              "scratch-executor",
+              "fixture-mac-builder",
+              "delivery-executor"
+            ],
+            "machine_ids": [
+              "fixture-machine",
+              "fixture-windows",
+              "fixture-macos",
+              "fixture-mac"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "project-alpha",
+      "repository": "example-org/project-alpha",
+      "base": "main",
+      "workflows": [
+        {
+          "id": "repeatable",
+          "branch": "codex/awh-task-",
+          "work_item": {
+            "repo": "example-org/project-alpha",
+            "issue": 0
+          },
+          "verification_commands": [
+            "git diff --check origin/main...HEAD"
+          ],
+          "bootstrap_paths": [
+            "docs/management/task-document.md",
+            "docs/management/fixed-document.md"
+          ],
+          "version": "repeatable-v1",
+          "branch_mode": "issue_prefix",
+          "executor_restrictions": {
+            "executor_ids": [
+              "alpha-executor",
+              "client-executor",
+              "fixture-windows-builder",
+              "fixture-macos-builder",
+              "scratch-executor",
+              "fixture-mac-builder",
+              "delivery-executor"
+            ],
+            "machine_ids": [
+              "fixture-machine",
+              "fixture-windows",
+              "fixture-macos",
+              "fixture-mac"
+            ]
+          }
+        },
+        {
+          "id": "docs",
+          "branch": "codex/fixed-document",
+          "work_item": {
+            "repo": "example-org/project-alpha",
+            "issue": 88
+          },
+          "verification_commands": [
+            "git diff --check origin/main...HEAD"
+          ],
+          "bootstrap_paths": [
+            "docs/management/fixed-document.md",
+            ".awh/project.yaml",
+            ".gitignore"
+          ],
+          "version": "fixed-v1",
+          "branch_mode": "fixed",
+          "executor_restrictions": {
+            "executor_ids": [
+              "alpha-executor",
+              "client-executor",
+              "fixture-windows-builder",
+              "fixture-macos-builder",
+              "scratch-executor",
+              "fixture-mac-builder",
+              "delivery-executor"
+            ],
+            "machine_ids": [
+              "fixture-machine",
+              "fixture-windows",
+              "fixture-macos",
+              "fixture-mac"
+            ]
+          }
+        },
+        {
+          "id": "bootstrap",
+          "branch": "codex/awh-flow-02-bootstrap",
+          "work_item": {
+            "repo": "example-org/workflow-core",
+            "issue": 6
+          },
+          "verification_commands": [
+            "pnpm lint",
+            "pnpm typecheck",
+            "pnpm test"
+          ],
+          "bootstrap_paths": [
+            "docs/management/agent-workflow-hub.md"
+          ],
+          "version": "fixture-v1",
+          "branch_mode": "fixed",
+          "executor_restrictions": {
+            "executor_ids": [
+              "alpha-executor",
+              "client-executor",
+              "fixture-windows-builder",
+              "fixture-macos-builder",
+              "scratch-executor",
+              "fixture-mac-builder",
+              "delivery-executor"
+            ],
+            "machine_ids": [
+              "fixture-machine",
+              "fixture-windows",
+              "fixture-macos",
+              "fixture-mac"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "project-beta",
+      "repository": "example-org/project-beta",
+      "base": "main",
+      "workflows": [
+        {
+          "id": "bootstrap",
+          "branch": "codex/awh-flow-03-project-beta-bootstrap",
+          "work_item": {
+            "repo": "example-org/workflow-core",
+            "issue": 8
+          },
+          "verification_commands": [
+            "pnpm check:foundations",
+            "pnpm lint",
+            "pnpm typecheck"
+          ],
+          "bootstrap_paths": [
+            "docs/management/agent-workflow-hub.md"
+          ],
+          "version": "fixture-v1",
+          "branch_mode": "fixed",
+          "executor_restrictions": {
+            "executor_ids": [
+              "alpha-executor",
+              "client-executor",
+              "fixture-windows-builder",
+              "fixture-macos-builder",
+              "scratch-executor",
+              "fixture-mac-builder",
+              "delivery-executor"
+            ],
+            "machine_ids": [
+              "fixture-machine",
+              "fixture-windows",
+              "fixture-macos",
+              "fixture-mac"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

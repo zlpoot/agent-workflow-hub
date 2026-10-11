@@ -1,12 +1,13 @@
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {appendEvent,replayRun} from '../dist/protocol/index.js';
 import {taskBinding} from '../dist/profiles.js';
 import {qualifyRecovery} from '../dist/client/recovery.js';
 function fixture(stage='verification') {
- const binding=taskBinding({repository:'zlpoot/future-ui',issue:90,branch:'codex/awh-task-90',source_sha:'a'.repeat(40),profile_ref:'future-ui/c1c-acceptance',profile_version:'v02-repeatable-v1',executor_id:'c1c-future-ui-windows',machine_id:'fixture-machine'});
+ const binding=taskBinding({repository:'example-org/project-alpha',issue:90,branch:'codex/awh-task-90',source_sha:'a'.repeat(40),profile_ref:'project-alpha/repeatable',profile_version:'repeatable-v1',executor_id:'alpha-executor',machine_id:'fixture-machine'});
  const next=taskBinding({...(({fingerprint,...data})=>data)(binding),source_sha:'b'.repeat(40)});
- const initial={schema_version:'1.0',kind:'run',id:'run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',project_id:'future-ui',work_item_id:'fixture-work',executor_id:binding.executor_id,machine_id:binding.machine_id,source:{provider:'github',repository:binding.repository,sha:binding.source_sha,ref:binding.branch},profile:{ref:binding.profile_ref,version:binding.profile_version},state:'created',created_at:'2026-10-08T00:00:00.000Z',updated_at:'2026-10-08T00:00:00.000Z',started_at:null,completed_at:null};
+ const initial={schema_version:'1.0',kind:'run',id:'run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',project_id:'project-alpha',work_item_id:'fixture-work',executor_id:binding.executor_id,machine_id:binding.machine_id,source:{provider:'github',repository:binding.repository,sha:binding.source_sha,ref:binding.branch},profile:{ref:binding.profile_ref,version:binding.profile_version},state:'created',created_at:'2026-10-08T00:00:00.000Z',updated_at:'2026-10-08T00:00:00.000Z',started_at:null,completed_at:null};
  const checks=[{command:'git diff --check origin/main...HEAD',exit_code:2}],events=[];
  const emit=(type,data,extensions={})=>{const e={schema_version:'1.0',kind:'event',id:'fixture-event-'+(events.length+1),run_id:initial.id,sequence:events.length+1,type,occurred_at:initial.created_at,payload:{schema_version:'1.0',data,extensions:{task_binding:binding,...extensions}}};appendEvent(initial,events,e);events.push(e);};
  emit('RUN_STARTED',{source_sha:binding.source_sha});emit('STEP_STARTED',{step_id:'builder-preflight',name:'App preflight'});emit('STEP_COMPLETED',{step_id:'builder-preflight',exit_code:stage==='verification'?0:2});

@@ -15,7 +15,7 @@ const stage = mkdtempSync(join(output, '.client-stage-'));
 try {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json')));
   mkdirSync(join(stage, 'dist/control-plane'), { recursive: true });
-  for (const path of viewer ? ['dashboard','dashboard-ui','dashboard-cli.js','dashboard-owner-cli.js','protocol','shared','validator.js','profiles.js','client','builder.js','control-plane/store.js'] : ['client','protocol','shared','validator.js','profiles.js','builder.js']) cpSync(join(root, 'dist', path), join(stage, 'dist', path), { recursive: true });
+  for (const path of viewer ? ['dashboard','dashboard-ui','dashboard-cli.js','protocol','shared','validator.js','profiles.js','client','builder.js','control-plane/store.js'] : ['client','protocol','shared','validator.js','profiles.js','builder.js']) cpSync(join(root, 'dist', path), join(stage, 'dist', path), { recursive: true });
   cpSync(join(root, 'dist/control-plane/security.js'), join(stage, 'dist/control-plane/security.js'));
   if (existsSync(join(root, 'docs/client.md'))) cpSync(join(root, viewer ? 'docs/windows-product.md' : 'docs/client.md'), join(stage, 'README.md'));
   cpSync(join(root, 'docs/doctor.md'), join(stage, 'doctor.md'));
@@ -24,6 +24,7 @@ try {
   cpSync(join(root, 'docs/project-enrollment.md'), join(stage, 'project-enrollment.md'));
   cpSync(join(root, 'config/schemas/client-machine.schema.json'), join(stage, 'client-machine.schema.json'));
   cpSync(join(root, 'docs/local-viewer.schema.json'), join(stage, 'local-viewer.schema.json'));
+  if (viewer) rmSync(join(stage, 'dist/dashboard-ui/build-inputs.json'), { force: true });
   const packageName = viewer ? '@zlpoot/awh-viewer' : CLIENT_PACKAGE;
   const packageJson = { name: packageName, version: CLIENT_VERSION, private: true, type: 'module', engines: { node: '>=24' },
     bin: viewer ? { 'awh-viewer': 'dist/dashboard-cli.js' } : { awh: 'dist/client/cli.js' }, ...(viewer ? {} : { exports: { '.': './dist/client/index.js' } }), files: ['dist', 'doctor.md', 'versioned-profile.md','windows-product.md','project-enrollment.md','client-machine.schema.json','local-viewer.schema.json'],
@@ -39,7 +40,7 @@ try {
     if (copied.has(name)) { assert.equal(copied.get(name), data.version, 'Bundled dependency version conflict'); return; }
     copied.set(name, data.version);
     cpSync(realpathSync(path), join(stage, 'node_modules', name), { recursive: true, dereference: true,
-      filter: file => !relative(path, file).split(/[\\/]/).includes('node_modules') });
+      filter: file => !relative(path, file).split(/[\\/]/).some(part => ['node_modules','test','tests','spec','benchmark','fixtures','examples','.github'].includes(part) || /\.(?:test|spec)[.-]/.test(part)) });
     const childRequire = createRequire(join(path, 'package.json'));
     for (const dependency of Object.keys({ ...data.dependencies, ...data.optionalDependencies })) copyDependency(dependency, childRequire);
   };

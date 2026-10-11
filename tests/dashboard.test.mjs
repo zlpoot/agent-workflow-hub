@@ -1,3 +1,5 @@
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomBytes, createHash } from 'node:crypto';
@@ -13,9 +15,9 @@ import { DashboardProjection } from '../dist/dashboard/projection.js';
 import { createViewerAuthenticator } from '../dist/dashboard/security.js';
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../examples/protocol/${name}.json`, import.meta.url)));
-const mac = fixture('webskill'), windows = fixture('future-ui');
+const mac = fixture('project-beta'), windows = fixture('project-alpha');
 const principal = f => ({ id: f.executor.id + '-client', project_ids: [f.project.id], executor_ids: [f.executor.id] });
-const viewer = { id: 'operator', project_ids: ['webskill', 'future-ui'] };
+const viewer = { id: 'operator', project_ids: ['project-beta', 'project-alpha'] };
 const started = (f, sequence = 1) => ({ schema_version: '1.0', kind: 'event', id: `event-${sequence}`, run_id: f.run.id, sequence,
   type: sequence === 1 ? 'RUN_STARTED' : 'STEP_STARTED', occurred_at: `2026-10-07T00:00:0${sequence}.000Z`,
   payload: { schema_version: '1.0', data: sequence === 1 ? { source_sha: f.run.source.sha } : { step_id: 'build', name: 'build' }, extensions: {} } });
@@ -29,7 +31,7 @@ const conforms = (name, value) => {
 function setup(t, withMetadata = true) {
   const dir = mkdtempSync(join(tmpdir(), 'awh-dashboard-')), path = join(dir, 'fixture.sqlite');
   let clock = Date.parse('2026-10-07T00:00:30.000Z');
-  const store = new ControlPlaneStore(path, [mac.profile_policy, windows.profile_policy], () => new Date(clock).toISOString());
+  const store = fixtureStore(path, [mac.profile_policy, windows.profile_policy], () => new Date(clock).toISOString());
   for (const f of [mac, windows]) {
     const p = principal(f);
     store.registerProject(p, f.manifest);
@@ -44,7 +46,7 @@ async function http(t, withMetadata = true) {
   const h = setup(t, withMetadata), token = randomBytes(32).toString('base64url'), foreignToken = randomBytes(32).toString('base64url');
   const clientToken = 'awh_cp_' + randomBytes(32).toString('base64url');
   const sessions = [ { ...viewer, session_sha256: hash(token), expires_at: new Date(h.clock + 3600000).toISOString() },
-    { id: 'mac-viewer', project_ids: ['webskill'], session_sha256: hash(foreignToken), expires_at: new Date(h.clock + 3600000).toISOString() } ];
+    { id: 'mac-viewer', project_ids: ['project-beta'], session_sha256: hash(foreignToken), expires_at: new Date(h.clock + 3600000).toISOString() } ];
   const authenticate = createViewerAuthenticator(sessions, () => h.clock);
   const service = createControlPlaneServer({ store: h.store, authenticate: createAuthenticator([{ ...principal(mac), token_sha256: hash(clientToken) }]),
     dashboard: { authenticate, now: () => h.clock }, poll_interval_ms: 20 });
@@ -86,7 +88,7 @@ test('OpenAPI is versioned, read-only, schema-complete and contains negative sco
   assert(api['x-negative-examples'].some(example => example.status === 403));
   assert(api['x-negative-examples'].some(example => example.code === 'invalid_cursor'));
 });
-test('Mac WebSkill and Windows Future UI projections use stored facts with unknown metadata and false authority', t => {
+test('Mac Project Beta and Windows Project Alpha projections use stored facts with unknown metadata and false authority', t => {
   const h = setup(t, false), snapshot = h.projection.snapshot(); conforms('Snapshot', snapshot);
   assert.equal(snapshot.cursor, 0); assert.equal(snapshot.projects.length, 2); assert.equal(snapshot.executors.length, 2);
   for (const project of snapshot.projects) { assert.equal(project.name, null); assert.equal(project.enabled, null); conforms('ProjectSummary', project); }
@@ -177,7 +179,7 @@ test('runtime Handoff/Review claims retain false authority and do not forward ar
     event(6, 'REVIEW_STARTED', { pull_request: pr, subject_sha: head, reviewer_executor_id: 'fixture-reviewer' }),
     event(7, 'REVIEW_PASSED', { pull_request: pr, subject_sha: head, reviewer_executor_id: 'fixture-reviewer', review })]) h.store.append(p, mac.run.id, value);
   const detail = h.projection.detail('runs', mac.run.id); assert.equal(detail.state, 'review_passed'); assert.equal(detail.authority_verified, false); conforms('RunDetail', detail);
-  assert(detail.github_refs.some(ref => ref.url === 'https://github.com/zlpoot/webskill/pull/42'));
+  assert(detail.github_refs.some(ref => ref.url === 'https://github.com/example-org/project-beta/pull/42'));
   assert(detail.github_refs.some(ref => ref.kind === 'review' && ref.url === null));
   const timeline = h.projection.timeline(mac.run.id, 0, 100); conforms('TimelinePage', timeline);
   assert(timeline.items.every(event => event.actor === null && event.authority_verified === false));
@@ -188,14 +190,14 @@ test('read-only projection preserves SQLite version, rows, owners, Event cursor 
   const raw = new DatabaseSync(h.path), dump = () => ['projects', 'profiles', 'executors', 'executor_clients', 'work_items', 'runs', 'events'].map(table => raw.prepare(`SELECT * FROM ${table}`).all());
   const before = dump(); h.projection.snapshot(); h.projection.detail('runs', mac.run.id); h.projection.timeline(null, 0, 100);
   assert.deepEqual(dump(), before); assert.equal(raw.prepare('PRAGMA user_version').get().user_version, 2); raw.close();
-  h.store.close(); const reopened = new ControlPlaneStore(h.path, [mac.profile_policy, windows.profile_policy]); h.stores.push(reopened);
+  h.store.close(); const reopened = fixtureStore(h.path, [mac.profile_policy, windows.profile_policy]); h.stores.push(reopened);
   const projection = new DashboardProjection(reopened, viewer); assert.equal(projection.snapshot().cursor, 1); assert.equal(projection.runs().find(run => run.id === mac.run.id).state, 'running');
   assert.equal(reopened.append(principal(mac), mac.run.id, started(mac)).disposition, 'idempotent'); assert.equal(projection.timeline(null, 0, 100).items.length, 1);
 });
 test('snapshot and every list/detail/timeline route conform to the machine-readable contract', async t => {
   const h = await http(t); h.store.append(principal(mac), mac.run.id, started(mac));
   for (const [path, schema] of [['/snapshot', 'Snapshot'], ['/projects', 'ProjectPage'], ['/runs', 'RunPage'], ['/executors', 'ExecutorPage'],
-    ['/projects/webskill', 'ProjectResponse'], [`/runs/${mac.run.id}`, 'RunResponse'], [`/executors/${mac.executor.id}`, 'ExecutorResponse'], [`/runs/${mac.run.id}/timeline`, 'TimelinePage']]) {
+    ['/projects/project-beta', 'ProjectResponse'], [`/runs/${mac.run.id}`, 'RunResponse'], [`/executors/${mac.executor.id}`, 'ExecutorResponse'], [`/runs/${mac.run.id}/timeline`, 'TimelinePage']]) {
     const result = await h.call('/dashboard/v1' + path); assert.equal(result.status, 200, path); conforms(schema, result.body);
     assert.equal(result.headers.get('cache-control'), 'no-store'); assert.equal(result.headers.get('access-control-allow-origin'), null);
     assert(!JSON.stringify(result.body).includes(h.clientToken)); assert(!JSON.stringify(result.body).includes(h.token));
@@ -210,7 +212,7 @@ test('viewer scope isolates all Project/Run/Executor/Snapshot/Timeline routes ac
     assert(!JSON.stringify(result.body).includes(windows.run.id)); assert(!JSON.stringify(result.body).includes(windows.executor.id));
     assert(!JSON.stringify(result.body).includes(windows.project.repository));
   }
-  for (const path of ['/projects/future-ui', '/runs?project_id=future-ui']) assert.equal((await h.call('/dashboard/v1' + path, { headers })).status, 403);
+  for (const path of ['/projects/project-alpha', '/runs?project_id=project-alpha']) assert.equal((await h.call('/dashboard/v1' + path, { headers })).status, 403);
   for (const path of [`/runs/${windows.run.id}`, `/runs/${windows.run.id}/timeline`, `/executors/${windows.executor.id}`]) assert.equal((await h.call('/dashboard/v1' + path, { headers })).status, 404);
   assert.equal((await h.call(`/dashboard/v1/runs/${mac.run.id}/timeline`, { headers })).body.items.length, 1);
 });
@@ -224,7 +226,7 @@ test('ID keyset pagination binds to resource/scope/filters and rejects malformed
   assert.equal((await h.call('/dashboard/v1/runs?state=created&cursor=' + first.body.next_cursor)).status, 400);
   assert.equal((await h.call('/dashboard/v1/projects?cursor=' + first.body.next_cursor)).status, 400);
   assert.equal((await h.call('/dashboard/v1/runs?cursor=' + first.body.next_cursor, { headers: { Cookie: 'awh_viewer=' + h.foreignToken } })).status, 400);
-  assert.equal((await h.call('/dashboard/v1/runs?project_id=webskill&state=created&executor_id=' + mac.executor.id)).body.items.length, 1);
+  assert.equal((await h.call('/dashboard/v1/runs?project_id=project-beta&state=created&executor_id=' + mac.executor.id)).body.items.length, 1);
 });
 test('browser boundary refuses Client bearer, PAT, JWT, cross-origin fetch, DNS rebinding and duplicate cookies', async t => {
   const h = await http(t);
@@ -256,26 +258,26 @@ test('viewer cannot mutate or start Executor/Run/Project/Profile/credential via 
 test('SSE snapshot watermark, global reconnect cursor, scope gaps and idempotent retries do not duplicate Events', async t => {
   const h = await http(t); h.store.append(principal(mac), mac.run.id, started(mac));
   const snapshot = await h.call('/dashboard/v1/snapshot'); assert.equal(snapshot.body.cursor, 1);
-  const first = await h.stream('/dashboard/v1/events/stream?after=1&project_id=webskill');
+  const first = await h.stream('/dashboard/v1/events/stream?after=1&project_id=project-beta');
   const hint = await first.next('view-refresh'); conforms('ViewRefresh', hint.data); assert.equal(hint.id, null);
   h.store.append(principal(windows), windows.run.id, started(windows)); h.store.append(principal(mac), mac.run.id, started(mac, 2));
-  const event = await first.next('timeline-event'); assert.equal(event.id, '3'); conforms('TimelineEvent', event.data); assert.equal(event.data.project_id, 'webskill'); first.abort.abort();
+  const event = await first.next('timeline-event'); assert.equal(event.id, '3'); conforms('TimelineEvent', event.data); assert.equal(event.data.project_id, 'project-beta'); first.abort.abort();
   h.store.append(principal(mac), mac.run.id, started(mac, 2)); assert.equal(h.store.latestCursor(), 3);
   const last = { ...started(mac, 2), id: 'finish-step', sequence: 3, type: 'STEP_COMPLETED', occurred_at: '2026-10-07T00:00:03.000Z',
     payload: { schema_version: '1.0', data: { step_id: 'build', exit_code: 0 }, extensions: {} } };
   h.store.append(principal(mac), mac.run.id, last);
-  const second = await h.stream('/dashboard/v1/events/stream?project_id=webskill', { 'Last-Event-ID': '3' });
+  const second = await h.stream('/dashboard/v1/events/stream?project_id=project-beta', { 'Last-Event-ID': '3' });
   const next = await second.next('timeline-event'); assert.equal(next.id, '4'); assert.equal(next.data.result, 'passed');
   assert.equal(h.store.latestCursor(), 4); second.abort.abort();
 });
 test('SSE isolates a viewer from other projects and rejects future/malformed/conflicting cursors before headers', async t => {
   const h = await http(t); h.store.append(principal(windows), windows.run.id, started(windows)); h.store.append(principal(mac), mac.run.id, started(mac));
   const stream = await h.stream('/dashboard/v1/events/stream?after=0', { Cookie: 'awh_viewer=' + h.foreignToken });
-  const event = await stream.next('timeline-event'); assert.equal(event.id, '2'); assert.equal(event.data.project_id, 'webskill'); stream.abort.abort();
+  const event = await stream.next('timeline-event'); assert.equal(event.id, '2'); assert.equal(event.data.project_id, 'project-beta'); stream.abort.abort();
   for (const query of ['', '?after=-1', '?after=3', '?after=', '?after=0&after=0', '?after=0&run_id=', '?after=0&project_id='])
     assert.equal((await h.call('/dashboard/v1/events/stream' + query)).status, 400, query);
   assert.equal((await h.call('/dashboard/v1/events/stream?after=0', { headers: { 'Last-Event-ID': '0' } })).status, 400);
-  assert.equal((await h.call('/dashboard/v1/events/stream?after=0&project_id=future-ui', { headers: { Cookie: 'awh_viewer=' + h.foreignToken } })).status, 403);
+  assert.equal((await h.call('/dashboard/v1/events/stream?after=0&project_id=project-alpha', { headers: { Cookie: 'awh_viewer=' + h.foreignToken } })).status, 403);
 });
 test('session expiry disconnects active streams and registration/heartbeat changes produce unnumbered refresh hints', async t => {
   const h = await http(t), stream = await h.stream('/dashboard/v1/events/stream?after=0');
@@ -301,7 +303,7 @@ test('bounded views fail closed instead of silently truncating existing scoped R
   raw.exec('COMMIT'); raw.close();
   assert.throws(() => h.projection.snapshot(), error => error.status === 503 && error.code === 'projection_limit');
   // Scope filtering precedes caps, so the other small project remains readable.
-  assert.equal(new DashboardProjection(h.store, { id: 'other-viewer', project_ids: ['future-ui'] }).snapshot().runs.length, 1);
+  assert.equal(new DashboardProjection(h.store, { id: 'other-viewer', project_ids: ['project-alpha'] }).snapshot().runs.length, 1);
 });
 test('viewer sessions freeze explicit scope and reject wildcard, extra fields, duplicate identities and invalid expiry', () => {
   const session = { ...viewer, project_ids: [...viewer.project_ids], session_sha256: hash('fixture'), expires_at: '2026-10-07T01:00:00.000Z' };

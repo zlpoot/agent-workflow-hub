@@ -32,7 +32,7 @@ export function readMachineConfig(path: string): MachineConfig {
   if (c.ca_certificate_file && endpoint.protocol !== 'https:') clientFail('certificate','CA requires HTTPS');
   return c;
 }
-export function setupMachine(options: { path: string; endpoint: string; home: string; projectRoot: string; clientEntry: string; ca?: string; policyTrust?: string; existingMachineState?: string }) {
+export function setupMachine(options: { path: string; endpoint: string; home: string; projectRoot: string; clientEntry: string; ca?: string; policyTrust?: string }) {
   const home = externalPath(options.home), entry = externalFilePath(options.clientEntry, 1024 * 1024);
   const config: MachineConfig = { schema_version: '1.0', endpoint: options.endpoint, home, project_roots: [realpathSync(options.projectRoot)],
     client_entry: entry, client_entry_sha256: hash(readFileSync(entry)), executor_type: 'codex', ...(options.ca ? { ca_certificate_file: options.ca } : {}), ...(options.policyTrust ? {policy_trust_file:options.policyTrust} : {}) };
@@ -42,12 +42,6 @@ export function setupMachine(options: { path: string; endpoint: string; home: st
   try {
     writeFileSync(temporary,JSON.stringify(config,null,2),{flag:'wx',mode:0o600});created = true;readMachineConfig(temporary);
     mkdirSync(join(home,'state'),{recursive:true,mode:0o700});externalPath(join(home,'state'));
-    if (options.existingMachineState) {
-      const source = externalPath(options.existingMachineState), original = machine({state_directory:source,executor_type:config.executor_type} as ClientConfig,false);
-      const target = join(home,'state','machine.json');
-      if (existsSync(target)) {if (!same(machine({state_directory:join(home,'state'),executor_type:config.executor_type} as ClientConfig,false),original)) clientFail('machine','Existing Machine identity cannot be replaced');}
-      else writeFileSync(target,JSON.stringify(original),{flag:'wx',mode:0o600});
-    }
     machine({state_directory:join(home,'state'),executor_type:config.executor_type} as ClientConfig);
     writeFileSync(path,JSON.stringify(config,null,2),{flag:'wx',mode:0o600});
   } finally {if (created) try {unlinkSync(temporary);}catch(e){if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;}}

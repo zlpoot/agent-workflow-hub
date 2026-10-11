@@ -1,3 +1,5 @@
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, randomBytes } from 'node:crypto';
@@ -21,24 +23,24 @@ function git(cwd, args) {
   const r = spawnSync('git', ['-c','commit.gpgsign=false','-c','core.hooksPath=' + (process.platform === 'win32' ? 'NUL' : '/dev/null'), ...args], { cwd, env: { ...cleanEnv(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null' }, encoding: 'utf8', windowsHide: true });
   assert.equal(r.status, 0, 'Fixture Git command failed'); return r.stdout.trim();
 }
-function consumer(base, name = 'consumer', repository = 'zlpoot/webskill') {
+function consumer(base, name = 'consumer', repository = 'example-org/project-beta') {
   const path = join(base, name); mkdirSync(path); git(path, ['init','-b','main']); git(path, ['config','user.name','Test']); git(path, ['config','user.email','test@example.invalid']);
   git(path, ['remote','add','origin','https://github.com/' + repository + '.git']); writeFileSync(join(path, 'source.txt'), 'fixture\n'); git(path, ['add','source.txt']); git(path, ['commit','-m','fixture']); return path;
 }
 function removeTemporary(path) {
-  assert(dirname(path) === tmpdir() && path.startsWith(join(tmpdir(), 'awh-c1c-'))); rmSync(path, { recursive: true, force: true });
+  assert(dirname(path) === tmpdir() && path.startsWith(join(tmpdir(), 'awh-flow-09-'))); rmSync(path, { recursive: true, force: true });
 }
 function temporary(t, cleanup = true) {
-  const path = mkdtempSync(join(tmpdir(), 'awh-c1c-'));
+  const path = mkdtempSync(join(tmpdir(), 'awh-flow-09-'));
   if (cleanup) t.after(() => removeTemporary(path)); return path;
 }
 async function harness(t, { proxy = false, policies } = {}) {
-  const base = temporary(t, false), repo = consumer(base), f = fixture('webskill');
+  const base = temporary(t, false), repo = consumer(base), f = fixture('project-beta');
   const token = 'awh_cp_' + randomBytes(32).toString('base64url'), foreignToken = 'awh_cp_' + randomBytes(32).toString('base64url');
-  const principal = { id: 'c1c-client', project_ids: ['webskill'], executor_ids: ['client-executor'] };
-  const foreign = { id: 'other-client', project_ids: ['future-ui'], executor_ids: ['other-executor'] };
+  const principal = { id: 'flow-09-client', project_ids: ['project-beta'], executor_ids: ['client-executor'] };
+  const foreign = { id: 'other-client', project_ids: ['project-alpha'], executor_ids: ['other-executor'] };
   const registered = (p, value) => ({ ...p, token_sha256: createHash('sha256').update(value).digest('hex') });
-  const store = new ControlPlaneStore(join(base, 'runtime.sqlite'), policies ?? [f.profile_policy, fixture('future-ui').profile_policy]);
+  const store = fixtureStore(join(base, 'runtime.sqlite'), policies ?? [f.profile_policy, fixture('project-alpha').profile_policy]);
   const service = createControlPlaneServer({ store, authenticate: createAuthenticator([registered(principal, token), registered(foreign, foreignToken)]) });
   await new Promise(resolveListen => service.server.listen(0, '127.0.0.1', resolveListen));
   const cp = `http://127.0.0.1:${service.server.address().port}`;
@@ -60,7 +62,7 @@ async function harness(t, { proxy = false, policies } = {}) {
   }
   const credential = join(base, 'client.credential'); writeFileSync(credential, token, { mode: 0o600 });
   const configPath = join(base, 'client.json'), config = { schema_version: '1.0', endpoint, credential_file: credential, state_directory: join(base,'state'), executor_id: 'client-executor', executor_type: 'codex' };
-  writeFileSync(configPath, JSON.stringify(config)); initManifest(inspectRepository(repo), 'webskill', f.manifest.profile.ref);
+  writeFileSync(configPath, JSON.stringify(config)); initManifest(inspectRepository(repo), 'project-beta', f.manifest.profile.ref);
   const client = new AwhClient(configPath, repo), sessionPath = () => join(config.state_directory, readdirSync(config.state_directory).find(n => /^[a-f0-9]{64}$/.test(n)), 'session.json');
   t.after(async () => { await service.close(); store.close(); removeTemporary(base); });
   return { base, repo, client, config, configPath, token, foreignToken, principal, foreign, store, cp, attempts, sessionPath,
@@ -77,18 +79,18 @@ async function runCli(file, args, cwd, env = cleanEnv()) {
 
 test('real Git root/origin binding; minimal Manifest is idempotent, closed and never overwrites identity', t => {
   const base = temporary(t), repo = consumer(base); mkdirSync(join(repo,'nested')); const identity = inspectRepository(join(repo,'nested'));
-  assert.equal(identity.root, repo); assert.equal(identity.repository, 'zlpoot/webskill'); assert.equal(identity.dirty, false);
-  const manifest = initManifest(identity,'webskill','webskill/bootstrap'); assert.deepEqual(initManifest(identity,'webskill','webskill/bootstrap'),manifest);
-  assert.deepEqual(readManifest(identity),manifest); assert.throws(() => initManifest(identity,'different','webskill/bootstrap'),errorCode('manifest_conflict'));
+  assert.equal(identity.root, repo); assert.equal(identity.repository, 'example-org/project-beta'); assert.equal(identity.dirty, false);
+  const manifest = initManifest(identity,'project-beta','project-beta/bootstrap'); assert.deepEqual(initManifest(identity,'project-beta','project-beta/bootstrap'),manifest);
+  assert.deepEqual(readManifest(identity),manifest); assert.throws(() => initManifest(identity,'different','project-beta/bootstrap'),errorCode('manifest_conflict'));
   const path = join(repo,'.awh/project.yaml'), original = readFileSync(path,'utf8');
-  for (const invalid of [original + 'commands: []\n', original.replace('profile:', 'project:'), original.replace('"webskill/bootstrap"','&alias'), original.replace('"webskill/bootstrap"','!!str value'), original.replace('"zlpoot/webskill"','"evil/repo"')]) {
+  for (const invalid of [original + 'commands: []\n', original.replace('profile:', 'project:'), original.replace('"project-beta/bootstrap"','&alias'), original.replace('"project-beta/bootstrap"','!!str value'), original.replace('"example-org/project-beta"','"evil/repo"')]) {
     writeFileSync(path,invalid); assert.throws(() => readManifest(identity));
   }
-  writeFileSync(path,original); git(repo,['remote','set-url','origin','git@github.com:zlpoot/future-ui.git']); assert.throws(() => readManifest(inspectRepository(repo)),errorCode('origin_mismatch'));
-  for (const origin of ['https://github.com/evil/repo?token=hidden', 'https://user:hidden@github.com/zlpoot/webskill.git','https://evil.invalid/zlpoot/webskill.git','file:///tmp/repo']) {
+  writeFileSync(path,original); git(repo,['remote','set-url','origin','git@github.com:example-org/project-alpha.git']); assert.throws(() => readManifest(inspectRepository(repo)),errorCode('origin_mismatch'));
+  for (const origin of ['https://github.com/evil/repo?token=hidden', 'https://user:hidden@github.com/example-org/project-beta.git','https://evil.invalid/example-org/project-beta.git','file:///tmp/repo']) {
     git(repo,['remote','set-url','origin',origin]); assert.throws(() => inspectRepository(repo),errorCode('origin'));
   }
-  git(repo,['remote','set-url','origin','https://github.com/zlpoot/webskill.git']); git(repo,['config','url.https://evil.invalid/.insteadOf','https://github.com/']); assert.throws(() => inspectRepository(repo),errorCode('origin'));
+  git(repo,['remote','set-url','origin','https://github.com/example-org/project-beta.git']); git(repo,['config','url.https://evil.invalid/.insteadOf','https://github.com/']); assert.throws(() => inspectRepository(repo),errorCode('origin'));
 });
 
 test('dedicated explicit off-project config fails closed on plaintext LAN, credentials, redirects in paths and unknown fields', async t => {
@@ -109,7 +111,7 @@ test('read-only Git inspection never executes configured fsmonitor or filter dri
   const quote = path => "'" + path.replaceAll('\\','/').replaceAll("'","'\\''") + "'";
   const driver = quote(process.execPath) + ' ' + quote(script);
   git(repo,['config','core.fsmonitor',driver]);
-  assert.equal(inspectRepository(repo).repository,'zlpoot/webskill'); assert.equal(existsSync(marker),false);
+  assert.equal(inspectRepository(repo).repository,'example-org/project-beta'); assert.equal(existsSync(marker),false);
   git(repo,['config','filter.fixture.clean',driver]);writeFileSync(join(repo,'.gitattributes'),'source.txt filter=fixture\n');writeFileSync(join(repo,'source.txt'),'modified fixture\n');
   assert.throws(() => inspectRepository(repo),errorCode('origin')); assert.equal(existsSync(marker),false);
 });
@@ -118,7 +120,7 @@ test('real linked worktrees with an unused worktreeConfig extension retain canon
   const base = temporary(t), repo = consumer(base), linked = join(base,'linked');
   git(repo,['config','extensions.worktreeConfig','true']); git(repo,['worktree','add','-b','acceptance',linked]);
   const common = readFileSync(join(repo,'.git/config')), marker = readFileSync(join(linked,'.git'));
-  const identity = inspectRepository(linked); assert.equal(identity.root,linked); assert.equal(identity.repository,'zlpoot/webskill');
+  const identity = inspectRepository(linked); assert.equal(identity.root,linked); assert.equal(identity.repository,'example-org/project-beta');
   assert.equal(identity.ref,'acceptance'); assert.equal(identity.sha,git(repo,['rev-parse','HEAD'])); assert.equal(identity.dirty,false);
   assert(common.equals(readFileSync(join(repo,'.git/config')))); assert(marker.equals(readFileSync(join(linked,'.git'))));
   const scoped = resolve(linked,git(linked,['rev-parse','--git-path','config.worktree']));
@@ -137,7 +139,7 @@ test('worktree-specific overrides remain refused before callbacks or substituted
     git(linked,['config','--worktree',key,value]); assert.throws(() => inspectRepository(linked),errorCode('origin'));
     assert.equal(existsSync(marker),false); git(linked,['config','--worktree','--unset-all',key]);
   }
-  assert.equal(inspectRepository(linked).repository,'zlpoot/webskill');
+  assert.equal(inspectRepository(linked).repository,'example-org/project-beta');
   git(repo,['config','--add','extensions.worktreeConfig','false']); assert.throws(() => inspectRepository(linked),errorCode('origin'));
 });
 
@@ -146,7 +148,7 @@ test('native Client registers metadata/heartbeat and reports exact source, order
   const registered = await h.client.register(); assert.equal(registered.client.client_version,CLIENT_VERSION); assert.equal(registered.client.executor_type,'codex');
   assert.equal(registered.executor.machine.platform,nativePlatform); assert.equal(registered.client.arch,process.arch); assert(registered.client.machine_name);
   assert.equal((await h.client.status()).run,null); const started = await h.client.start(21); assert.equal(started.event.sequence,1); assert.equal(started.run.state,'running');
-  assert.equal(started.run.source.sha,before); assert.equal(started.run.source.repository,'zlpoot/webskill'); assert.equal(started.event.payload.extensions.source_dirty,true);
+  assert.equal(started.run.source.sha,before); assert.equal(started.run.source.repository,'example-org/project-beta'); assert.equal(started.event.payload.extensions.source_dirty,true);
   assert.equal((await h.client.start(21)).run.id,started.run.id); await assert.rejects(h.client.start(22),errorCode('active_run'));
   await h.client.event('STEP_STARTED',{ step_id:'controlled', name:'Client reporting smoke test' }); await h.client.event('STEP_COMPLETED',{ step_id:'controlled', exit_code:0 });
   await assert.rejects(h.client.finish(),errorCode('review_gate'));
@@ -180,7 +182,7 @@ test('machine identity and session survive moving a consumer; corrupt state and 
 });
 
 test('ambiguous trusted versions require explicit external selection; Manifest never uploads policy', async t => {
-  const policy = fixture('webskill').profile_policy, h = await harness(t,{policies:[policy,{...policy,version:'fixture-v2'}]}); await h.client.register();
+  const policy = fixture('project-beta').profile_policy, h = await harness(t,{policies:[policy,{...policy,version:'fixture-v2'}]}); await h.client.register();
   await assert.rejects(h.client.start(21),errorCode('profile')); h.updateConfig({profile_version:'fixture-v2'}); assert.equal((await h.client.start(21)).run.profile.version,'fixture-v2');
   for (const type of ['GITHUB_PR_CREATED','HANDOFF_PUBLISHED','REVIEW_PASSED','RUN_COMPLETED','MERGE']) await assert.rejects(h.client.event(type,{}),errorCode('event_type'));
   await assert.rejects(h.client.event('RUN_FAILED',{reason:'awh_cp_' + randomBytes(32).toString('base64url')})); assert.equal(h.store.latestCursor(),1);
@@ -225,7 +227,7 @@ test('local package installs offline with bundled runtime and real bin; full CLI
   const installedRepo = join(h.base,'installed-consumer-worktree');
   git(h.repo,['config','extensions.worktreeConfig','true']); git(h.repo,['worktree','add','-b','installed-client',installedRepo]);
   const invoke = async args => { const r = await runCli(linkedCli,args,installedRepo); assert.equal(r.code,0,r.stderr); assert(!r.stdout.includes(h.token)); return JSON.parse(r.stdout); };
-  await invoke(['init','--profile',fixture('webskill').manifest.profile.ref]); await invoke(['--config',h.configPath,'register']); const started = await invoke(['--config',h.configPath,'start','--issue','21']);
+  await invoke(['init','--profile',fixture('project-beta').manifest.profile.ref]); await invoke(['--config',h.configPath,'register']); const started = await invoke(['--config',h.configPath,'start','--issue','21']);
   const payload = join(h.base,'event.json'); writeFileSync(payload,JSON.stringify({step_id:'installed',name:'Installed CLI smoke test'})); await invoke(['--config',h.configPath,'event','--type','STEP_STARTED','--data',payload]);
   assert.equal((await invoke(['--config',h.configPath,'status'])).run.id,started.run.id);
   writeFileSync(payload,JSON.stringify({reason:'Controlled installation test; no delivery/Review'})); assert.equal((await invoke(['--config',h.configPath,'finish','--outcome','failed','--data',payload])).run.state,'failed');

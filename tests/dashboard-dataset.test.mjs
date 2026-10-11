@@ -1,3 +1,5 @@
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawn, spawnSync } from 'node:child_process';
@@ -96,8 +98,8 @@ test('installed standard Viewer never displays the fixture marker', { timeout: 6
   const install = spawnSync(process.execPath, [npmEntry(), 'install', '--prefix', join(base, 'installed'), '--ignore-scripts', '--offline', '--no-audit', '--no-fund', artifact],
     { cwd: base, env: npmEnv(join(base, 'cache')), encoding: 'utf8', windowsHide: true, timeout: 60000 });
   assert.equal(install.status, 0, 'Offline Viewer package installation failed');
-  const fixture = JSON.parse(readFileSync(new URL('../examples/protocol/webskill.json', import.meta.url)));
-  const database = join(base, 'fixture.sqlite'), store = new ControlPlaneStore(database, [fixture.profile_policy]);
+  const fixture = JSON.parse(readFileSync(new URL('../examples/protocol/project-beta.json', import.meta.url)));
+  const database = join(base, 'fixture.sqlite'), store = fixtureStore(database, [fixture.profile_policy]);
   try { store.registerProject({ id: 'fixture-reader', project_ids: [fixture.project.id], executor_ids: [] }, fixture.manifest); } finally { store.close(); }
   const probe = createServer(); await new Promise(resolvePort => probe.listen(0, '127.0.0.1', resolvePort));
   const port = probe.address().port; await new Promise(resolvePort => probe.close(resolvePort));

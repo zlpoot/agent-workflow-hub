@@ -1,26 +1,26 @@
-import { deliveryPolicy } from './delivery-policy.js';
-import { selectWorkflow } from '../profiles.js';
-import { clientFail } from './local.js';
-import { comparePolicy, type PolicyFacts } from '../shared/preflight.js';
-import type { ProfilePolicy } from '../protocol/index.js';
+import { createHash } from 'node:crypto';
+import { dirname, join } from 'node:path';
+import { readExternalFile } from '../shared/external-files.js';
+import { enrollmentGrants, type EnrollmentGrant } from '../shared/enrollment.js';
+import { clientFail, same, type ClientConfig, type Machine, type RepositoryIdentity } from './local.js';
+import type { ProjectManifest } from '../protocol/index.js';
 
-/** Read-only static comparison, independent of the Deliver allowlist. */
-export function observationPolicy(ref: string, version?: string) {
-  if (ref === 'future-ui/c1c-acceptance' || ref === 'future-ui/default' || ref === 'webskill/default') return deliveryPolicy(ref, version);
-  const [profile, workflow, extra] = ref.split('/');
-  if (extra || !profile || !workflow) clientFail('profile', 'No static observation mapping');
-  return selectWorkflow({ profile, workflow });
+/** Read-only Enrollment comparison; never selects or grants a Deliver workflow. */
+export function observationPolicy(configPath: string, config: ClientConfig, identity: RepositoryIdentity,
+  manifest: ProjectManifest, machine: Machine): EnrollmentGrant {
+  const directory = dirname(configPath);
+  const request = JSON.parse(readExternalFile(join(directory, 'request.json'), 16384).toString('utf8'));
+  const grant = enrollmentGrants([JSON.parse(readExternalFile(join(directory, 'approved.json'), 16384).toString('utf8'))])[0]!;
+  const worktree = 'worktree-' + createHash('sha256').update(identity.root).digest('hex').slice(0, 32);
+  if (!same(grant.request, request) || !same(grant.manifest, manifest) || grant.request.mode !== 'observe' ||
+      manifest.profile.ref !== 'observe/' + manifest.project.id || grant.request.profile_ref !== manifest.profile.ref ||
+      grant.request.repository !== identity.repository || grant.request.worktree_id !== worktree ||
+      grant.request.executor_id !== config.executor_id || !same(grant.request.machine, { id: machine.id, platform: machine.platform }))
+    clientFail('enrollment_binding', 'Observe Enrollment differs from the current repository, Manifest or Machine');
+  return grant;
 }
-export function compareObservedPolicy(policy: ProfilePolicy, ref: string) {
-  const fixed = observationPolicy(ref, policy.version);
-  const repeatable = fixed.workflow.id === 'repeatable-docs';
-  const approved: Partial<PolicyFacts> = { repository: fixed.profile.repository, issue_repository: fixed.workflow.work_item.repo,
-    ...(repeatable ? { executor: 'c1c-future-ui-windows' } : { issue: fixed.workflow.work_item.issue }), base: fixed.profile.base,
-    branch: fixed.workflow.branch, checks: fixed.workflow.verification_commands, profile_ref: ref };
-  const result = comparePolicy(approved, { repository: policy.repository, base: policy.base, branch: policy.branch.ref,
-    checks: policy.verification.commands, profile_ref: policy.ref, profile_version: policy.version,
-    ...(repeatable ? { executor: policy.executor_restrictions?.executor_ids.length === 1 ? policy.executor_restrictions.executor_ids[0]! : '[ambiguous]' } : {}) });
-  if (policy.branch.mode !== (fixed.workflow.id === 'repeatable-docs' ? 'issue_prefix' : 'fixed')) result.status = 'blocked';
-  if (repeatable && policy.executor_restrictions?.machine_ids.length !== 1) result.status = 'blocked';
-  return result;
+
+export function compareObservedPolicy(value: unknown, approved: EnrollmentGrant): void {
+  const observed = enrollmentGrants([value])[0]!;
+  if (!same(observed, approved)) clientFail('enrollment_binding', 'CP Observe Enrollment differs from the retained approval');
 }

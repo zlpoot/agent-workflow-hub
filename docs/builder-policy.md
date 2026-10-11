@@ -1,0 +1,21 @@
+# Administrator-approved Builder policy
+
+The sole Deliver policy source is a closed `builder_policy` JSON file. The administrator approves the complete bytes and independently supplies their SHA-256 digest via AWH_BUILDER_POLICY_SHA256, together with the absolute external AWH_BUILDER_POLICY_FILE path, in an OS-protected launcher environment. The file must be outside every Git worktree, bounded to 256 KiB, nonempty, non-redirected and owner-only on Unix. Windows deployment ACL ownership is an administrator provisioning requirement. Protect both the file and launcher; the digest is a pin relative to this trust root, not a signature or remote approval service.
+
+No CLI argument, ordinary Client configuration, project YAML, CP response, GitHub Issue or repository file supplies this authority. Missing source, changed bytes, invalid schema and unknown selection fail before credentials or network access. A checked-in example is never loaded as authority. This candidate does not automatically provision real repository grants.
+
+The top-level fields are schema_version=1.0, kind=builder_policy, default_selection, installation and profiles. default_selection is an explicitly approved profile/workflow pair. It is not a product repository default.
+
+installation binds app_id, installation_id, account_login, app_slug, exact selected_repository_sets, reviewers and authorization_actors. Reviewer and Human authorization entries bind both login and numeric GitHub ID. Permission sets remain fixed in Builder code; policies cannot grant administration, workflow mutation, Review, approve or merge. Selected-set inspection uses metadata-only permission; duplicate, partial, unexpected, paginated/incomplete and All repositories scopes fail closed. Every subsequent token requests and checks one target repository with the operation's minimum permission set.
+
+Each profile contains id, repository, base and workflows. Each workflow contains id, version, branch, branch_mode, work_item={repo,issue}, verification_commands, bootstrap_paths and executor_restrictions={executor_ids,machine_ids}. All lists are nonempty, bounded and duplicate-free; bootstrap_paths may be null for a fixed workflow. A fixed branch cannot equal base. An issue_prefix branch ends in a dash or slash, binds a positive safe Issue suffix and requires an approved path allowlist, Executor and Machine. Its policy placeholder issue is zero; the frozen Task binding carries the positive Issue and exact source SHA. No project input can change base, branch template, commands, paths or identities.
+
+Client compares the exact CP Profile version, repository, base, branch mode/template, ordered checks and executor restrictions with this policy. CP data is comparison data, never a command grant. Protocol validates general structural and identity constraints; only the approved source authorizes execution.
+
+Verification additionally accepts only a bounded executor grammar: pnpm script commands (optionally `--config.verifyDepsBeforeRun=false` and `run`), `node --test tests/<files>.mjs`, or `git diff --check origin/<base>...HEAD`. It strips App/GitHub/CP environment secrets before starting children. Shell/API/Git argument forwarding remains unavailable.
+
+The standard source CLI is `pnpm builder --profile <approved-id> --workflow <approved-id> preflight`. Other bounded operations publish a candidate and comments, or read its actual lifecycle. Ready requires an exact confirmed Handoff and remote readback; it grants no Review or merge authority. Review decisions count only from approved identities on the exact candidate HEAD. Same-PR revision and recovery retain consumed receipts and original records.
+
+The current Revision capability supports only an approved issue_prefix workflow with base=main, a path allowlist and exactly one verification command: `git diff --check origin/main...HEAD`. Both Client and Builder refuse a different base, missing check or additional checks. Other approved workflows remain available for ordinary delivery; their approval does not imply this Revision capability.
+
+See config/examples/builder-policy.json for fictional structure. Administrator approval, OS protection, live App preflight and independent Review are separate facts; generating a file or matching a digest cannot substitute for them.

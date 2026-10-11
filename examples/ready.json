@@ -1,7 +1,7 @@
 {
   "schema_version": "0.1",
   "kind": "builder_handoff",
-  "work_item": { "repo": "zlpoot/agent-workflow-hub", "issue": 1 },
+  "work_item": { "repo": "example-org/workflow-core", "issue": 1 },
   "candidate": {
     "pr": 2,
     "base_sha": "1111111111111111111111111111111111111111",
@@ -13,7 +13,7 @@
     "lifecycle": "completed",
     "outcome": "pass",
     "checks": [{ "command": "pnpm check", "exit_code": 0 }],
-    "evidence_refs": ["https://github.com/zlpoot/agent-workflow-hub/issues/1"]
+    "evidence_refs": ["https://github.com/example-org/workflow-core/issues/1"]
   },
   "handoff": { "next_step": "review", "publication": "confirmed" }
 }

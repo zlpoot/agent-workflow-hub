@@ -4,11 +4,12 @@ import { join } from 'node:path';
 import type { Event, EventData } from '../protocol/index.js';
 import { replayRun } from '../protocol/index.js';
 import type { TaskBinding } from '../profiles.js';
+import { REVISION_COMMAND } from '../profiles.js';
+export { REVISION_COMMAND } from '../profiles.js';
 import { clientFail, git, readJson, same } from './local.js';
 import { exclusiveRecoveryFile } from './recovery.js';
 import { validateHandoff } from '../validator.js';
 
-export const REVISION_COMMAND = 'git diff --check origin/main...HEAD';
 export const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 export const revisionId = (run: string, task: TaskBinding, previous: string, head: string, pr: number) =>
   'revision-' + digest(JSON.stringify([run, task.fingerprint, previous, head, pr]));

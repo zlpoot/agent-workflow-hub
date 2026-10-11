@@ -3,7 +3,7 @@
   "info": {
     "title": "AWH read-only Dashboard contract",
     "version": "1.0.0",
-    "description": "Hub #23. No provider writes, browser Client bearer, secret projection or Review/Merge authority."
+    "description": "No provider writes, browser Client bearer, secret projection or Review/Merge authority."
   },
   "servers": [
     {
@@ -2371,7 +2371,7 @@
     "buffer_bytes": 131072,
     "drain_timeout_ms": 15000
   },
-  "x-security": "Default disabled. Separate trusted viewer session registry; no session issuance/admin route. Exact loopback Host/socket plus Origin/Fetch-Metadata guard; no CORS. All non-GET dashboard methods fail before body parsing. Sessions never authenticate legacy /v1 Client routes. Expiry rechecked during streams.",
+  "x-security": "Default disabled. Separate trusted viewer session registry; no session issuance/admin route. Exact loopback Host/socket plus Origin/Fetch-Metadata guard; no CORS. All non-GET dashboard methods fail before body parsing. Sessions never authenticate /v1 Client routes. Expiry rechecked during streams.",
   "x-negative-examples": [
     {
       "request": "GET /dashboard/v1/projects with Authorization: Bearer <CP Client credential>",

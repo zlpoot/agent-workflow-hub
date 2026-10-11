@@ -1,3 +1,5 @@
+import { fixtureStore } from './store-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomBytes, createHash } from 'node:crypto';
@@ -13,9 +15,9 @@ import { DashboardProjection } from '../dist/dashboard/projection.js';
 import { createViewerAuthenticator } from '../dist/dashboard/security.js';
 
 function setup(t) {
-  const f = JSON.parse(readFileSync(new URL('../examples/protocol/future-ui.json', import.meta.url)));
+  const f = JSON.parse(readFileSync(new URL('../examples/protocol/project-alpha.json', import.meta.url)));
   const dir = mkdtempSync(join(tmpdir(), 'awh-read-gateway-')), path = join(dir, 'fixture.sqlite');
-  const writer = new ControlPlaneStore(path, [f.profile_policy]);
+  const writer = fixtureStore(path, [f.profile_policy]);
   const p = { id: 'fixture-client', project_ids: [f.project.id], executor_ids: [f.executor.id] };
   writer.registerProject(p, f.manifest); writer.registerExecutor(p, f.executor); writer.registerWorkItem(p, f.work_item); writer.createRun(p, f.run);
   const reader = new DashboardReadStore(path), viewer = { id: 'viewer', project_ids: [f.project.id] };
@@ -39,7 +41,7 @@ test('shared SSE cache performs one projection per exact scope and bounded cheap
   const cache = new DashboardStreamCache(counted, () => clock);
   for (let tick = 0; tick < 16; ++tick) { clock = tick * 250; for (let viewer = 0; viewer < 64; ++viewer) cache.read({ ...h.viewer, id: 'viewer-' + viewer }); }
   assert.equal(reads, 1); assert.equal(probes, 16);
-  const foreign = cache.read({ id: h.viewer.id, project_ids: ['webskill'] }); assert.deepEqual(foreign.snapshot.projects, []); assert.equal(reads, 2);
+  const foreign = cache.read({ id: h.viewer.id, project_ids: ['project-beta'] }); assert.deepEqual(foreign.snapshot.projects, []); assert.equal(reads, 2);
 });
 
 test('Executor project pages include run-free bindings and paginate reverse bindings in ID order without gaps', t => {

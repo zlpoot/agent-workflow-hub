@@ -25,12 +25,14 @@ const statistic = (output: string, label: string): number | null => {
   const match = new RegExp('(?:#|ℹ) ' + label + ' (\\d+)').exec(output); return match ? Number(match[1]) : null;
 };
 const defaults: DeliveryDependencies = { connect: connectBuilder, verify: async (command, root) => {
-  // These are literal commands from checked-in policies, never shell text from CP/Manifest/user data.
-  if (!['git diff --check origin/main...HEAD','pnpm check','pnpm check:foundations','pnpm lint','pnpm typecheck','pnpm test'].includes(command))
-    clientFail('delivery_policy', 'Unsupported fixed verification command');
+  // Approved commands still pass a bounded executor grammar; there is no shell/API pass-through.
+  const pnpm = /^pnpm(?: --config\.verifyDepsBeforeRun=false)? (?:run )?[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(command);
+  const node = /^node --test(?: tests\/[A-Za-z0-9_.\/-]+\.mjs)+$/.test(command) && !command.includes('..');
+  const git = /^git diff --check origin\/[A-Za-z0-9_./-]+\.\.\.HEAD$/.test(command);
+  if (!pnpm && !node && !git) clientFail('delivery_policy', 'Unsupported approved verification command grammar');
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$|NODE_EXTRA_CA_CERTS$)/i.test(k)));
   const at = Date.now();
-  const r = command === 'git diff --check origin/main...HEAD' ? spawnSync('git', ['-c','core.hooksPath=' + (process.platform === 'win32' ? 'NUL' : '/dev/null'), 'diff','--check','origin/main...HEAD'], { cwd: root, env: { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_TERMINAL_PROMPT: '0' }, encoding: 'utf8', timeout: 10000, windowsHide: true }) : process.platform === 'win32' ? spawnSync('cmd.exe', ['/d','/s','/c',command], { cwd: root, env, encoding: 'utf8', timeout: 300000, maxBuffer: 1024 * 1024, windowsHide: true }) :
+  const r = git ? spawnSync('git', ['-c','core.hooksPath=' + (process.platform === 'win32' ? 'NUL' : '/dev/null'), 'diff','--check',command.slice(17)], { cwd: root, env: { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_TERMINAL_PROMPT: '0' }, encoding: 'utf8', timeout: 10000, windowsHide: true }) : node ? spawnSync(process.execPath, command.split(' ').slice(1), { cwd: root, env, encoding: 'utf8', timeout: 300000, maxBuffer: 1024 * 1024, windowsHide: true }) : process.platform === 'win32' ? spawnSync('cmd.exe', ['/d','/s','/c',command], { cwd: root, env, encoding: 'utf8', timeout: 300000, maxBuffer: 1024 * 1024, windowsHide: true }) :
     spawnSync('pnpm', command.slice(5).split(' '), { cwd: root, env, encoding: 'utf8', timeout: 300000, maxBuffer: 1024 * 1024 });
   const log = { command, exit_code: r.error || r.status === null ? 2 : r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '', elapsed_ms: Date.now() - at };
   if (credentialOutput(log.stdout) || credentialOutput(log.stderr)) return { ...log, exit_code: 2, stdout: '[verification output suppressed by credential guard]', stderr: '[verification output suppressed by credential guard]' };

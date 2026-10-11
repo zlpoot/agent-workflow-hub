@@ -20,19 +20,19 @@ export async function main(args: string[]): Promise<void> {
     console.log(JSON.stringify(approveEnrollment({ request: entries.get('--request')!, trustedConfig: entries.get('--config')!, database: entries.get('--database')!, confirm: entries.has('--confirm'), policyTrust: entries.get('--policy-trust') }))); return;
   }
   if (args.length === 1 && args[0] === '--help') {
-    console.log('Usage: node dist/control-plane-cli.js [init|serve] --runtime-config <external-json-file>\nLocal CP-owner approval: approve-project --request <external-request> --database <existing-v2.sqlite> --config <external-trusted-file> [--policy-trust <external-anchor>] [--confirm]\nLegacy arguments: [init|serve] --database <external-sqlite-file> --config <external-trusted-json-file> [--port <1-65535>] [--https-config <external-json-file>]\nNormal startup requires an existing CP v2 database. init exclusively creates a new database and exits. HTTP binds only to 127.0.0.1; optional native HTTPS uses an explicit private IPv4 interface.'); return;
+    console.log('Usage: node dist/control-plane-cli.js [init|serve] --runtime-config <external-json-file>\nLocal CP-owner approval: approve-project --request <external-request> --database <existing-v2.sqlite> --config <external-trusted-file> [--policy-trust <external-anchor>] [--confirm]\nNormal startup requires an existing CP v2 database. init exclusively creates a new database and exits. HTTP binds only to 127.0.0.1; optional native HTTPS uses an explicit private IPv4 interface.'); return;
   }
   const mode = args[0] === 'init' ? 'init' : 'serve';
   if (args[0] === 'init' || args[0] === 'serve') args = args.slice(1);
   const options = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i]!, value = args[i + 1];
-    if (!['--database', '--config', '--port', '--https-config', '--runtime-config'].includes(key) || options.has(key) || !value || value.startsWith('--'))
+    if (key !== '--runtime-config' || options.has(key) || !value || value.startsWith('--'))
       throw new ControlPlaneError(500, 'configuration', 'Invalid Control Plane startup arguments');
     options.set(key, value);
   }
-  if (options.has('--runtime-config')) {
-    if (options.size !== 1) throw new ControlPlaneError(500, 'configuration', 'Deployment configuration cannot be overridden by legacy arguments');
+  if (!options.has('--runtime-config') || options.size !== 1) throw new ControlPlaneError(500, 'configuration', 'Explicit runtime configuration required');
+  {
     const config = readRuntimeConfig(options.get('--runtime-config')!);
     options.clear(); options.set('--database', config.database); options.set('--config', config.trusted_config_file); options.set('--port', String(config.port));
     if (config.https_config_file) options.set('--https-config', config.https_config_file);
@@ -55,7 +55,7 @@ export async function main(args: string[]): Promise<void> {
   if (mode === 'init') {
     // Exclusive reservation: never overwrite an existing file. Retain failed initialization for inspection.
     const fd = openSync(path, 'wx', 0o600); closeSync(fd);
-    const store = new ControlPlaneStore(path, typed.profiles); store.close();
+    const store = new ControlPlaneStore(path, typed.profiles, undefined, 'initialize'); store.close();
     console.log('AWH Control Plane database initialized (v2); no listener started'); return;
   }
   const store = new ControlPlaneStore(path, typed.profiles, undefined, 'existing', () => current.enrollments);

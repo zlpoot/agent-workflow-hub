@@ -1,3 +1,6 @@
+import { REPEATABLE_VERSION, allowMachine } from './trusted-policy-fixture.mjs';
+import { policyFor } from './workflow-fixture.mjs';
+import './trusted-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
@@ -14,7 +17,7 @@ import { npmEntry, npmEnv } from '../scripts/npm-tool.mjs';
 import { tlsFixture } from './tls-fixture.mjs';
 import { facts, trustedFixture } from './versioned-profile-fixture.mjs';
 import { deliveryPolicy, matchDeliveryPolicy } from '../dist/client/delivery-policy.js';
-import { taskBinding, REPEATABLE_VERSION } from '../dist/profiles.js';
+import { taskBinding } from '../dist/profiles.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url)), cli = join(root,'dist/client/cli.js');
 export const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:GIT_|GH_|GITHUB_|AWH_|NODE_OPTIONS$)/i.test(key)));
@@ -29,7 +32,7 @@ function temporary(t) {
   t.after(() => { assert.equal(dirname(base),tmpdir()); assert(base.startsWith(join(tmpdir(),'awh-doctor-'))); rmSync(base,{recursive:true,force:true}); });
   return base;
 }
-function fixture(t, { repository='zlpoot/webskill', ref='webskill/bootstrap', branch='codex/awh-c07-webskill-bootstrap', executor_id='doctor-fixture', profile_version='fixture-v1' }={}) {
+function fixture(t, { repository='example-org/project-beta', ref='project-beta/bootstrap', branch='codex/awh-flow-03-project-beta-bootstrap', executor_id='doctor-fixture', profile_version='fixture-v1' }={}) {
   const base=temporary(t),repo=join(base,'consumer');mkdirSync(repo);git(repo,['init','-b',branch]);
   git(repo,['config','user.name','Fixture']);git(repo,['config','user.email','fixture@example.invalid']);
   git(repo,['remote','add','origin','https://github.com/'+repository+'.git']);writeFileSync(join(repo,'product.txt'),'unchanged fixture');
@@ -52,7 +55,7 @@ function snapshot(path) {
 }
 const check=(report,id)=>{const c=report.checks.find(c=>c.id===id);assert(c,'Missing check '+id);return c;};
 function startSession(h, pending=false) {
-  const example=JSON.parse(readFileSync(join(root,'examples/protocol/webskill.json')));
+  const example=JSON.parse(readFileSync(join(root,'examples/protocol/project-beta.json')));
   h.session.initial={...example.run,source:{...example.run.source,sha:git(h.repo,['rev-parse','HEAD']),ref:git(h.repo,['branch','--show-current'])},executor_id:h.config.executor_id,machine_id:h.m.id,profile:{ref:h.manifest.profile.ref,version:'fixture-v1'}};
   h.session.work_item=example.work_item;
   if(pending)h.session.pending=event(h,'RUN_STARTED',1,{source_sha:h.session.initial.source.sha});
@@ -74,11 +77,11 @@ test('no config still explains real origin, Manifest and dirty flag without disc
   assert.equal(check(report,'repository').details.dirty,true);assert.equal(check(report,'cp_connection').status,'not_checked');assert.deepEqual(snapshot(h.base),before);
 });
 test('wrong repository, malformed/mismatched Manifest and malicious origin stay bounded and secret-free',async t=>{
-  const h=fixture(t,{repository:'zlpoot/unknown',ref:'webskill/bootstrap'});assert.equal(check(await doctor({cwd:h.repo}),'repository').status,'blocked');
-  writeFileSync(join(h.repo,'.awh/project.yaml'),'apiVersion: awh/v1\nproject:\n  id: webskill\n  repository: zlpoot/webskill\nprofile:\n  ref: webskill/bootstrap\n');
+  const h=fixture(t,{repository:'example-org/unknown',ref:'project-beta/bootstrap'});assert.equal(check(await doctor({cwd:h.repo}),'repository').status,'blocked');
+  writeFileSync(join(h.repo,'.awh/project.yaml'),'apiVersion: awh/v1\nproject:\n  id: project-beta\n  repository: example-org/project-beta\nprofile:\n  ref: project-beta/bootstrap\n');
   assert.equal(check(await doctor({cwd:h.repo}),'manifest').code,'origin_mismatch');
   writeFileSync(join(h.repo,'.awh/project.yaml'),'invalid');assert.equal(check(await doctor({cwd:h.repo}),'manifest').status,'blocked');
-  const secret='github_pat_DO_NOT_PRINT';git(h.repo,['remote','set-url','origin','https://'+secret+'@github.com/zlpoot/webskill.git']);
+  const secret='github_pat_DO_NOT_PRINT';git(h.repo,['remote','set-url','origin','https://'+secret+'@github.com/example-org/project-beta.git']);
   const report=await doctor({cwd:h.repo});assert.equal(check(report,'repository').code,'origin');assert(!JSON.stringify(report).includes(secret));
 });
 test('config endpoint/CA errors and redirected external paths are blocked without creating state',async t=>{
@@ -99,18 +102,13 @@ test('missing original machine/session stays blocked and is never replaced or in
     const report=await doctor({configPath:h.configPath,cwd:h.repo});assert.equal(check(report,missing==='machine.json'?'machine_executor':'client_state').status,'blocked');assert.deepEqual(snapshot(h.base),before);
   }
 });
-test('future-ui acceptance ref conflicts explain current and legacy bootstrap expectations and request #34',async t=>{
-  const h=fixture(t,{repository:'zlpoot/future-ui',ref:'future-ui/c1c-acceptance',branch:'feature/current-product'});const before=snapshot(h.base);
-  const report=await doctor({configPath:h.configPath,cwd:h.repo});assert.equal(check(report,'branch').status,'blocked');assert.equal(check(report,'branch').details.actual_branch,'feature/current-product');
-  assert.equal(check(report,'branch').details.expected_branch,'codex/awh-v01-acceptance');assert.equal(check(report,'legacy_bootstrap').details.expected_branch,'codex/awh-c06-bootstrap');
-  assert(check(report,'branch').safe_next_step.includes('#34'));assert.deepEqual(snapshot(h.base),before);
-});
 
 test('repeatable Doctor keeps retained Issue 90 but reports unavailable dynamic Issue without inferring authority',async t=>{
-  const h=fixture(t,{repository:'zlpoot/future-ui',ref:'future-ui/c1c-acceptance',branch:'feature/current-product',
-    executor_id:'c1c-future-ui-windows',profile_version:REPEATABLE_VERSION});
-  const example=JSON.parse(readFileSync(join(root,'examples/protocol/future-ui.json')));
-  const binding=taskBinding({repository:'zlpoot/future-ui',issue:90,branch:'codex/awh-task-90',source_sha:git(h.repo,['rev-parse','HEAD']),
+  const h=fixture(t,{repository:'example-org/project-alpha',ref:'project-alpha/repeatable',branch:'feature/current-product',
+    executor_id:'alpha-executor',profile_version:REPEATABLE_VERSION});
+  const example=JSON.parse(readFileSync(join(root,'examples/protocol/project-alpha.json')));
+  allowMachine(h.m.id,h.config.executor_id);
+  const binding=taskBinding({repository:'example-org/project-alpha',issue:90,branch:'codex/awh-task-90',source_sha:git(h.repo,['rev-parse','HEAD']),
     profile_ref:h.manifest.profile.ref,profile_version:REPEATABLE_VERSION,executor_id:h.config.executor_id,machine_id:h.m.id});
   h.session.initial={...example.run,project_id:h.manifest.project.id,executor_id:h.config.executor_id,machine_id:h.m.id,
     source:{...example.run.source,repository:binding.repository,sha:binding.source_sha,ref:binding.branch},profile:{ref:h.manifest.profile.ref,version:REPEATABLE_VERSION}};
@@ -133,15 +131,15 @@ test('repeatable Doctor keeps retained Issue 90 but reports unavailable dynamic 
   assert.equal(check(mismatch,'work_item').details.expected_work_item.issue,91);
 });
 test('Manifest cannot approve an unknown/cross-repository Profile, and CP version/check conflicts are explicit',async t=>{
-  const h=fixture(t,{ref:'webskill/owner-approved-in-project-json'});
+  const h=fixture(t,{ref:'project-beta/owner-approved-in-project-json'});
   assert.equal(check(await doctor({configPath:h.configPath,cwd:h.repo}),'profile').code,'profile');
-  const path=join(h.repo,'.awh/project.yaml');writeFileSync(path,readFileSync(path,'utf8').replace('webskill/owner-approved-in-project-json','hub/c05'));
+  const path=join(h.repo,'.awh/project.yaml');writeFileSync(path,readFileSync(path,'utf8').replace('project-beta/owner-approved-in-project-json','core/flow-01'));
   assert.equal(check(await doctor({configPath:h.configPath,cwd:h.repo}),'profile').status,'blocked');
-  writeFileSync(path,readFileSync(path,'utf8').replace('hub/c05','webskill/bootstrap'));
-  const example=JSON.parse(readFileSync(join(root,'examples/protocol/webskill.json')));let mode='version';
+  writeFileSync(path,readFileSync(path,'utf8').replace('core/flow-01','project-beta/bootstrap'));
+  const example=JSON.parse(readFileSync(join(root,'examples/protocol/project-beta.json')));let mode='version';
   const server=await mock(t,(req,res)=>{
-    if(req.url.startsWith('/v1/projects/'))return envelope(res,{project:{...example.project,profile_ref:'webskill/bootstrap'}});
-    if(req.url.startsWith('/v1/profiles'))return envelope(res,{profiles:[{...example.profile_policy,ref:'webskill/bootstrap',version:mode==='version'?'unselected-v2':'fixture-v1',verification:{commands:mode==='commands'?['pnpm check']:example.profile_policy.verification.commands}}]});
+    if(req.url.startsWith('/v1/projects/'))return envelope(res,{project:{...example.project,profile_ref:'project-beta/bootstrap'}});
+    if(req.url.startsWith('/v1/profiles'))return envelope(res,{profiles:[{...example.profile_policy,ref:'project-beta/bootstrap',version:mode==='version'?'unselected-v2':'fixture-v1',verification:{commands:mode==='commands'?['pnpm check']:example.profile_policy.verification.commands}}]});
     envelope(res,{executors:[]});
   });h.update({endpoint:'http://127.0.0.1:'+server.address().port});
   let report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});assert.equal(check(report,'cp_profile').code,'profile');assert.equal(check(report,'profile_version').status,'not_checked');
@@ -150,7 +148,7 @@ test('Manifest cannot approve an unknown/cross-repository Profile, and CP versio
 test('pending Event, journal/lock and recorded check/Work Item mismatches are observations, never execution',async t=>{
   const h=fixture(t);startSession(h,true);let report=await doctor({configPath:h.configPath,cwd:h.repo});assert.equal(check(report,'pending_events').code,'event_ack_pending');assert.equal(check(report,'work_item').status,'passed');
   h.session.events=[h.session.pending,event(h,'VERIFICATION_STARTED',2,{subject_sha:h.session.initial.source.sha}),event(h,'VERIFICATION_PASSED',3,{subject_sha:h.session.initial.source.sha,checks:[{command:'pnpm wrong-do-not-execute',exit_code:0}]})];
-  h.session.pending=null;h.session.work_item.reference.repository='zlpoot/webskill';h.session.work_item.reference.number=147;h.save();writeFileSync(join(h.namespace,'fixture.delivery.json'),'{}');writeFileSync(join(h.namespace,'session.json.lock'),'');
+  h.session.pending=null;h.session.work_item.reference.repository='example-org/project-beta';h.session.work_item.reference.number=147;h.save();writeFileSync(join(h.namespace,'fixture.delivery.json'),'{}');writeFileSync(join(h.namespace,'session.json.lock'),'');
   const before=snapshot(h.base);report=await doctor({configPath:h.configPath,cwd:h.repo});assert.equal(check(report,'work_item').status,'blocked');assert.equal(check(report,'verification').code,'recorded_commands_profile_conflict');assert.equal(check(report,'journal').status,'blocked');assert.deepEqual(snapshot(h.base),before);
 });
 async function mock(t, handler, tls) {
@@ -159,10 +157,10 @@ async function mock(t, handler, tls) {
 }
 const envelope=(res,value)=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({authority_verified:false,...value}));};
 test('CP probe is opt-in GET-only and verifies existing Project/Profile/Executor without heartbeat or mutations',async t=>{
-  const h=fixture(t),calls=[];const example=JSON.parse(readFileSync(join(root,'examples/protocol/webskill.json')));
+  const h=fixture(t),calls=[];const example=JSON.parse(readFileSync(join(root,'examples/protocol/project-beta.json')));
   const server=await mock(t,(req,res)=>{calls.push([req.method,req.url]);
     if(req.url.startsWith('/v1/projects/'))return envelope(res,{project:{...example.project,profile_ref:h.manifest.profile.ref}});
-    if(req.url.startsWith('/v1/profiles'))return envelope(res,{profiles:[{...example.profile_policy,ref:h.manifest.profile.ref}]});
+    if(req.url.startsWith('/v1/profiles'))return envelope(res,{profiles:[policyFor('project-beta','bootstrap')]});
     envelope(res,{executors:[{executor:{schema_version:'1.0',kind:'executor',id:h.config.executor_id,display_name:'codex on '+h.m.name,machine:{id:h.m.id,platform:h.m.platform}},client:{schema_version:'1.0',executor_type:'codex',machine_name:h.m.name,arch:h.m.arch,client_version:CLIENT_VERSION},last_seen:'2026-10-09T00:00:00.000Z'}]});
   });h.update({endpoint:'http://127.0.0.1:'+server.address().port});
   await doctor({configPath:h.configPath,cwd:h.repo});assert.deepEqual(calls,[]);const before=snapshot(h.base);
@@ -197,24 +195,22 @@ test('standalone tarball installs offline, exports Doctor, and actual awh bin ru
   const prefix=join(h.base,'installed');mkdirSync(prefix);writeFileSync(join(prefix,'package.json'),'{"private":true}');
   const installed=spawnSync(process.execPath,[npmEntry(),'install','--prefix',prefix,'--offline','--ignore-scripts','--no-audit','--no-fund',artifact.artifact],{cwd:prefix,env:npmEnv(join(h.base,'cache')),encoding:'utf8',windowsHide:true,timeout:60000});assert.equal(installed.status,0,installed.stderr);
   const packageRoot=join(prefix,'node_modules/@zlpoot/awh-client'),installedCli=join(packageRoot,'dist/client/cli.js'),before=snapshot(h.repo);
-  const result=await runCli(installedCli,['--config',h.configPath,'doctor','--json'],h.repo);assert.equal(result.code,0,result.stderr);const report=JSON.parse(result.stdout);assert.equal(check(report,'installation').status,'passed');assert.equal(report.status,'not_checked');assert.deepEqual(snapshot(h.repo),before);
+  const result=await runCli(installedCli,['--config',h.configPath,'doctor','--json'],h.repo);assert.equal(result.code,2,result.stderr);const report=JSON.parse(result.stdout);assert.equal(check(report,'installation').status,'passed');assert.equal(report.status,'blocked');assert.equal(check(report,'repository').code,'repository_not_in_approved_profiles');assert.deepEqual(snapshot(h.repo),before);
   const bin=join(prefix,'node_modules/.bin/awh'+(process.platform==='win32'?'.cmd':''));
   const invoked=process.platform==='win32'?spawnSync(process.env.ComSpec??'cmd.exe',['/d','/s','/c',`""${bin}" doctor --json"`],{cwd:h.repo,env:cleanEnv(),encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true}):spawnSync(bin,['doctor','--json'],{cwd:h.repo,env:cleanEnv(),encoding:'utf8'});
   assert.equal(invoked.status,2);assert.equal(JSON.parse(invoked.stdout).kind,'client_doctor');
-  const metadataPath=join(packageRoot,'package.json'),metadata=JSON.parse(readFileSync(metadataPath));metadata.version='0.4.4';writeFileSync(metadataPath,JSON.stringify(metadata));
+  const metadataPath=join(packageRoot,'package.json'),metadata=JSON.parse(readFileSync(metadataPath));metadata.version='99.0.0';writeFileSync(metadataPath,JSON.stringify(metadata));
   const stale=JSON.parse((await runCli(installedCli,['--config',h.configPath,'doctor','--json'],h.repo)).stdout);assert.equal(check(stale,'installation').code,'standalone_metadata_conflict');
 });
-test('CP observation accepts non-Deliver hub/c1i without granting Deliver; mismatches still block',async t=>{
-  const h=fixture(t,{repository:'zlpoot/agent-workflow-hub',ref:'hub/c1i',branch:'codex/c1i-doctor-prototype'});let wrong=false;
-  const example=JSON.parse(readFileSync(join(root,'examples/protocol/webskill.json')));
-  const policy={...example.profile_policy,ref:'hub/c1i',repository:'zlpoot/agent-workflow-hub',base:'main',branch:{mode:'fixed',ref:'codex/c1i-doctor-prototype'},verification:{commands:['pnpm build','node --test tests/doctor.test.mjs','node --test tests/client.test.mjs']}};
-  const calls=[],server=await mock(t,(req,res)=>{calls.push(req.method);if(req.url.startsWith('/v1/projects/'))return envelope(res,{project:{schema_version:'1.0',kind:'project',id:h.manifest.project.id,repository:h.manifest.project.repository,profile_ref:h.manifest.profile.ref}});
-    if(req.url.startsWith('/v1/profiles'))return envelope(res,{profiles:[wrong?{...policy,branch:{mode:'fixed',ref:'codex/wrong'}}:policy]});envelope(res,{executors:[]});});
+test('unapproved CP observation mapping cannot grant Deliver; explicit diagnosis remains read-only',async t=>{
+  const h=fixture(t,{repository:'example-org/workflow-core',ref:'project-observation/inspect',branch:'codex/observed-task'}),calls=[];
+  const server=await mock(t,(req,res)=>{calls.push(req.method);envelope(res,{profiles:[]});});
   h.update({endpoint:'http://127.0.0.1:'+server.address().port});const before=snapshot(h.base);
-  let report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});assert.equal(check(report,'cp_profile').status,'passed');assert.equal(report.policy_preflight.provider_scope,'not_checked');assert.equal(report.policy_preflight.deliver,'blocked');
-  assert.throws(()=>deliveryPolicy('hub/c1i'));assert.throws(()=>matchDeliveryPolicy(policy,'hub/c1i'));
-  wrong=true;report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});assert.equal(check(report,'cp_profile').status,'blocked');assert(calls.every(x=>x==='GET'));assert.deepEqual(snapshot(h.base),before);
+  const report=await doctor({configPath:h.configPath,cwd:h.repo,probeCp:true});
+  assert.equal(check(report,'profile').status,'blocked');assert.throws(()=>deliveryPolicy('project-observation/inspect'));
+  assert(calls.every(method=>method==='GET'));assert.deepEqual(snapshot(h.base),before);
 });
+
 test('Doctor diagnoses new approved business task without fixed mapping and suppresses untrusted policy fallback',async t=>{
   const h=fixture(t,{repository:facts.repository,ref:facts.profile_ref,branch:facts.branch});h.update({executor_id:facts.executor,profile_version:'v1'});
   // Fresh fixture identity has no compatible existing Session after explicit executor change; that remains a separate blocker.
@@ -222,7 +218,7 @@ test('Doctor diagnoses new approved business task without fixed mapping and supp
   const options={configPath:h.configPath,cwd:h.repo,trustPath:f.path,workItem:f.selection,observationPath};const before=snapshot(h.base);
   let report=await doctor(options);assert.equal(check(report,'policy_source').status,'passed');assert.equal(check(report,'versioned_policy').status,'passed');assert.equal(report.policy_preflight.approved_effective.issue,901);assert.equal(check(report,'app_scope').status,'not_checked');assert.deepEqual(snapshot(h.base),before);
   writeFileSync(observationPath,JSON.stringify({...facts,issue:902}));report=await doctor(options);assert.equal(report.policy_preflight.differences.find(d=>d.field==='issue').status,'blocked');assert(formatDoctor(report).includes('approved=901 observed=902'));
-  writeFileSync(observationPath,JSON.stringify({...facts,repository:'zlpoot/other'}));report=await doctor(options);assert.equal(check(report,'declared_bindings').status,'blocked');assert.equal(report.declared_preflight.differences.find(d=>d.field==='repository').observed,'zlpoot/other');
+  writeFileSync(observationPath,JSON.stringify({...facts,repository:'example-org/other'}));report=await doctor(options);assert.equal(check(report,'declared_bindings').status,'blocked');assert.equal(report.declared_preflight.differences.find(d=>d.field==='repository').observed,'example-org/other');
   report=await doctor({...options,trustPath:join(h.repo,'observations.json')});assert.equal(check(report,'policy_source').status,'blocked');assert.equal(check(report,'profile').status,'not_checked');assert.equal(report.policy_preflight,undefined);
   let cpCalls=0;const cp=await mock(t,(_req,res)=>{cpCalls++;envelope(res,{});});h.update({endpoint:'http://127.0.0.1:'+cp.address().port});
   report=await doctor({...options,probeCp:true});assert.equal(check(report,'policy_source').status,'blocked');assert.equal(cpCalls,0);

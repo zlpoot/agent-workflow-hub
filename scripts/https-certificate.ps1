@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# One-time #21 certificate provisioning; no global trust import or service installation.
+# One-time certificate provisioning; no global trust import or service installation.
 param([Parameter(Mandatory=$true)][string]$Directory)
 $ErrorActionPreference='Stop'
 try {
@@ -23,12 +23,12 @@ try {
   [IO.File]::WriteAllText($taskCaPath,$taskRoot.ExportCertificatePem())
   [IO.File]::WriteAllText($taskCertPath,$taskLeaf.ExportCertificatePem())
   # Export encrypted PKCS#8 in memory, import into a transient RSA object, write only the private file.
-  if(-not ('AwhC1cPrivateExport' -as [type])){Add-Type -TypeDefinition @'
+  if(-not ('AwhPrivateExport' -as [type])){Add-Type -TypeDefinition @'
 using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-public static class AwhC1cPrivateExport {
+public static class AwhPrivateExport {
   public static void WriteLeaf(X509Certificate2 cert, string path) {
     using RSA rsa = cert.GetRSAPrivateKey();
     string password = Guid.NewGuid().ToString("N");
@@ -38,7 +38,7 @@ public static class AwhC1cPrivateExport {
   }
 }
 '@ }
-  [AwhC1cPrivateExport]::WriteLeaf($taskLeaf,$taskKeyPath)
+  [AwhPrivateExport]::WriteLeaf($taskLeaf,$taskKeyPath)
   $taskFingerprint=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($taskRoot.RawData)).ToLowerInvariant()
   $taskProof=[ordered]@{status='OS_CERTIFICATE_PROVISIONED_NOT_LAN_ACCEPTED';host='192.168.2.5';ca_certificate_file=$taskCaPath;certificate_file=$taskCertPath;private_key_file=$taskKeyPath;ca_sha256_der=$taskFingerprint;leaf_sha256_der=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($taskLeaf.RawData)).ToLowerInvariant();leaf_expires=$taskLeaf.NotAfter.ToUniversalTime().ToString('o');ca_private_key='NON_EXPORTABLE_WINDOWS_CURRENT_USER_STORE';leaf_private_key_transfer='PROHIBITED'}
   $taskProof | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskDirectory 'certificate-proof.json') -Encoding utf8

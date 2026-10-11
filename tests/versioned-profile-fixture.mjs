@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { policyFingerprint } from '../dist/client/versioned-profile.js';
-export const facts = { repository:'zlpoot/agent-workflow-hub',issue_repository:'zlpoot/agent-workflow-hub',issue:901,base:'main',
-  branch:'codex/new-business-901',executor:'fixture-executor',checks:['pnpm lint','pnpm typecheck'],profile_ref:'hub/fixture-business',profile_version:'v1',work_item_version:'v1' };
+export const facts = { repository:'example-org/workflow-core',issue_repository:'example-org/workflow-core',issue:901,base:'main',
+  branch:'codex/new-business-901',executor:'fixture-executor',checks:['pnpm lint','pnpm typecheck'],profile_ref:'core/fixture-business',profile_version:'v1',work_item_version:'v1' };
 export function trustedFixture(directory, mutate=()=>{}) {
   const template={ref:facts.profile_ref,version:'v1',repository:facts.repository,base:'main',branch_prefix:'codex/new-business-',executors:[facts.executor],checks:facts.checks,stages:['observe','develop']};
   const item={...facts,id:'business-901',expires_at:'2099-01-01T00:00:00.000Z',stages:['observe','develop']};
