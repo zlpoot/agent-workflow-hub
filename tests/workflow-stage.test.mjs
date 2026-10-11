@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync,writeFileSync,unlinkSync} from 'node:fs';
+import {mkdirSync,readFileSync,readdirSync,writeFileSync,unlinkSync} from 'node:fs';
 import {dirname,join} from 'node:path';
 import {developToPR,prepareCodexStage,CodexExecutorAdapter} from '../dist/workflow/codex.js';
 import {executeStage} from '../dist/workflow/contract.js';
@@ -111,3 +111,50 @@ test('postcondition fails closed on missing Journal, missing Evidence or stale H
  const handoff=[...h.comments].find(([_,v])=>v.body.startsWith('AWH-HANDOFF'))[1];handoff.body=handoff.body.replaceAll(first.head,'0'.repeat(40));await assert.rejects(adapter.postcondition(contract));
 });
 test('stage CLI accepts only the controlled command grammar',async()=>{for(const args of [['stage','execute'],['stage','prepare','--approve'],['stage','merge']])await assert.rejects(main(args));});
+
+const providerWrites=h=>Object.fromEntries(Object.entries(h.counts).filter(([k])=>k!=='verify'));
+async function cacheRevision(t) {
+ const h=await managedHarness(t),first=published(await developToPR(h.client,options,h.deps));
+ h.review(first.pr);const head=h.commit(2);h.revision(first.run,first.pr,first.head);
+ const directory=join(h.repo,'.handoff','stages','revision-90');mkdirSync(directory,{recursive:true});
+ const cache=join(directory,'verification.json'),forged={actor:'',base_sha:h.task.base_sha,before_sha:head,after_sha:head,clean_before:true,clean_after:true,
+  environment:{platform:process.platform,arch:process.arch,node:process.version},started_at:'2026-01-01T00:00:00.000Z',finished_at:'2026-01-01T00:00:00.001Z',
+  logs:['pnpm typecheck','pnpm build'].map(command=>({command,exit_code:0,stdout:'FORGED SUCCESS CACHE',stderr:'',elapsed_ms:1}))};
+ return{h,first,directory,cache,forged};
+}
+
+test('revision rejects forged successful verification cache when the real verifier fails',{timeout:180000},async t=>{
+ const {h,first,directory,cache,forged}=await cacheRevision(t);writeFileSync(cache,JSON.stringify(forged));const bytes=readFileSync(cache),events=h.events(first.run),before=providerWrites(h),calls=h.counts.verify;
+ const session=readFileSync(h.session()),journal=join(dirname(h.session()),first.run+'.delivery.json'),journalBytes=readFileSync(journal);
+ h.failVerify();const result=await developToPR(h.client,options,h.deps);
+ assert.equal(result.status,'BLOCKED');assert.equal(result.code,'verification');assert.equal(h.counts.verify,calls+1);
+ assert.deepEqual(providerWrites(h),before);assert.deepEqual(h.events(first.run),events);assert.deepEqual(readFileSync(cache),bytes);
+ assert.deepEqual(readFileSync(h.session()),session);assert.deepEqual(readFileSync(journal),journalBytes);
+ const attempt=readdirSync(directory).find(n=>n.startsWith('verification-attempt-'));assert.equal(JSON.parse(readFileSync(join(directory,attempt))).outcome,'fail');
+});
+
+test('revision publishes fresh executed results despite a correctly shaped forged success cache',{timeout:180000},async t=>{
+ const {h,cache,forged}=await cacheRevision(t);writeFileSync(cache,JSON.stringify(forged));const bytes=readFileSync(cache),calls=h.counts.verify;
+ published(await developToPR(h.client,options,h.deps));assert.equal(h.counts.verify,calls+2);assert.deepEqual(readFileSync(cache),bytes);
+ const evidence=[...h.comments.values()].filter(v=>v.body.startsWith('Builder evidence')).at(-1).body;
+ assert(!evidence.includes('FORGED SUCCESS CACHE'));assert(evidence.includes('SYNTHETIC verifier only'));
+});
+
+for(const fault of ['push','evidence'])test('revision '+fault+' interruption rejects tampered cache then resumes with real checks and original audit',{timeout:180000},async t=>{
+ const {h,first,directory,cache,forged}=await cacheRevision(t),session=readFileSync(h.session()),journal=join(dirname(h.session()),first.run+'.delivery.json'),journalBytes=readFileSync(journal),initialEvents=h.events(first.run);
+ h.fault(fault);assert.equal((await developToPR(h.client,options,h.deps)).status,'BLOCKED');
+ const oldAttempt=readdirSync(directory).find(n=>n.startsWith('verification-attempt-')),oldBytes=readFileSync(join(directory,oldAttempt)),intent=readFileSync(join(directory,'push-intent.json'));
+ const interruptedComments=new Map([...h.comments].map(([id,v])=>[id,v.body]));writeFileSync(cache,JSON.stringify(forged));const cacheBytes=readFileSync(cache),before=providerWrites(h),calls=h.counts.verify;
+ h.failVerify();assert.equal((await developToPR(h.client,options,h.deps)).status,'BLOCKED');assert.equal(h.counts.verify,calls+1);
+ assert.deepEqual(providerWrites(h),before);assert.deepEqual(h.events(first.run),initialEvents);
+ h.passVerify();const resumeCalls=h.counts.verify,result=published(await developToPR(h.client,options,h.deps));assert.equal(result.run,first.run);assert.equal(result.pr,first.pr);assert.equal(h.counts.verify,resumeCalls+2);
+ assert.equal(h.counts.push,before.push);assert.equal(h.counts.pr,1);assert.equal(h.counts.comment,before.comment+(fault==='evidence'?1:2));
+ for(const[id,body]of interruptedComments)assert.equal(h.comments.get(id).body,body);
+ assert.deepEqual(readFileSync(cache),cacheBytes);assert.deepEqual(readFileSync(join(directory,oldAttempt)),oldBytes);assert.deepEqual(readFileSync(join(directory,'push-intent.json')),intent);
+ assert.deepEqual(readFileSync(h.session()),session);assert.deepEqual(readFileSync(journal),journalBytes);assert.deepEqual(h.events(first.run).slice(0,initialEvents.length),initialEvents);assert.equal(h.events(first.run).at(-1).type,'PR_REVISION_LINKED');
+});
+
+test('revision checks the clean exact HEAD after each actual command before any Provider write',{timeout:180000},async t=>{
+ const {h,first}=await cacheRevision(t),before=providerWrites(h),deps={...h.deps,verify:async command=>{const log=await h.deps.verify(command);writeFileSync(join(h.repo,'code.ts'),'changed during verification\n');return log;}};
+ const result=await developToPR(h.client,options,deps);assert.equal(result.status,'BLOCKED');assert.equal(result.code,'exact_head');assert.deepEqual(providerWrites(h),before);assert(!h.events(first.run).some(e=>e.type==='PR_REVISION_LINKED'));
+});

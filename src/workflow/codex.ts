@@ -1,5 +1,6 @@
 import { mkdirSync, existsSync, readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { managedContext, deny, digest, encode } from '../admin/registry.js';
 import { selectWorkflow } from '../profiles.js';
 import { AwhClient } from '../client/client.js';
@@ -83,20 +84,22 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
     const intent = {authorization:c.version,authorization_sha256:c.approved.proposal_sha256,run:r.run_id,pr:r.pull_request,previous:r.previous_head,head:identity.sha};
     if (existsSync(file('intent'))) { if (!same(load('intent'),intent)) deny('revision_journal_conflict'); } else save('intent',intent);
     const exact = () => {if (!same(inspectRepository(this.client.cwd),identity) || identity.dirty) deny('exact_head');};
-    let verified: any;
-    if (existsSync(file('verification'))) verified = load('verification');
-    else {
-      const logs: VerificationLog[] = [], started = new Date().toISOString();
-      for (const command of fixed.workflow.verification_commands) {
-        exact(); const log = await this.deps.verify(command,identity.root); safeData(log); logs.push(log);
-        if (log.command !== command || log.exit_code !== 0) {save('verification-failure',{head:identity.sha,logs}); clientFail('verification','Revision verification failed; raw logs retained');}
+    // Worktree logs are audit data, never authority to skip execution, including on recovery.
+    const attempt = 'verification-attempt-'+randomUUID(), logs: VerificationLog[] = [], started = new Date().toISOString();
+    for (const command of fixed.workflow.verification_commands) {
+      exact(); const log = await this.deps.verify(command,identity.root); safeData(log); logs.push(log);
+      if (log.command !== command || log.exit_code !== 0) {
+        save(attempt,{head:identity.sha,started_at:started,finished_at:new Date().toISOString(),logs,outcome:'fail'});
+        clientFail('verification','Revision verification failed; raw logs retained');
       }
-      exact(); verified = {actor:'',base_sha:t.base_sha,before_sha:identity.sha,after_sha:identity.sha,clean_before:true,clean_after:true,
-        environment:{platform:process.platform,arch:process.arch,node:process.version},started_at:started,finished_at:new Date().toISOString(),logs};
-      save('verification',verified);
+      exact();
     }
+    exact(); const verified = {actor:'',base_sha:t.base_sha,before_sha:identity.sha,after_sha:identity.sha,clean_before:true,clean_after:true,
+      environment:{platform:process.platform,arch:process.arch,node:process.version},started_at:started,finished_at:new Date().toISOString(),logs};
+    save(attempt,verified);
+    if (!existsSync(file('verification'))) save('verification',verified);
     const observer = await this.deps.connect({cwd:()=>identity.root},undefined,undefined,'observe'), actor = observer.preflight().actor;
-    const body = 'Builder evidence\n'+JSON.stringify({...verified,actor,run_id:r.run_id,authorization_version:c.version},null,2);
+    let body = 'Builder evidence\n'+JSON.stringify({...verified,actor,run_id:r.run_id,authorization_version:c.version},null,2);
     safeData(body);
     parseRevisionEvidence(body,actor,identity.sha,t.base_sha,fixed.workflow.verification_commands);
     if (!existsSync(file('push-intent'))) {
@@ -108,7 +111,8 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
     let evidence: {id:number;url:string;body:string};
     if (existsSync(file('evidence'))) evidence = load('evidence');
     else if (existsSync(file('evidence-intent'))) {
-      const comments = await observer.listComments(r.pull_request), matches = comments.filter(v => v.actor === actor && v.actor_type === 'Bot' && v.body === body);
+      const intent = load('evidence-intent');
+      const comments = await observer.listComments(r.pull_request), matches = comments.filter(v => v.actor === actor && v.actor_type === 'Bot' && digest(v.body) === intent.body_sha256);
       if (matches.length !== 1) deny('revision_evidence_uncertain');
       evidence = matches[0]!; save('evidence',evidence);
     } else {
@@ -116,7 +120,13 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       const publisher = await this.deps.connect({cwd:()=>identity.root},undefined,undefined,'revision');
       evidence = await publisher.createComment(r.pull_request,body); save('evidence',evidence);
     }
-    if ((await observer.readComment(r.pull_request,evidence.id)).body !== body) deny('revision_evidence_readback');
+    // Preserve an acknowledged App comment after an interruption; fresh execution above gates Handoff.
+    const record = await observer.readComment(r.pull_request,evidence.id);
+    if (record.actor !== actor || record.body !== evidence.body) deny('revision_evidence_readback');
+    body = record.body; safeData(body);
+    parseRevisionEvidence(body,actor,identity.sha,t.base_sha,fixed.workflow.verification_commands);
+    const metadata = JSON.parse(body.slice('Builder evidence\n'.length));
+    if (metadata.run_id !== r.run_id || metadata.authorization_version !== c.version) deny('revision_evidence_readback');
     exact(); await this.client.linkRevision({run:r.run_id,pr:r.pull_request,head:identity.sha,evidenceComment:evidence.id},this.deps.connect);
   }
   async postcondition(_contract:WorkflowStage): Promise<StageFacts> {
