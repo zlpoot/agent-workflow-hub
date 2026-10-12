@@ -9,9 +9,10 @@ import { localBrowserSession } from './local-browser.js';
 import type { Viewer } from './security.js';
 import type { createLocalOnboarding } from './onboarding.js';
 import { enrollmentBody, type createEnrollmentService } from './enrollment.js';
+import type { TaskAdapter } from './tasks.js';
 
 export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; now?: () => number;
-  localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding>; enrollment?: ReturnType<typeof createEnrollmentService> }
+  localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding>; enrollment?: ReturnType<typeof createEnrollmentService>; tasks?: TaskAdapter }
 export const dashboardHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin',
   'Cross-Origin-Opener-Policy': 'same-origin', 'Referrer-Policy': 'no-referrer',
@@ -71,7 +72,7 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify({ ...value, authority_verified: false })); return;
       }
       if (url.pathname.startsWith('/dashboard/v1/')) {
-        dashboardRoute(request, response, url, { store: options.store!, authenticate, streams, interval: 250, now: options.now }); return;
+        await dashboardRoute(request, response, url, { store: options.store!, authenticate, streams, interval: 250, now: options.now, tasks: options.tasks }); return;
       }
       if (!authenticate(request) && !local?.bootstrap(request, response)) fail(401, 'viewer_unauthorized', 'A separate viewer session is required');
       if (request.method !== 'GET') fail(405, 'read_only', 'Dashboard is read-only');

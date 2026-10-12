@@ -20,7 +20,30 @@
             "ViewerSession": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "github_interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "60",
+                "300"
+              ]
+            },
+            "description": "Observation only: manual / 1 minute / default 5 minutes. Does not change Watcher."
+          },
+          {
+            "name": "refresh_github",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Request a real native read; coalesced and constrained by shared budget/backoff."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Read projection; GitHub authority is never established.",
@@ -1088,6 +1111,145 @@
           }
         }
       }
+    },
+    "/tasks": {
+      "get": {
+        "operationId": "dashboardTasks",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "machine_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "github_interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "60",
+                "300"
+              ]
+            },
+            "description": "Observation only: manual / 1 minute / default 5 minutes. Does not change Watcher."
+          },
+          {
+            "name": "refresh_github",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Request a real native read; coalesced and constrained by shared budget/backoff."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped read-only managed task projection; native facts and declarations have separate provenance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks/{id}": {
+      "get": {
+        "operationId": "dashboardTaskDetail",
+        "security": [
+          {
+            "ViewerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "github_interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "60",
+                "300"
+              ]
+            },
+            "description": "Observation only: manual / 1 minute / default 5 minutes. Does not change Watcher."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped read-only managed task projection; native facts and declarations have separate provenance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2076,6 +2238,12 @@
             "items": {
               "$ref": "#/components/schemas/ExecutorSummary"
             }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            }
           }
         }
       },
@@ -2349,6 +2517,781 @@
           },
           "item": {
             "$ref": "#/components/schemas/ExecutorSummary"
+          }
+        }
+      },
+      "TaskActor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "name"
+        ],
+        "properties": {
+          "role": {
+            "enum": [
+              "coding_executor",
+              "reviewer",
+              "owner",
+              "stage",
+              "watcher"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "status",
+          "observed_at",
+          "freshness",
+          "error_code"
+        ],
+        "properties": {
+          "source": {
+            "enum": [
+              "control_plane",
+              "local_fast",
+              "github",
+              "owner_scope",
+              "watcher"
+            ]
+          },
+          "status": {
+            "enum": [
+              "verified",
+              "unknown",
+              "not_checked",
+              "permission_denied"
+            ]
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "freshness": {
+            "enum": [
+              "fresh",
+              "stale",
+              "unknown"
+            ]
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "project_id",
+          "repository",
+          "workflow",
+          "fixture",
+          "issue",
+          "pr",
+          "state",
+          "active_actor",
+          "waiting_for",
+          "machine",
+          "executor",
+          "run_ids",
+          "source_head",
+          "github_head",
+          "review",
+          "checks",
+          "stage",
+          "watcher",
+          "owner_scope",
+          "next_action",
+          "blockers",
+          "updated_at",
+          "observations",
+          "history",
+          "review_gate",
+          "github_refresh"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "project_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$"
+          },
+          "workflow": {
+            "enum": [
+              "standard",
+              "local-fast"
+            ]
+          },
+          "fixture": {
+            "type": "boolean"
+          },
+          "issue": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "number",
+              "title",
+              "state"
+            ],
+            "properties": {
+              "number": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "open",
+                      "closed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "pr": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "number",
+                  "state",
+                  "draft",
+                  "merged_at",
+                  "merge_sha"
+                ],
+                "properties": {
+                  "number": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "state": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "open",
+                          "closed"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "draft": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "merged_at": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "merge_sha": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{40}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "ready",
+              "developing",
+              "verifying",
+              "awaiting_review",
+              "changes_requested",
+              "review_passed",
+              "awaiting_merge",
+              "merging",
+              "completed",
+              "blocked",
+              "unknown"
+            ]
+          },
+          "active_actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting_for": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "platform"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "executor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_head": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{40}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "github_head": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{40}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "state",
+                  "commit_id",
+                  "actor",
+                  "decision",
+                  "matches_head"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "commit_id": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{40}$"
+                  },
+                  "actor": {
+                    "type": "string"
+                  },
+                  "decision": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "PASS",
+                          "REQUEST_CHANGES"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "matches_head": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "count"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "passed",
+                  "pending",
+                  "failed",
+                  "not_checked",
+                  "none"
+                ]
+              },
+              "count": {
+                "type": "integer"
+              }
+            }
+          },
+          "stage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "head",
+              "status",
+              "checks"
+            ],
+            "properties": {
+              "head": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{40}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not_checked"
+                ]
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "exit_code"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "exit_code": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "watcher": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "running",
+              "executor_running",
+              "stale_lock"
+            ],
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "running": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "executor_running": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "stale_lock": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "owner_scope": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "expires_at",
+              "allow_merge"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "valid",
+                  "expired",
+                  "not_checked"
+                ]
+              },
+              "expires_at": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "allow_merge": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "next_action": {
+            "type": "string"
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskObservation"
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "type",
+                "occurred_at",
+                "observed_at",
+                "head",
+                "run_id"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "occurred_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "observed_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "head": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{40}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "run_id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "review_gate": {
+            "$ref": "#/components/schemas/ReviewGate"
+          },
+          "github_refresh": {
+            "$ref": "#/components/schemas/GitHubRefresh"
+          }
+        }
+      },
+      "TaskResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "item"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "item": {
+            "$ref": "#/components/schemas/Task"
+          }
+        }
+      },
+      "TaskPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "authority_verified",
+          "items",
+          "next_offset"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "authority_verified": {
+            "const": false
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            }
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ReviewGate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "passed",
+              "changes_requested",
+              "pending",
+              "not_checked",
+              "stale"
+            ]
+          },
+          "source": {
+            "enum": [
+              "administrator_policy",
+              "local_fast_contract",
+              "not_checked"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "GitHubRefresh": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "last_success_at",
+          "retry_at",
+          "interval_seconds"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "not_checked",
+              "querying",
+              "success",
+              "failed",
+              "rate_limited"
+            ]
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interval_seconds": {
+            "enum": [
+              0,
+              60,
+              300
+            ]
           }
         }
       }

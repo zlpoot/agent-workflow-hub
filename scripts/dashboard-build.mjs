@@ -8,7 +8,7 @@ import standalone from 'ajv/dist/standalone/index.js';
 const contract = JSON.parse(readFileSync('contracts/dashboard-v1.openapi.json', 'utf8'));
 const ajv = new Ajv({ strict: false, code: { source: true }, allErrors: false });
 addFormats(ajv); ajv.addSchema(contract, 'urn:awh:dashboard');
-const names = ['Snapshot', 'TimelinePage', 'TimelineEvent', 'ViewRefresh', 'RunResponse'];
+const names = ['Snapshot', 'TimelinePage', 'TimelineEvent', 'ViewRefresh', 'RunResponse', 'TaskResponse', 'TaskPage'];
 const exports = Object.fromEntries(names.map(name => [name, `urn:awh:dashboard#/components/schemas/${name}`]));
 mkdirSync('dist/dashboard-ui', { recursive: true });
 writeFileSync('dist/dashboard-ui/validators.cjs', standalone(ajv, exports));

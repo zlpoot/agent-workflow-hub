@@ -93,7 +93,7 @@ export function createControlPlaneServer(options: ServerOptions) {
       const url = new URL(request.url, 'http://control-plane.invalid');
       if (url.pathname === '/dashboard/v1' || url.pathname.startsWith('/dashboard/v1/')) {
         if (!options.dashboard) fail(404, 'not_found', 'Dashboard read gateway is not enabled');
-        dashboardRoute(request, response, url, { store, authenticate: options.dashboard.authenticate, now: options.dashboard.now, streams, interval }); return;
+        await dashboardRoute(request, response, url, { store, authenticate: options.dashboard.authenticate, now: options.dashboard.now, streams, interval }); return;
       }
       const principal = authenticate(request);
       if (!principal) fail(401, 'unauthorized', 'A registered Control Plane client credential is required');

@@ -5,6 +5,7 @@ import { relative, isAbsolute, dirname, join } from 'node:path';
 import { validateHandoff } from './validator.js';
 import { allowedInstallation, loadTrustedPolicy, bindWorkflow, selectWorkflow, validateBuilderPolicy, supportsRevision, type TaskBinding, type BuilderSelection } from './profiles.js';
 import { managedContext, projectObservationContext, digest, encode } from './admin/registry.js';
+import { authorizedReviewer } from './shared/review-gate.js';
 
 const API = 'https://api.github.com';
 const PERMISSIONS = { contents: 'write', issues: 'write', metadata: 'read', pull_requests: 'write' };
@@ -495,7 +496,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       if (!Array.isArray(rows) || rows.length > 100) fail('Invalid revision Review history');
       for (const r of rows) {
         if (!positive(r.id) || !sha(r.commit_id) || !['APPROVED','CHANGES_REQUESTED','COMMENTED','DISMISSED','PENDING'].includes(r.state)) fail('Invalid native Review');
-        if (r.user?.type === 'User' && policy.installation.reviewers.some(a => a.login === r.user.login && a.id === r.user.id) && !['COMMENTED','PENDING'].includes(r.state)) latest.set(r.user.login,r);
+        if (authorizedReviewer(r.user,policy.installation.reviewers,'') && !['COMMENTED','PENDING'].includes(r.state)) latest.set(r.user.login,r);
       }
       if (rows.length < 100) break;
     }
@@ -727,7 +728,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
               !['APPROVED','CHANGES_REQUESTED','COMMENTED','DISMISSED','PENDING'].includes(review.state))
             fail('Invalid native Review record');
           // Comments do not supersede an effective decision. Dismissals do.
-          if (review.user.type === 'User' && policy.installation.reviewers.some(a => a.login === review.user.login && a.id === review.user.id) && review.user.login !== actor && review.state !== 'COMMENTED' && review.state !== 'PENDING')
+          if (authorizedReviewer(review.user,policy.installation.reviewers,actor) && review.state !== 'COMMENTED' && review.state !== 'PENDING')
             latest.set(review.user.login, review);
         }
         if (rows.length < 100) break;

@@ -6,6 +6,7 @@ import { ControlPlaneStore } from '../dist/control-plane/store.js';
 import { dashboardRoute } from '../dist/dashboard/routes.js';
 import { createViewerAuthenticator } from '../dist/dashboard/security.js';
 import { dashboardHeaders } from '../dist/dashboard/gateway.js';
+import { taskFixtures } from '../tests/task-fixture.mjs';
 
 // Fixture-only loopback preview. No DB/config/path/credential/provider inputs are accepted.
 if (process.argv.length !== 2) throw new Error('Fixture preview takes no arguments');
@@ -21,20 +22,22 @@ for (const [i, f] of fixtures.entries()) {
   append(1, 'RUN_STARTED', { source_sha: f.run.source.sha }); append(2, 'STEP_STARTED', { step_id: 'verify', name: '验证接口契约' });
   if (!i) append(3, 'RUN_FAILED', { reason: 'Synthetic failure for read-only preview' });
 }
+const emptyManifest=structuredClone(fixtures[0].manifest);emptyManifest.project.id='fixture-empty-project';
+store.registerProject({id:'fixture-empty',project_ids:['fixture-empty-project'],executor_ids:[]},emptyManifest);
 const cookie = randomBytes(32).toString('base64url');
-const authenticate = createViewerAuthenticator([{ id: 'fixture-viewer', project_ids: fixtures.map(f => f.project.id),
+const authenticate = createViewerAuthenticator([{ id: 'fixture-viewer', project_ids: [...fixtures.map(f => f.project.id),'fixture-empty-project'],
   session_sha256: createHash('sha256').update(cookie).digest('hex'), expires_at: new Date(Date.now() + 3600000).toISOString() }]);
 const files = new Map([['/dashboard', ['text/html', readFileSync('dist/dashboard-ui/index.html', 'utf8').replace('<title>', '<meta name="awh-dataset" content="fixture"><title>')]],
   ['/dashboard/app.js', ['text/javascript', readFileSync('dist/dashboard-ui/app.js')]], ['/dashboard/app.css', ['text/css', readFileSync('dist/dashboard-ui/app.css')]]]);
 const streams = new Set();
-const server = createServer((request, response) => {
+const server = createServer(async (request, response) => {
   for (const [key, value] of Object.entries(dashboardHeaders)) response.setHeader(key, value);
   const host = `127.0.0.1:${request.socket.localPort}`;
   if (request.headers.host !== host || request.headers.authorization || (request.headers.origin && request.headers.origin !== `http://${host}`) ||
       (request.headers['sec-fetch-site'] && !['none', 'same-origin'].includes(request.headers['sec-fetch-site']))) { response.writeHead(403); response.end(); return; }
   try {
     const url = new URL(request.url, 'http://fixture.invalid');
-    if (url.pathname.startsWith('/dashboard/v1/')) { dashboardRoute(request, response, url, { store, authenticate, streams, interval: 250 }); return; }
+    if (url.pathname.startsWith('/dashboard/v1/')) { await dashboardRoute(request, response, url, { store, authenticate, streams, interval: 250, tasks:{observe:async(_scope,managed)=>[...managed.map(t=>({...t,fixture:true})),...taskFixtures()]} }); return; }
     const file = files.get(url.pathname);
     if (request.method !== 'GET' || !file || url.search) { response.writeHead(404); response.end(); return; }
     if (url.pathname === '/dashboard') response.setHeader('Set-Cookie', `awh_viewer=${cookie}; HttpOnly; SameSite=Strict; Path=/dashboard; Max-Age=3600`);

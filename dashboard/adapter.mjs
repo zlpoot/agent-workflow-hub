@@ -28,13 +28,15 @@ export function mergeEvents(previous, incoming) {
 // Same-origin, fixed, read-only endpoints. No bearer, URL/config passthrough or storage.
 export class DashboardReader {
   constructor({ fetcher = (...args) => globalThis.fetch(...args), openStream = path => new EventSource(path), now = Date.now,
-    publish, schedule = (fn, ms) => globalThis.setTimeout(fn, ms), cancel = timer => globalThis.clearTimeout(timer) }) {
+    publish, githubInterval, schedule = (fn, ms) => globalThis.setTimeout(fn, ms), cancel = timer => globalThis.clearTimeout(timer) }) {
     Object.assign(this, { fetcher, openStream, now, publish, schedule, cancel });
     this.state = { snapshot: null, events: [], phase: 'loading', lastRefresh: null, error: null };
     this.closed = false; this.generation = 0; this.timer = null; this.stream = null; this.retry = 1000;
+    this.githubInterval=githubInterval;this.githubRequest=null;
   }
   emit(patch) { this.state = { ...this.state, ...patch }; this.publish(this.state); }
   async get(path, schema, signal) {
+    if(this.githubInterval!==undefined&&(path.startsWith('/snapshot')||path.startsWith('/tasks/')))path+=(path.includes('?')?'&':'?')+'github_interval='+this.githubInterval;
     const response = await this.fetcher('/dashboard/v1' + path, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal });
     if (!response.ok) {
       const error = new Error(response.status === 401 || response.status === 403 ? 'Viewer session unavailable or expired' :
@@ -43,6 +45,13 @@ export class DashboardReader {
     }
     try { return assertContract(schema, await response.json()); }
     catch { throw new Error('Dashboard contract mismatch'); }
+  }
+  setGitHubInterval(value){if(![0,60,300].includes(value))throw new Error('Invalid GitHub interval');this.githubInterval=value;}
+  refreshGitHub(){
+    if(this.githubRequest)return this.githubRequest;
+    this.githubController=new AbortController();
+    this.githubRequest=this.get('/snapshot?refresh_github=1','Snapshot',this.githubController.signal).then(()=>this.refresh()).finally(()=>{this.githubRequest=null;});
+    return this.githubRequest;
   }
   queue(ms = 150) {
     if (this.closed || this.timer !== null) return;
@@ -105,5 +114,5 @@ export class DashboardReader {
     this.stream?.close(); this.stream = null;
     this.emit({ phase: 'offline', error: message }); this.queue(this.retry); this.retry = Math.min(15000, this.retry * 2);
   }
-  stop() { this.closed = true; ++this.generation; this.controller?.abort(); this.stream?.close(); if (this.timer !== null) this.cancel(this.timer); }
+  stop() { this.closed = true; ++this.generation; this.controller?.abort();this.githubController?.abort(); this.stream?.close(); if (this.timer !== null) this.cancel(this.timer); }
 }
