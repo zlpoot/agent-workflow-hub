@@ -32,7 +32,7 @@ function fixture(t, h, overrides = {}) {
     assert.equal(init.redirect, 'error'); assert(url.startsWith('https://api.github.com/'));
     let v;
     if (path === '/app') v = { id: 5, slug: 'synthetic-builder' };
-    else if (path.endsWith('/installation')) v = { id: 9, app_id: 5, app_slug: 'synthetic-builder', account: { login: repository.split('/')[0] }, repository_selection: 'selected', suspended_at: null, permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } };
+    else if (path.endsWith('/installation')) v = { id: 9, app_id: 5, app_slug: 'synthetic-builder', account: { id: 15, login: repository.split('/')[0], type: 'Organization' }, repository_selection: 'selected', suspended_at: null, permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } };
     else if (path.endsWith('/access_tokens')) {
       const write = Object.values(body.permissions).includes('write');
       if (write) assert.deepEqual(body.repository_ids, [42]);

@@ -1,12 +1,23 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { clientFail, same } from '../client/local.js';
+import { ClientError, same } from '../client/local.js';
 import { externalPath, readExternalFile } from '../shared/external-files.js';
 import { appJwt } from '../shared/github-app-auth.js';
 import type { Native } from './local-fast-github.js';
 
 export interface Actor { id: number; login: string; type: 'User' | 'Bot' }
+export interface AppInput { app_id: number; app_slug: string; private_key_path: string; reviewer: string }
+export interface AppInstallation {
+  installation_id: number; account: { id: number; login: string; type: string };
+  repository_selection: string; permissions: { contents: string; pull_requests: string; metadata: string };
+  repositories: { id: number; full_name: string }[]; delivery_actor: Actor; reviewer: Actor;
+}
+export type AppInspection = { app_id: number; app_slug: string; installations: ({ status: 'DETECTED'; facts: AppInstallation } | { status: 'BLOCKED'; installation_id: number; account: string; reason: string })[] };
+type AppSession = { app: Native; jwt: string; request: (path: string, credential: string, method?: string, body?: Native) => Promise<any>; expiries: Map<string, number> };
+export class GithubAppError extends ClientError {
+  constructor(readonly reason: string) { super('github_app', 'GitHub App identity, scope, credentials or operation could not be verified; no personal fallback.'); }
+}
 export interface AppBinding {
   provider: 'github-app'; app_id: number; app_slug: string; installation_id: number;
   repository: string; repository_id: number; delivery_actor: Actor; reviewer: Actor;
@@ -21,20 +32,20 @@ export interface AppDependencies {
 }
 const positive = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
 const repoName = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(v) && !v.includes('..');
-const stop = () => clientFail('github_app', 'GitHub App identity, scope, credentials or operation could not be verified; no personal fallback.');
+const stop = (reason = 'verification_failed'): never => { throw new GithubAppError(reason); };
 
 /** Files must already be Owner-protected. Never change permissions of an existing key. */
 export function protectedAppPath(path: string): void {
   externalPath(path);
   if (process.platform !== 'win32') {
-    if (lstatSync(path).mode & 0o077) stop();
+    if (lstatSync(path).mode & 0o077) stop('unsafe_acl');
     return;
   }
   // Fixed ACL inspection; paths travel as data, never PowerShell code.
   const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     '$ErrorActionPreference="Stop"; $a=Get-Acl -LiteralPath $env:AWH_ACL_PATH; $u=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $ok=@($u,"S-1-5-18","S-1-5-32-544"); if($ok -notcontains $a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value){exit 2}; foreach($r in $a.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])){if($r.AccessControlType -eq "Allow" -and $ok -notcontains $r.IdentityReference.Value){exit 3}}'],
   { env: { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH, AWH_ACL_PATH: path }, windowsHide: true, timeout: 10000, encoding: 'utf8' });
-  if (r.error || r.status !== 0) stop();
+  if (r.error || r.status !== 0) stop('unsafe_acl');
 }
 export function appConfigPath(env = process.env): string {
   if (!env.LOCALAPPDATA || !isAbsolute(env.LOCALAPPDATA)) return stop();
@@ -52,6 +63,7 @@ function validate(c: Connection): Connection {
 }
 export interface AppDelivery {
   binding: AppBinding;
+  inspection: AppInstallation;
   push(cwd: string, branch: string, head: string): Promise<void>;
   pulls(branch: string): Promise<Native[]>;
   create(branch: string, title: string, body: string): Promise<void>;
@@ -68,7 +80,7 @@ export class GithubApp {
     try {
       this.#d.protect(this.#d.configPath);
       return validate(JSON.parse(readExternalFile(this.#d.configPath, 65536, true).toString('utf8')));
-    } catch { return stop(); }
+    } catch { return stop('configuration_invalid'); }
   }
   binding(repository: string): AppBinding { return this.#bound(this.#read(), repository); }
   #bound(c: Connection, repository: string): AppBinding {
@@ -83,35 +95,52 @@ export class GithubApp {
     return { status: 'CONNECTED_LOCAL', provider: 'github-app', app_id: c.app_id, app_slug: c.app_slug, installation_id: c.installation_id,
       repositories: c.repositories, delivery_actor: c.delivery_actor, reviewer: c.reviewer, live_verified: false };
   }
-  async #inspect(c: Pick<Connection, 'app_id' | 'app_slug' | 'private_key_path'>, repository: string, pinned?: Connection) {
+  async #authenticate(c: Pick<Connection, 'app_id' | 'app_slug' | 'private_key_path'>, signal?: AbortSignal) {
+    if (!positive(c.app_id) || !/^[a-z0-9-]{1,100}$/.test(c.app_slug)) return stop('invalid_input');
     let jwt: string;
-    try { this.#d.protect(c.private_key_path); jwt = appJwt(String(c.app_id), readExternalFile(c.private_key_path, 65536, true), this.#d.now()); }
-    catch { return stop(); }
+    try { this.#d.protect(c.private_key_path); }
+    catch (e) { if (e instanceof GithubAppError) throw e; return stop('unsafe_key_path'); }
+    try { jwt = appJwt(String(c.app_id), readExternalFile(c.private_key_path, 65536, true), this.#d.now()); }
+    catch { return stop('invalid_key'); }
     const expiries = new Map<string, number>([[jwt, this.#d.now() + 540000]]);
     const request = async (path: string, credential: string, method = 'GET', body?: Native): Promise<any> => {
       try {
         if (!expiries.has(credential) || expiries.get(credential)! <= this.#d.now()) return stop();
-        const r = await this.#d.fetch(`https://api.github.com${path}`, { method, redirect: 'error', signal: AbortSignal.timeout(15000),
+        const r = await this.#d.fetch(`https://api.github.com${path}`, { method, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(15000), ...(signal ? [signal] : [])]),
           headers: { Authorization: `Bearer ${credential}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-        if (!r.ok) return stop();
+        if (!r.ok) return stop(r.status === 401 ? 'app_authentication' : r.status === 404 ? 'github_not_found' : r.status === 403 || r.status === 429 ? 'github_forbidden' : 'github_unavailable');
         const value = await r.json();
         if (expiries.get(credential)! <= this.#d.now()) return stop();
         if (!value || typeof value !== 'object') return stop();
         return value;
-      } catch { return stop(); }
+      } catch (e) { if (e instanceof GithubAppError) throw e; return stop('network_error'); }
     };
     const app = await request('/app', jwt);
-    if (app.id !== c.app_id || app.slug !== c.app_slug) return stop();
-    const inst = await request(`/repos/${repository}/installation`, jwt);
-    if (!positive(inst.id) || inst.app_id !== app.id || inst.app_slug !== app.slug || inst.account?.login !== repository.split('/')[0] ||
-        inst.repository_selection !== 'selected' || inst.suspended_at !== null || pinned && inst.id !== pinned.installation_id ||
-        inst.permissions?.contents !== 'write' || inst.permissions?.pull_requests !== 'write' || inst.permissions?.metadata !== 'read') return stop();
+    if (app.id !== c.app_id || app.slug !== c.app_slug) return stop('identity_drift');
+    return { app, jwt, request, expiries };
+  }
+  async #inspect(c: Pick<Connection, 'app_id' | 'app_slug' | 'private_key_path'>, repository: string, pinned?: Connection, signal?: AbortSignal) {
+    const auth = await this.#authenticate(c, signal);
+    const inst = await auth.request(`/repos/${repository}/installation`, auth.jwt);
+    return this.#inspectInstallation(auth, inst, repository, pinned);
+  }
+  async #inspectInstallation(auth: AppSession, inst: Native, repository?: string, pinned?: Connection) {
+    const { app, jwt, request, expiries } = auth;
+    if (!positive(inst.id) || inst.app_id !== app.id || inst.app_slug !== app.slug ||
+        !positive(inst.account?.id) || !['User','Organization'].includes(inst.account?.type) ||
+        typeof inst.account?.login !== 'string' || !/^[A-Za-z0-9-]{1,39}$/.test(inst.account.login) ||
+        repository && inst.account.login !== repository.split('/')[0] || pinned && inst.id !== pinned.installation_id) return stop('identity_drift');
+    if (inst.repository_selection !== 'selected') return stop('all_repositories');
+    if (inst.suspended_at !== null) return stop('installation_suspended');
+    if (inst.permissions?.contents !== 'write' || inst.permissions?.pull_requests !== 'write' || inst.permissions?.metadata !== 'read') return stop('permissions_insufficient');
     const mint = async (permissions: Native, id?: number) => {
       const v = await request(`/app/installations/${inst.id}/access_tokens`, jwt, 'POST', { ...(id ? { repository_ids: [id] } : {}), permissions });
       const expiry = Date.parse(v.expires_at);
-      if (typeof v.token !== 'string' || !v.token || !Number.isFinite(expiry) || expiry <= this.#d.now() + 30000 || expiry > this.#d.now() + 3660000 ||
-          !same(v.permissions, { metadata: 'read', ...permissions }) || id && (!Array.isArray(v.repositories) || v.repositories.length !== 1 || v.repositories[0].id !== id || v.repositories[0].full_name !== repository)) return stop();
+      if (typeof v.token !== 'string' || !v.token) return stop();
+      if (!Number.isFinite(expiry) || expiry <= this.#d.now() + 30000 || expiry > this.#d.now() + 3660000) return stop('token_expiry');
+      if (!same(v.permissions, { metadata: 'read', ...permissions })) return stop('token_permissions');
+      if (id && (!Array.isArray(v.repositories) || v.repositories.length !== 1 || v.repositories[0].id !== id || v.repositories[0].full_name !== repository)) return stop('token_scope');
       expiries.set(v.token, expiry);
       return { token: v.token as string, expiry };
     };
@@ -121,41 +150,75 @@ export class GithubApp {
     for (let page = 1; page <= 2; page++) {
       if (metadata.expiry <= this.#d.now()) return stop();
       const v = await request(`/installation/repositories?per_page=100&page=${page}`, metadata.token);
-      if (!positive(v.total_count) || v.total_count > 128 || total !== undefined && total !== v.total_count || !Array.isArray(v.repositories) || !v.repositories.length || v.repositories.length > 100) return stop();
+      if (!positive(v.total_count) || v.total_count > 128 || total !== undefined && total !== v.total_count || !Array.isArray(v.repositories) || !v.repositories.length || v.repositories.length > 100) return stop('scope_drift');
       total = v.total_count;
       for (const r of v.repositories) { if (!positive(r.id) || !repoName(r.full_name)) return stop(); repositories.push({ id: r.id, full_name: r.full_name }); }
       if (repositories.length >= v.total_count) break;
     }
     repositories.sort((a,b) => a.id - b.id);
+    if (repositories.some(r => r.full_name.split('/')[0] !== inst.account.login)) return stop('scope_drift');
     if (repositories.length !== total || new Set(repositories.map(r => r.id)).size !== total || new Set(repositories.map(r => r.full_name)).size !== total ||
-        !repositories.some(r => r.full_name === repository) || pinned && !same(repositories, pinned.repositories)) return stop();
+        repository && !repositories.some(r => r.full_name === repository) || pinned && !same(repositories, pinned.repositories)) return stop('scope_drift');
     const actor = await request(`/users/${encodeURIComponent(app.slug + '[bot]')}`, metadata.token);
-    if (!positive(actor.id) || actor.login !== `${app.slug}[bot]` || actor.type !== 'Bot') return stop();
+    if (!positive(actor.id) || actor.login !== `${app.slug}[bot]` || actor.type !== 'Bot') return stop('bot_identity');
     const delivery_actor: Actor = { id: actor.id, login: actor.login, type: 'Bot' };
-    if (pinned && !same(delivery_actor, pinned.delivery_actor)) return stop();
-    return { installation_id: inst.id as number, repositories, delivery_actor, request, mint, metadata };
+    if (pinned && !same(delivery_actor, pinned.delivery_actor)) return stop('identity_drift');
+    return { installation_id: inst.id as number, repositories, delivery_actor, request, mint, metadata,
+      account: { id: inst.account.id as number, login: inst.account.login as string, type: inst.account.type as string },
+      repository_selection: 'selected', permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } };
   }
-  async connect(input: { app_id: number; app_slug: string; private_key_path: string; repositories: string[]; reviewer: string }, confirm: boolean) {
+  async detect(input: AppInput, signal?: AbortSignal): Promise<AppInspection> {
+    if (!/^[A-Za-z0-9-]{1,39}$/.test(input.reviewer)) return stop('invalid_input');
+    const auth = await this.#authenticate(input, signal), all: Native[] = [];
+    let complete = false;
+    for (let page = 1; page <= 2; page++) {
+      const v = await auth.request(`/app/installations?per_page=100&page=${page}`, auth.jwt);
+      if (!Array.isArray(v) || v.length > 100 || all.length + v.length > 128) return stop('installation_limit');
+      all.push(...v);
+      if (v.length < 100) { complete = true; break; }
+    }
+    if (!complete || new Set(all.map(v => v.id)).size !== all.length) return stop('installation_limit');
+    if (!all.length) return stop('not_installed');
+    const installations: AppInspection['installations'] = [];
+    for (const inst of all) {
+      if (!positive(inst.id) || !positive(inst.account?.id) || !['User','Organization'].includes(inst.account?.type)) return stop('identity_drift');
+      try {
+        const live = await this.#inspectInstallation(auth, inst);
+        const user = await live.request(`/users/${input.reviewer}`, live.metadata.token);
+        if (!positive(user.id) || user.login !== input.reviewer || user.type !== 'User' || user.id === live.delivery_actor.id) return stop('reviewer_identity');
+        installations.push({ status: 'DETECTED', facts: { installation_id: live.installation_id, account: live.account, repository_selection: live.repository_selection,
+          permissions: live.permissions, repositories: live.repositories, delivery_actor: live.delivery_actor, reviewer: { id: user.id, login: user.login, type: 'User' } } });
+      } catch (e) {
+        if (!(e instanceof GithubAppError)) throw e;
+        installations.push({ status: 'BLOCKED', installation_id: inst.id, account: /^[A-Za-z0-9-]{1,39}$/.test(inst.account.login) ? inst.account.login : '', reason: e.reason });
+      }
+    }
+    return { app_id: input.app_id, app_slug: input.app_slug, installations };
+  }
+  async connect(input: AppInput & { repositories: string[] }, confirm: boolean, expected?: AppInstallation, signal?: AbortSignal, canSave?: () => boolean) {
     if (!confirm || !positive(input.app_id) || !/^[a-z0-9-]+$/.test(input.app_slug) || !input.repositories.length || input.repositories.length > 128 ||
         !input.repositories.every(repoName) || new Set(input.repositories).size !== input.repositories.length || !/^[A-Za-z0-9-]+$/.test(input.reviewer)) return stop();
     // Owner provisions the parent ACL once; no fake credential discovery or permission changes.
-    externalPath(this.#d.configPath, true);
-    this.#d.protect(join(this.#d.configPath, '..'));
-    const inspected = await this.#inspect(input, input.repositories[0]!);
+    try { externalPath(this.#d.configPath, true); this.#d.protect(join(this.#d.configPath, '..')); }
+    catch (e) { if (e instanceof GithubAppError) throw e; return stop('configuration_directory'); }
+    const inspected = await this.#inspect(input, input.repositories[0]!, undefined, signal);
     if (!same([...input.repositories].sort(), inspected.repositories.map(r => r.full_name).sort())) return stop();
     const user = await inspected.request(`/users/${input.reviewer}`, inspected.metadata.token);
     if (!positive(user.id) || user.login !== input.reviewer || user.type !== 'User' || user.id === inspected.delivery_actor.id) return stop();
     const connection: Connection = { schema_version: '1.0', app_id: input.app_id, app_slug: input.app_slug, private_key_path: input.private_key_path,
       installation_id: inspected.installation_id, repositories: inspected.repositories, delivery_actor: inspected.delivery_actor,
       reviewer: { id: user.id, login: user.login, type: 'User' } };
+    if (expected && !same({ installation_id: inspected.installation_id, account: inspected.account, repository_selection: inspected.repository_selection,
+      permissions: inspected.permissions, repositories: inspected.repositories, delivery_actor: inspected.delivery_actor, reviewer: connection.reviewer }, expected)) return stop('identity_drift');
+    if (signal?.aborted || canSave && !canSave()) return stop('operation_cancelled');
     try { writeFileSync(this.#d.configPath, JSON.stringify(validate(connection), null, 2), { flag: 'wx', mode: 0o600 }); this.#d.protect(this.#d.configPath); }
-    catch { return stop(); }
+    catch { return stop('connection_save_failed'); }
     return this.status();
   }
-  async preflight(repository: string): Promise<AppDelivery> {
-    const c = this.#read(), binding = this.#bound(c, repository), live = await this.#inspect(c, repository, c);
+  async preflight(repository: string, signal?: AbortSignal): Promise<AppDelivery> {
+    const c = this.#read(), binding = this.#bound(c, repository), live = await this.#inspect(c, repository, c, signal);
     const user = await live.request(`/users/${c.reviewer.login}`, live.metadata.token);
-    if (user.id !== c.reviewer.id || user.login !== c.reviewer.login || user.type !== 'User') return stop();
+    if (user.id !== c.reviewer.id || user.login !== c.reviewer.login || user.type !== 'User') return stop('identity_drift');
     const operation = async (permissions: Native, fn: (token: string, valid: () => void) => Promise<any>) => {
       // Re-read the Owner configuration immediately before every short-lived token.
       if (!same(this.#read(), c)) return stop();
@@ -166,6 +229,8 @@ export class GithubApp {
     const root = `/repos/${repository}`;
     return {
       binding,
+      inspection: { installation_id: live.installation_id, account: live.account, repository_selection: live.repository_selection, permissions: live.permissions,
+        repositories: live.repositories, delivery_actor: live.delivery_actor, reviewer: { id: user.id, login: user.login, type: 'User' } },
       push: async (cwd, branch, head) => {
         if (!/^codex\/local-fast-[1-9]\d*$/.test(branch) || !/^[a-f0-9]{40}$/.test(head)) return stop();
         await operation({ contents: 'write' }, async (token, valid) => {

@@ -1,6 +1,7 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { ControlPlaneError, fail } from '../control-plane/security.js';
 import type { DashboardStore } from '../control-plane/store.js';
 import type { AuthenticateViewer } from './security.js';
@@ -10,9 +11,11 @@ import type { Viewer } from './security.js';
 import type { createLocalOnboarding } from './onboarding.js';
 import { enrollmentBody, type createEnrollmentService } from './enrollment.js';
 import type { TaskAdapter } from './tasks.js';
+import { githubAppBody, type createGithubAppManagement } from './github-app-management.js';
 
 export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; now?: () => number;
-  localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding>; enrollment?: ReturnType<typeof createEnrollmentService>; tasks?: TaskAdapter }
+  localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding>; enrollment?: ReturnType<typeof createEnrollmentService>; tasks?: TaskAdapter;
+  githubApp?: ReturnType<typeof createGithubAppManagement> }
 export const dashboardHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin',
   'Cross-Origin-Opener-Policy': 'same-origin', 'Referrer-Policy': 'no-referrer',
@@ -47,6 +50,27 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
       if (!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.length > 2048 || request.url.includes('\\') || /%2e|%2f|%5c/i.test(request.url))
         fail(400, 'invalid_route', 'Invalid request target');
       const url = new URL(request.url, 'http://dashboard.invalid');
+      if (url.pathname.startsWith('/dashboard/github-app/v1/')) {
+        if (!local || !options.githubApp) fail(404, 'not_found', 'Local App settings are not configured');
+        if (!authenticate(request)) fail(401, 'viewer_unauthorized', 'Local Viewer session required');
+        if (url.search) fail(400, 'app_input', 'App actions accept no query');
+        const action = url.pathname.slice('/dashboard/github-app/v1/'.length);
+        const sessionCookie = request.headers.cookie!.split(';').map(v => v.trim()).find(v => v.startsWith('awh_viewer='))!;
+        const session = createHash('sha256').update(sessionCookie).digest('hex');
+        let result: unknown;
+        if (request.method === 'GET' && action === 'status') result = options.githubApp.read(session);
+        else {
+          if (request.method !== 'POST' || request.headers.origin !== `http://${host}` || request.headers['sec-fetch-site'] !== 'same-origin' ||
+              request.headersDistinct['x-awh-csrf']?.length !== 1 || !/^[A-Za-z0-9_-]{43}$/.test(String(request.headers['x-awh-csrf']))) fail(403, 'app_origin', 'Explicit same-origin CSRF required');
+          const data = await githubAppBody(request), controller = new AbortController();
+          const abort = () => { if (!response.writableEnded) controller.abort(); };
+          request.once('aborted', abort); response.once('close', abort);
+          try { result = await options.githubApp.handle(action, data, session, String(request.headers['x-awh-csrf']), AbortSignal.any([controller.signal, AbortSignal.timeout(420000)]), () => !!authenticate(request)); }
+          finally { request.off('aborted', abort); response.off('close', abort); }
+        }
+        if (!authenticate(request)) fail(401, 'viewer_unauthorized', 'Viewer session expired');
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify({ item: result, authority_verified: false })); return;
+      }
       if (url.pathname.startsWith('/dashboard/enrollment/v1/')) {
         if (!local || !options.enrollment) fail(404,'not_found','Local project initialization is not configured');
         const viewer = authenticate(request);
@@ -89,6 +113,7 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
   server.maxHeadersCount = 64;
   server.on('clientError', (_error, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'));
   return { server, close: async () => {
+    options.githubApp?.close();
     await options.enrollment?.close();
     for (const stream of streams) stream.destroy();
     await new Promise<void>((resolve, reject) => { server.close(error => error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING' ? reject(error) : resolve()); server.closeAllConnections(); });

@@ -4,6 +4,8 @@
 
 ## Owner connects once
 
+Windows 用户优先在现有 **Dashboard → 设置 → GitHub App** 填写、检测并连接，完整 Selected Repository 范围由服务端自动发现；保存需要原生 Windows Owner 确认。管理员仅在安装时配置受保护的本机 Owner 管理能力。详见 [Dashboard 可视化接入](dashboard-github-app.md)。以下 CLI 保留用于受信操作与诊断，无需普通用户手工执行。
+
 Use the App settings to obtain the numeric **App ID** and slug. A PEM cannot supply the App ID. Install that App on **selected repositories** with Contents: write, Pull requests: write and Metadata: read. AWH checks the complete selected set (all pages, maximum 128); `--repos` must name that exact set. Only those saved repositories may use this connection. The CLI discovers the installation ID and verifies its App ID, slug, account, active status and permissions through GitHub.
 
 On Windows, create `%LOCALAPPDATA%\AWH\github-app` outside Git and provision its ACL for the current Windows Owner, SYSTEM and Administrators only. Place the existing RSA PEM in an equally protected directory outside every Git checkout; do not copy it into a worktree. Owner can provision **a new directory** in PowerShell:
