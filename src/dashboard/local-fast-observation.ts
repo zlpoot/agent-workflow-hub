@@ -12,12 +12,12 @@ export interface LocalFastObservationConfig {
 export type GitHubObservationConfig = Pick<LocalFastObservationConfig,'project_id'|'repository'|'root'>;
 type Native = Record<string, any>;
 export interface ObservationDependencies {
-  now: () => number; alive: (pid: number) => boolean;
+  now: () => number; alive: (pid: number) => boolean | null;
   command: (command: 'git'|'gh', args: string[], cwd: string) => Promise<string>;
 }
 const env = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(AWH_|GH_TOKEN$|GITHUB_TOKEN$|GIT_CONFIG|NODE_OPTIONS$)/i.test(k)));
 const defaults: ObservationDependencies = {
-  now: Date.now, alive: pid => { try {process.kill(pid,0);return true;} catch {return false;} },
+  now: Date.now, alive: pid => { try {process.kill(pid,0);return true;} catch(error) {return (error as NodeJS.ErrnoException).code==='ESRCH'?false:null;} },
   command: (command,args,cwd) => new Promise((resolve,reject) => {
     execFile(command,args,{cwd,env:{...env(),GH_HOST:'github.com',GH_PROMPT_DISABLED:'1',GIT_TERMINAL_PROMPT:'0'},windowsHide:true,timeout:10000,maxBuffer:2*1024*1024},(error,stdout,stderr)=>{
       if (error) { const denied = /HTTP (401|403)|authentication|permission|not accessible/i.test(stderr); reject(new Error(denied ? 'permission_denied' : 'read_failed')); }
@@ -150,9 +150,9 @@ export class LocalFastObservationAdapter implements TaskAdapter {
       task.observations=[observation('local_fast',now),observation('watcher',now,watchRead?'verified':'not_checked'),observation('owner_scope',now,scope?'verified':'not_checked')];
       if(scope)task.owner_scope={status:Date.parse(scope.expires_at)>now?'valid':'expired',expires_at:scope.expires_at,allow_merge:scope.allow_merge};
       const attempt=watch?.attempts.filter((a:Native)=>a.issue===issue).at(-1);
-      const running=watchRead?!!lock&&this.deps.alive(lock.pid):null;
+      const running=watchRead?(lock?this.deps.alive(lock.pid):false):null;
       const executorRunning=watchRead?!!attempt&&attempt.status==='running'&&positive(attempt.executor_pid)&&this.deps.alive(attempt.executor_pid):null;
-      task.watcher={status:watch?safeLabel(watch.status):'not_checked',running,executor_running:executorRunning,stale_lock:watchRead?!!lock&&!running:null};
+      task.watcher={status:watch?safeLabel(watch.status):'not_checked',running,executor_running:executorRunning,stale_lock:watchRead&&running!==null?!!lock&&!running:null};
       if(t) {
         task.source_head=t.head??(sha(t.pending_head)?t.pending_head:null);
         if(t.pr)task.pr={number:t.pr,state:null,draft:null,merged_at:null,merge_sha:null};
@@ -174,7 +174,7 @@ export class LocalFastObservationAdapter implements TaskAdapter {
       await this.verifyGitHub(c,task,state.repository_id);
       if(task.state!=='completed'&&task.state!=='unknown') {
         if(task.owner_scope.status==='expired') {task.state='blocked';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.blockers.push('Owner 有界授权已过期');task.next_action='Owner 检查并决定是否续期';}
-        if(watchRead&&!running&&(task.waiting_for?.role==='watcher'||['ready','queued'].includes(task.state))) {task.state='blocked';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.blockers.push('Watcher 已停止，无法自动推进');task.next_action='Owner 检查 Watcher 并决定恢复';}
+        if(watchRead&&running===false&&(task.waiting_for?.role==='watcher'||['ready','queued'].includes(task.state))) {task.state='blocked';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.blockers.push('Watcher 已停止，无法自动推进');task.next_action='Owner 检查 Watcher 并决定恢复';}
         if(attempt?.status==='blocked'||task.watcher.stale_lock) {task.state='blocked';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.blockers.push('Watcher 执行失败或存在失效锁');task.next_action='Owner 检查原始 Watcher 日志并决定恢复';}
       }
       if(watch)task.history.push({source:'watcher',type:task.watcher.status,occurred_at:null,observed_at:new Date(now).toISOString(),head:task.source_head,run_id:null});
