@@ -51,9 +51,20 @@ awh local-fast flow next
 # records completion and creates the next worktree from the latest remote main.
 ```
 
-An open PR, even when approved, blocks the next Issue. Independent native approval must name the exact current candidate HEAD; the PR author's own approval does not satisfy the gate. A new commit requires a fresh independent Review. Stage updates the same PR and returns it to Draft if it was made ready. It cannot create a replacement for a closed unmerged PR.
+An open PR, even when its Review passes, blocks the next Issue. Third-party native `APPROVED` on the exact current candidate HEAD retains priority. When ChatGPT uses the same GitHub account as the ordinary PR author, it can instead submit a native `COMMENTED` Review containing exactly one decision block:
 
-Continuation checks native merge, independent exact-head approval and GitHub status checks. It does not require manual Issue closing or a new per-Issue administrator approval. After Issue #3 it returns `QUEUE_COMPLETED`. No command auto-merges. Flow advances when invoked by Codex after the Human merge; this version has no background watcher or autonomous model scheduler.
+~~~text
+AWH-LOCAL-FAST-REVIEW v1
+```json
+{"head":"<actual complete candidate HEAD>","decision":"PASS"}
+```
+~~~
+
+The reviewing ChatGPT reads the actual PR HEAD and uses it for both the native Review `commit_id` and the block's `head`; Human need not fill in a SHA. The only decisions are `PASS` and `REQUEST_CHANGES`. The block must have exactly those two fields, and both HEADs must equal the current candidate. Plain comments, malformed decisions and old HEAD decisions do not satisfy the gate. The latest valid same-head comment decision applies, with native third-party Review retaining its existing priority.
+
+Flow reports `review.source: local-fast-commented-review`, `review.native_state: COMMENTED` and the explicit decision. This personal comment record never claims GitHub `APPROVED`, a trusted independent identity, formal Builder Evidence or CP Review PASS. Local Fast does not submit its own Review. Comment `REQUEST_CHANGES` returns the same PR/worktree repair instructions. A new commit requires a fresh independent Review. Stage updates the same PR and returns it to Draft if it was made ready. It cannot create a replacement for a closed unmerged PR.
+
+Continuation requires Human to actually authorize and complete the native merge, an exact-head third-party approval or Local Fast comment `PASS`, and passing GitHub status checks. A comment PASS never authorizes or performs merge. It does not require manual Issue closing or a new per-Issue administrator approval. After Issue #3 it returns `QUEUE_COMPLETED`. No command auto-merges. Flow advances when invoked by Codex after the Human merge; this version has no background watcher or autonomous model scheduler.
 
 Verification failure preserves the local Commit and raw failure without Push. A failed/uncertain publication keeps the same candidate; retry Stage reads back the branch and searches the exact Issue PR before resuming. `flow next` can reconcile a lost PR-create acknowledgement or resume an interrupted preparation when the reserved worktree exactly matches its original branch/base. An interrupted lock/incomplete worktree, unexpected remote HEAD, changed account or conflicting branch/PR fails visibly and preserves state; do not delete history or force-push to bypass it.
 

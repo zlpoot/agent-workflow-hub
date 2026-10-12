@@ -81,9 +81,9 @@ function harness(t) {
   };
   const client = (cwd = repo) => new LocalFast(cwd, deps);
   const bind = () => client().bind(repository, '1,2,3', true, ['node --test tests/smoke.test.mjs']);
-  const review = (number, state = 'APPROVED', owner = 22, head) => {
+  const review = (number, state = 'APPROVED', owner = 22, head, body = '') => {
     const p = refresh(prs.find(p => p.number === number));
-    const list = reviews.get(number) ?? []; list.push({ id: 100 + list.length, user: { id: owner }, commit_id: head ?? p.head.sha, state }); reviews.set(number, list);
+    const list = reviews.get(number) ?? []; list.push({ id: 100 + list.length, user: { id: owner }, commit_id: head ?? p.head.sha, state, body }); reviews.set(number, list);
   };
   // Human merge is simulated only against this fresh local bare remote; product never merges.
   const merge = number => { const p = refresh(prs.find(p => p.number === number)); git(['--git-dir', remote, 'update-ref', 'refs/heads/main', p.head.sha]); p.merged_at = '2026-10-12T00:00:00Z'; p.state = 'closed'; p.draft = false; };
@@ -126,6 +126,39 @@ test('one binding drives three ordinary Issues, same-PR revision and latest-main
   assert.equal(h.git(['rev-parse', 'main']), h.initialMain, 'local original main was never reset');
   assert(h.calls.every(c => c.command !== 'gh' || !c.args.some(a => /app\/installations|approve|merge|comment/.test(a))));
   assert(!existsSync(join(h.repo, 'cp.sqlite')));
+});
+
+test('same-account COMMENTED Review drives three Issues, same-PR repair and fresh-head PASS only after Human merge', { timeout: 180000 }, async t => {
+  const h = harness(t); await h.bind(); let ready = await h.client().flow(true), active = h.client(ready.worktree);
+  const decision = (head, verdict) => `AWH-LOCAL-FAST-REVIEW v1\n\`\`\`json\n${JSON.stringify({ head, decision: verdict })}\n\`\`\``;
+  writeFileSync(join(ready.worktree, 'code.txt'), 'same-account feature one\n'); const first = await active.execute(options), pr = h.prs[0].number;
+  h.review(pr, 'COMMENTED', 11, first.head, 'PASS'); assert.equal((await active.flow()).review, undefined);
+  h.review(pr, 'COMMENTED', 11, first.head, decision(ready.base_sha, 'PASS')); assert.equal((await active.flow()).review, undefined);
+  h.review(pr, 'COMMENTED', 11, first.head, decision(first.head, 'APPROVED')); assert.equal((await active.flow()).review, undefined);
+  h.review(pr, 'COMMENTED', 11, first.head, decision(first.head, 'REQUEST_CHANGES'));
+  const requested = await active.flow(true); assert.equal(requested.status, 'REQUEST_CHANGES'); assert.equal(requested.pr_url, first.pr_url);
+  assert.equal(requested.review.source, 'local-fast-commented-review'); assert.equal(requested.review.native_state, 'COMMENTED'); assert(requested.instructions[0].includes('same PR'));
+  writeFileSync(join(ready.worktree, 'code.txt'), 'same-account feature one repaired\n'); const repaired = await active.execute(options);
+  assert.equal(repaired.pr_url, first.pr_url); assert.notEqual(repaired.head, first.head); assert.equal(h.prs.length, 1);
+  h.review(pr, 'COMMENTED', 11, first.head, decision(first.head, 'PASS')); assert.equal((await active.flow()).review, undefined, 'old HEAD PASS is not reusable');
+  h.review(pr, 'COMMENTED', 11, repaired.head, decision(first.head, 'PASS')); assert.equal((await active.flow()).review, undefined, 'body HEAD must match native commit_id');
+  h.review(pr, 'COMMENTED', 11, repaired.head, decision(repaired.head, 'PASS'));
+  let passed = await active.flow(true); assert.equal(passed.issue, 1); assert.equal(passed.status, 'AWAITING_REVIEW');
+  assert.equal(passed.review.decision, 'PASS'); assert.equal(passed.review.native_state, 'COMMENTED'); assert.equal(passed.review.source, 'local-fast-commented-review');
+  assert.equal(JSON.parse(readFileSync(h.statePath)).tasks.length, 1, 'comment PASS alone cannot advance');
+  // A later same-head REQUEST_CHANGES supersedes the comment PASS; a new PASS is required.
+  h.review(pr, 'COMMENTED', 11, repaired.head, decision(repaired.head, 'REQUEST_CHANGES')); assert.equal((await active.flow()).status, 'REQUEST_CHANGES');
+  h.review(pr, 'COMMENTED', 11, repaired.head, decision(repaired.head, 'PASS')); h.merge(pr);
+  for (const issue of [2, 3]) {
+    const latest = h.readRef('main'); ready = await active.flow(true); assert.equal(ready.issue, issue); assert.equal(ready.base_sha, latest);
+    active = h.client(ready.worktree); writeFileSync(join(ready.worktree, 'code.txt'), `same-account feature ${issue}\n`);
+    const candidate = await active.execute(options), number = h.prs.at(-1).number;
+    h.review(number, 'COMMENTED', 11, candidate.head, decision(candidate.head, 'PASS'));
+    passed = await active.flow(true); assert.equal(passed.issue, issue); assert.equal(passed.review.native_state, 'COMMENTED');
+    assert.equal(passed.review.decision, 'PASS'); assert.equal(passed.review.source, 'local-fast-commented-review'); h.merge(number);
+  }
+  const complete = await active.flow(true); assert.equal(complete.status, 'QUEUE_COMPLETED'); assert.deepEqual(complete.completed, [1,2,3]); assert.equal(h.prs.length, 3);
+  assert(!h.calls.some(c => c.command === 'gh' && c.args.some(a => a === 'merge' || a === 'review')));
 });
 
 test('bind checks write permission, exact repository/queue and ordinary Issues before retaining a binding', async t => {
@@ -177,7 +210,12 @@ test('merged candidate needs independent exact-head Review; closed Issue alone c
 
 test('native failing or pending checks block continuation after merge; successful checks allow the next Issue', async t => {
   const h = harness(t); await h.bind(); const ready = await h.client().flow(true); const active = h.client(ready.worktree); await active.execute(options);
-  h.review(h.prs[0].number); h.merge(h.prs[0].number);
+  h.review(h.prs[0].number);
+  const nativeHead = h.prs[0].head.sha;
+  h.review(h.prs[0].number, 'COMMENTED', 11, nativeHead, `AWH-LOCAL-FAST-REVIEW v1\n\`\`\`json\n${JSON.stringify({ head: nativeHead, decision: 'REQUEST_CHANGES' })}\n\`\`\``);
+  const nativePass = await active.flow(); assert.equal(nativePass.review.source, 'github-native-review');
+  assert.equal(nativePass.review.native_state, 'APPROVED'); assert.equal(nativePass.review.decision, 'PASS', 'third-party native APPROVED retains priority');
+  h.merge(h.prs[0].number);
   h.githubChecks([{ __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: null }]); await assert.rejects(active.flow(true), code('local_fast_merge_gate'));
   h.githubChecks([{ __typename: 'StatusContext', state: 'FAILURE' }]); await assert.rejects(active.flow(true), code('local_fast_merge_gate'));
   h.githubChecks([{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }]); assert.equal((await active.flow(true)).issue, 2);

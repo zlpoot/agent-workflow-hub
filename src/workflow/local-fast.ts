@@ -6,6 +6,7 @@ import { deliveryDependencies, type VerificationLog } from '../client/deliver.js
 import { initFlow, readFlow } from './flow.js';
 
 type Native = Record<string, any>;
+type ReviewDecision = { decision: 'PASS' | 'REQUEST_CHANGES'; source: 'github-native-review' | 'local-fast-commented-review'; native_state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; review_id: number; head: string };
 type Task = { issue: number; branch: string; base: string; worktree: string; phase: 'preparing' | 'developing' | 'publishing' | 'awaiting_review' | 'completed'; head?: string; pending_head?: string; pr?: number };
 interface State {
   schema_version: '1.0'; mode: 'local-fast'; repository: string; repository_id: number;
@@ -149,7 +150,7 @@ export class LocalFast {
       clientFail('local_fast_pr_scope', 'Native PR differs from this Local Fast repository, author, branch or Issue.');
     return p;
   }
-  private review(s: State, p: Native): string | undefined {
+  private review(s: State, p: Native): ReviewDecision | undefined {
     const reviews: Native[] = this.api(`repos/${s.repository}/pulls/${p.number}/reviews?per_page=100`, true);
     const latest = new Map<number, Native>();
     for (const r of [...reviews].sort((a, b) => a.id - b.id)) {
@@ -157,9 +158,22 @@ export class LocalFast {
       if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) latest.set(r.user.id, r);
     }
     const exact = [...latest.values()].filter(r => r.user.id !== p.user.id && r.commit_id === p.head.sha);
-    if (exact.some(r => r.state === 'CHANGES_REQUESTED')) return 'CHANGES_REQUESTED';
-    if (exact.some(r => r.state === 'APPROVED')) return 'APPROVED';
-    return undefined;
+    const native = exact.find(r => r.state === 'CHANGES_REQUESTED') ?? exact.find(r => r.state === 'APPROVED');
+    if (native) return { decision: native.state === 'APPROVED' ? 'PASS' : 'REQUEST_CHANGES', source: 'github-native-review', native_state: native.state, review_id: native.id, head: native.commit_id };
+    // A same-account personal Review remains COMMENTED, never GitHub APPROVED.
+    // Both the native commit_id and the explicit decision must name this candidate.
+    let commented: ReviewDecision | undefined;
+    for (const r of [...reviews].sort((a, b) => a.id - b.id)) {
+      if (r.state !== 'COMMENTED' || r.user.id !== p.user.id || r.commit_id !== p.head.sha || typeof r.body !== 'string') continue;
+      const blocks = [...r.body.matchAll(/^AWH-LOCAL-FAST-REVIEW v1\r?\n```json\r?\n([\s\S]*?)\r?\n```(?=\r?\n|$)/gm)];
+      if (blocks.length !== 1) continue;
+      try {
+        const record = JSON.parse(blocks[0]![1]!);
+        if (!record || Object.keys(record).sort().join(',') !== 'decision,head' || record.head !== r.commit_id || !['PASS', 'REQUEST_CHANGES'].includes(record.decision)) continue;
+        commented = { decision: record.decision, source: 'local-fast-commented-review', native_state: 'COMMENTED', review_id: r.id, head: r.commit_id };
+      } catch { /* An ordinary or malformed comment is not a Review decision. */ }
+    }
+    return commented;
   }
   private checks(s: State, p: Native): boolean {
     const rollup = JSON.parse(this.deps.run('gh', ['pr', 'view', String(p.number), '--repo', s.repository, '--json', 'statusCheckRollup'], this.cwd));
@@ -205,14 +219,15 @@ export class LocalFast {
       if (t.phase === 'publishing' && (p.head.sha !== t.pending_head || !p.draft)) return result('PUBLISHING', { issue: number, worktree: t.worktree, next_action: 'RESUME_SAME_STAGE' });
       const review = this.review(s, p), ci = this.checks(s, p);
       if (p.merged_at) {
-        if (review !== 'APPROVED' || !ci) clientFail('local_fast_merge_gate', 'Merged candidate lacks independent exact-head approval or passing GitHub checks.');
+        if (review?.decision !== 'PASS' || !ci) clientFail('local_fast_merge_gate', 'Merged candidate lacks an exact-head native approval/Local Fast comment PASS or passing GitHub checks.');
         if (advance && t.phase !== 'completed') { t.pr = p.number; t.head = p.head.sha; delete t.pending_head; t.phase = 'completed'; this.save(s); }
         completed.push(number); continue;
       }
       if (p.state === 'closed' || t.phase === 'completed') clientFail('local_fast_closed_pr', 'PR was closed without merge or completed history changed.');
       if (advance && (!t.pr || t.phase === 'publishing')) { t.pr = p.number; t.head = p.head.sha; delete t.pending_head; t.phase = 'awaiting_review'; this.save(s); }
-      return result(review === 'CHANGES_REQUESTED' ? 'REQUEST_CHANGES' : 'AWAITING_REVIEW', { issue: number, branch: t.branch, worktree: t.worktree,
-        head: p.head.sha, pr_url: p.html_url, github_checks_passed: ci, completed, next_action: 'AWAITING_INDEPENDENT_REVIEW' });
+      return result(review?.decision === 'REQUEST_CHANGES' ? 'REQUEST_CHANGES' : 'AWAITING_REVIEW', { issue: number, branch: t.branch, worktree: t.worktree,
+        head: p.head.sha, pr_url: p.html_url, review, github_checks_passed: ci, completed, next_action: 'AWAITING_INDEPENDENT_REVIEW',
+        ...(review?.decision === 'REQUEST_CHANGES' ? { instructions: ['Repair this same PR in the returned worktree, then execute Stage again. The new HEAD requires a fresh Review; only Human-authorized actual merge permits the next Issue.'] } : {}) });
     }
     return result('QUEUE_COMPLETED', { repository: s.repository, completed });
   }
