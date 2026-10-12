@@ -9,6 +9,7 @@ import { deliver, DeliveryError, deliveryDiagnostic } from './deliver.js';
 import { prepareCodexStage, developToPR } from '../workflow/codex.js';
 import { initFlow, inspectFlow } from '../workflow/flow.js';
 import { LOCAL_FAST_COMMANDS, localFastMain } from '../workflow/local-fast-cli.js';
+import { GITHUB_APP_COMMANDS, githubAppMain } from '../workflow/github-app-cli.js';
 import { readFileSync, lstatSync } from 'node:fs';
 import { publicationDiagnostic } from '../builder.js';
 import { doctor, formatDoctor, isDoctorReport } from './doctor.js';
@@ -16,6 +17,7 @@ import { residentControl, startResident } from './resident.js';
 import { setupMachine, enrollmentPreview, submitEnrollment, finishEnrollment, browseDirectories, diagnoseEnrollment, enrollmentPolicies } from './enrollment.js';
 
 export async function main(args: string[]): Promise<unknown> {
+  if (args[0] === 'github-app') return githubAppMain(args.slice(1));
   if (args[0] === 'local-fast') return localFastMain(args.slice(1));
   if (args.length === 1 && args[0] === '--version') return { package: CLIENT_PACKAGE, version: CLIENT_VERSION, authority_verified: false };
   if (args.length === 1 && args[0] === '--help') return { commands: ['setup --machine-config <external-file> --home <external-directory> --endpoint <trusted-CP> --project-root <directory> [--ca <external-public-CA>] [--policy-trust <external-anchor>]',
@@ -24,7 +26,7 @@ export async function main(args: string[]): Promise<unknown> {
     'resident start|status|stop', 'doctor [--json] [--probe-cp] [--policy-trust <external-file> --work-item <id> --work-item-version <version> --observations <json-file>]', 'init --profile <ref> [--project-id <id>]', 'register', 'status', 'timeline', 'sync', 'start --issue <n>',
     'event --type <type> --data <json-file>', 'event --retry', 'finish [--outcome failed --data <json-file>]', 'deliver [--issue <n>] [--recover-from-run <run-id>] --title <title> --body <utf8-file> [--hold-draft]', 'deliver --retry',
     'link-revision --run <run-id> --pr <n> --head <sha> --evidence-comment <id>', 'link-revision --retry',
-    'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>', 'stage prepare', 'stage execute --title <title> --body <utf8-file>', 'flow init --issues 1,2,3', 'flow status', 'flow next', ...LOCAL_FAST_COMMANDS], event_types: CLIENT_EVENT_TYPES,
+    'reconcile-publication --revision <revision-id>', 'resume-publication --revision <revision-id> --authorization-comment <id>', 'stage prepare', 'stage execute --title <title> --body <utf8-file>', 'flow init --issues 1,2,3', 'flow status', 'flow next', ...LOCAL_FAST_COMMANDS, ...GITHUB_APP_COMMANDS], event_types: CLIENT_EVENT_TYPES,
     configuration: '--config <absolute-external-json-file> before command or AWH_CLIENT_CONFIG', doctor: 'read-only offline by default; explicit CP GET probe uses existing approved config; never grants authority', deliver: 'fixed Builder policy; explicit event-only retry', authority_verified: false };
   let configPath = process.env.AWH_CLIENT_CONFIG;
   if (args[0] === '--config') {

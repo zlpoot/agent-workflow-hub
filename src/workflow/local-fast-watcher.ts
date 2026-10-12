@@ -25,7 +25,7 @@ export const codexExecutor: ExecutorAdapter = {
   run(request, started, signal) {
     ignoredDeliveryLogs(inspectRepository(request.task.worktree));
     mkdirSync(request.log_directory, { recursive: true });
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AWH_|GH_TOKEN$|GITHUB_TOKEN$|CODEX_API_KEY$|OPENAI_API_KEY$)/i.test(key)));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AWH_|GH_|GITHUB_|GIT_|NODE_OPTIONS$|NODE_EXTRA_CA_CERTS$|SSH_|CODEX_API_KEY$|OPENAI_API_KEY$)/i.test(key)));
     // The coding child only edits. The parent runs existing Stage and owns publication.
     // No shell, new worktree, review command, approval bypass or grant-directory access.
     const args = ['exec', '--sandbox', 'workspace-write', '--json', '-C', request.task.worktree, '-o', join(request.log_directory, 'last-message.txt'), '-'];
@@ -105,10 +105,10 @@ export class LocalFastWatcher {
   private load(): WatchScope {
     externalPath(this.scope_file);
     const grant = readJson(this.scope_file) as WatchScope, scope = this.fast().scope();
-    const allowed = ['repository','repository_id','owner','root','issues','checks','schema_version','mode','source','scope_version','expires_at','executor','allow_merge'];
+    const allowed = ['repository','repository_id','owner','root','issues','checks','delivery','schema_version','mode','source','scope_version','expires_at','executor','allow_merge'];
     if (!grant || Object.keys(grant).some(k => !allowed.includes(k)) || grant.schema_version !== '1.0' || grant.mode !== 'local-fast' || grant.source !== 'windows-owner-confirmation' ||
         typeof grant.scope_version !== 'string' || !/^[a-f0-9-]{36}$/.test(grant.scope_version) || typeof grant.allow_merge !== 'boolean' || grant.executor?.type !== this.deps.executor.type ||
-        !same({ repository: grant.repository, repository_id: grant.repository_id, owner: grant.owner, root: grant.root, issues: grant.issues, checks: grant.checks }, scope))
+        !same({ repository: grant.repository, repository_id: grant.repository_id, owner: grant.owner, root: grant.root, issues: grant.issues, checks: grant.checks, ...(grant.delivery ? { delivery: grant.delivery } : {}) }, scope))
       clientFail('local_fast_watch_scope', 'Saved Owner scope does not match the actual login, binding, checks, queue or executor.');
     if (!Number.isFinite(Date.parse(grant.expires_at)) || Date.parse(grant.expires_at) <= this.deps.now()) clientFail('local_fast_watch_expired', 'The saved Owner scope has expired; no continuation or merge is allowed.');
     this.executable(grant.executor.executable);

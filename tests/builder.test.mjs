@@ -309,7 +309,7 @@ test('unsafe local Git transport, wrong branch and Git errors are refused safely
 
 test('Builder exposes only fixed operations, requires App bot for PR/comments, rejects secret text', async () => {
   const f = fake(), b = await connectBuilder(f.deps);
-  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready', 'restoreDraft', 'readLifecycle', 'readRevisionRef', 'listComments', 'readAuthorization', 'adoptComment'].sort());
+  assert.deepEqual(Object.keys(b).sort(), ['preflight', 'push', 'createPR', 'updatePR', 'readPR', 'createComment', 'editComment', 'readComment', 'ready', 'restoreDraft', 'readLifecycle', 'readFlowIssue', 'readRevisionRef', 'listComments', 'readAuthorization', 'adoptComment'].sort());
   await b.createPR('Title', 'Implements #4');
   assert.deepEqual(JSON.parse(f.requests.at(-1).body), { title: 'Title', body: 'Implements #4', head: BRANCH, base: 'main', draft: true });
   await b.updatePR(5, 'Final title', 'Final body');

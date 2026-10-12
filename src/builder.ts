@@ -1,4 +1,5 @@
-import { createPrivateKey, sign, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { appJwt } from './shared/github-app-auth.js';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { relative, isAbsolute, dirname, join } from 'node:path';
@@ -66,12 +67,7 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
   if (!/^[1-9]\d*$/.test(appId) || !Number.isSafeInteger(Number(appId))) fail('Invalid App ID');
   if (!Number.isFinite(now) || now < 60000) fail('Invalid clock');
   try {
-    const key = createPrivateKey(pem);
-    if (key.asymmetricKeyType !== 'rsa') fail('Private key must be RSA');
-    const seconds = Math.floor(now / 1000);
-    const encode = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
-    const input = `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode({ iat: seconds - 60, exp: seconds + 540, iss: appId })}`;
-    return `${input}.${sign('RSA-SHA256', Buffer.from(input), key).toString('base64url')}`;
+    return appJwt(appId, pem, now);
   } catch { return fail('Private key is not a usable RSA signing key'); }
 }
 

@@ -6,7 +6,7 @@ import { ReviewBridge, type ReviewContext, type ReviewDecisionName } from './loc
 import { LocalFastWatcher, type WatchDependencies } from './local-fast-watcher.js';
 
 export const LOCAL_FAST_COMMANDS = [
-  'local-fast bind --repo <owner/name> --issues 1,2,3 --confirm [--check <bounded-command>]',
+  'local-fast bind --repo <owner/name> --issues 1,2,3 --confirm [--provider personal-gh|github-app] [--check <bounded-command>]',
   'local-fast flow status|next', 'local-fast stage prepare',
   'local-fast stage execute --title <title> --body <UTF8-file> --message <commit-message> [--check <bounded-command>]',
   'local-fast review prepare --pr <GitHub-PR-URL> [--output <JSON-file>]',
@@ -61,7 +61,7 @@ export async function localFastMain(args: string[], cwd = process.cwd(), deps: P
   if (command === 'stage' && args.length === 2 && sub === 'prepare') return new LocalFast(cwd, deps).prepare();
   const bind = command === 'bind', execute = command === 'stage' && sub === 'execute';
   if (!bind && !execute) clientFail('arguments', 'Use local-fast --help; arbitrary Git/GitHub operations are unavailable.');
-  const options = new Map<string, string>(), checks: string[] = [], allowed = bind ? ['--repo', '--issues', '--confirm', '--check'] : ['--title', '--body', '--message', '--check'];
+  const options = new Map<string, string>(), checks: string[] = [], allowed = bind ? ['--repo', '--issues', '--confirm', '--check', '--provider'] : ['--title', '--body', '--message', '--check'];
   for (let i = bind ? 1 : 2; i < args.length; i++) {
     const key = args[i]!;
     if (!allowed.includes(key) || key !== '--check' && options.has(key)) clientFail('arguments', 'Unknown or duplicate Local Fast option.');
@@ -71,7 +71,7 @@ export async function localFastMain(args: string[], cwd = process.cwd(), deps: P
     if (key === '--check') checks.push(value); else options.set(key, value);
   }
   if (checks.length > 32 || !(bind ? ['--repo', '--issues', '--confirm'] : ['--title', '--body', '--message']).every(key => options.has(key))) clientFail('arguments', 'An exact repository/queue confirmation or title/body/message is required.');
-  if (bind) return new LocalFast(cwd, deps).bind(options.get('--repo')!, options.get('--issues')!, true, checks);
+  if (bind) return new LocalFast(cwd, deps).bind(options.get('--repo')!, options.get('--issues')!, true, checks, (options.get('--provider') ?? 'personal-gh') as 'personal-gh' | 'github-app');
   const body = textFile(options.get('--body')!);
   return new LocalFast(cwd, deps).execute({ title: options.get('--title')!, message: options.get('--message')!, body, checks });
 }
