@@ -10,17 +10,20 @@ import { createLocalOnboarding, type LocalBinding } from './dashboard/onboarding
 import { createEnrollmentService } from './dashboard/enrollment.js';
 import { createOwnerApproval } from './dashboard/owner-approval.js';
 import { readMachineConfig } from './client/enrollment.js';
+import { LocalFastObservationAdapter, GitHubObservationAdapter, combineTaskAdapters, validateObservationConfigs, validateGitHubObservationConfigs, type LocalFastObservationConfig, type GitHubObservationConfig } from './dashboard/local-fast-observation.js';
 
-interface ViewerConfig { schema_version: '1.0'; mode: 'local_browser_direct'; database: string; port: number; viewer: { id: string; project_ids: string[] }; local_bindings: LocalBinding[]; machine_config_file?: string }
+interface ViewerConfig { schema_version: '1.0'; mode: 'local_browser_direct'; database: string; port: number; viewer: { id: string; project_ids: string[] }; local_bindings: LocalBinding[]; machine_config_file?: string; local_fast_observations?: LocalFastObservationConfig[]; github_observations?: GitHubObservationConfig[] }
 export function readViewerConfig(path: string): ViewerConfig {
   let c: ViewerConfig;
   try { c = JSON.parse(readExternalFile(path, 64 * 1024).toString('utf8')); safeData(c); } catch { return fail(500, 'configuration', 'Invalid external viewer configuration (contents suppressed)'); }
-  if (!c || !['database,local_bindings,mode,port,schema_version,viewer','database,local_bindings,machine_config_file,mode,port,schema_version,viewer'].includes(Object.keys(c).sort().join(',')) || c.schema_version !== '1.0' || c.mode !== 'local_browser_direct' ||
+  if (!c || !['database,local_bindings,mode,port,schema_version,viewer','database,local_bindings,machine_config_file,mode,port,schema_version,viewer'].includes(Object.keys(c).filter(k=>!['local_fast_observations','github_observations'].includes(k)).sort().join(',')) || c.schema_version !== '1.0' || c.mode !== 'local_browser_direct' ||
       !Number.isSafeInteger(c.port) || c.port < 1 || c.port > 65535 || !c.viewer || Object.keys(c.viewer).sort().join(',') !== 'id,project_ids' ||
       !validId(c.viewer.id) || !Array.isArray(c.viewer.project_ids) || !c.viewer.project_ids.length && !c.machine_config_file || c.viewer.project_ids.length > 64 ||
       !c.viewer.project_ids.every(validId) || new Set(c.viewer.project_ids).size !== c.viewer.project_ids.length || !Array.isArray(c.local_bindings) ||
       c.local_bindings.some(b => !c.viewer.project_ids.includes(b.project_id))) fail(500, 'configuration', 'Invalid viewer scope or deployment parameters');
   if (c.machine_config_file) readMachineConfig(c.machine_config_file);
+  if(c.local_fast_observations!==undefined)validateObservationConfigs(c.local_fast_observations,c.viewer.project_ids);
+  if(c.github_observations!==undefined)validateGitHubObservationConfigs(c.github_observations,c.viewer.project_ids);
   externalFilePath(c.database); createLocalOnboarding(c.local_bindings); return c;
 }
 export async function main(args: string[]) {
@@ -35,7 +38,8 @@ export async function main(args: string[]) {
   // Assets are relative to the installed product, never an editable config path.
   const assets = join(dirname(fileURLToPath(import.meta.url)), 'dashboard-ui');
   readFileSync(join(assets, 'index.html'));
-  const gateway = createDashboardGateway({ enabled: true, store, assets, localBrowserViewer: c.viewer, onboarding: createLocalOnboarding(c.local_bindings), enrollment });
+  const gateway = createDashboardGateway({ enabled: true, store, assets, localBrowserViewer: c.viewer, onboarding: createLocalOnboarding(c.local_bindings), enrollment,
+    tasks:combineTaskAdapters(new LocalFastObservationAdapter(c.local_fast_observations??[]),new GitHubObservationAdapter(c.github_observations??[])) });
   try { await new Promise<void>((resolve, reject) => { gateway.server.once('error', reject); gateway.server.listen(c.port, '127.0.0.1', resolve); }); }
   catch { await gateway.close(); store.close(); return fail(500, 'viewer_start', 'Viewer port unavailable; preserve the existing listener'); }
   console.log(JSON.stringify({ url: `http://127.0.0.1:${c.port}/dashboard`, access: 'explicit_local_os_user', expires_in_seconds: 3600, database: 'existing_v2_readonly', authority_verified: false }));

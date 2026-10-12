@@ -3,6 +3,7 @@ import { fail, validId } from '../control-plane/security.js';
 import type { DashboardStore, DashboardReadView, StoredEvent } from '../control-plane/store.js';
 import { RUN_STATES, type Event, type Run } from '../protocol/types.js';
 import type { Viewer } from './security.js';
+import { controlPlaneTasks } from './tasks.js';
 
 const indexes = new WeakMap<DashboardReadView, { runs: Map<string, Run>; events: Map<string, StoredEvent[]>; projects: Map<string, StoredEvent[]> }>();
 function index(view: DashboardReadView) {
@@ -112,7 +113,7 @@ export class DashboardProjection {
   }
   snapshot() {
     const view = this.view();
-    return { ...envelope, cursor: view.cursor, projects: this.projects(view), runs: this.runs(view), executors: this.executors(view) };
+    return { ...envelope, cursor: view.cursor, projects: this.projects(view), runs: this.runs(view), executors: this.executors(view), tasks: controlPlaneTasks(view, this.now()) };
   }
   scope(projectId: string) { if (!this.viewer.project_ids.includes(projectId)) fail(403, 'forbidden', 'Project is outside the viewer scope'); }
   detail(kind: 'projects' | 'runs' | 'executors', id: string) {

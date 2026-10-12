@@ -4,6 +4,7 @@ import type { DashboardStore } from '../control-plane/store.js';
 import { DashboardProjection, integer } from './projection.js';
 import type { AuthenticateViewer } from './security.js';
 import { streamCache } from './stream-cache.js';
+import { TASK_STATES, controlPlaneTasks, type TaskAdapter } from './tasks.js';
 
 function query(url: URL, keys: string[]) {
   for (const key of url.searchParams.keys()) if (!keys.includes(key) || url.searchParams.getAll(key).length !== 1)
@@ -14,15 +15,36 @@ function json(response: ServerResponse, value: unknown) {
     'Cross-Origin-Resource-Policy': 'same-origin', 'Referrer-Policy': 'no-referrer' });
   response.end(JSON.stringify(value));
 }
-export function dashboardRoute(request: IncomingMessage, response: ServerResponse, url: URL,
-  options: { store: DashboardStore; authenticate: AuthenticateViewer; streams: Set<ServerResponse>; interval: number; now?: () => number }) {
+export async function dashboardRoute(request: IncomingMessage, response: ServerResponse, url: URL,
+  options: { store: DashboardStore; authenticate: AuthenticateViewer; streams: Set<ServerResponse>; interval: number; now?: () => number; tasks?: TaskAdapter }) {
   const viewer = options.authenticate(request);
   if (!viewer) fail(401, 'viewer_unauthorized', 'A separate same-origin viewer session is required');
   // Authenticate every path and reject every mutation before body parsing; no Client principal is granted.
   if (request.method !== 'GET') fail(405, 'read_only', 'Dashboard sessions have read-only access');
   const projection = new DashboardProjection(options.store, viewer, options.now);
   const path = url.pathname.slice('/dashboard/v1'.length);
-  if (path === '/snapshot') { query(url, []); json(response, projection.snapshot()); return; }
+  const tasks = async (cp = controlPlaneTasks(projection.view(), (options.now ?? Date.now)())) => {
+    const observed = await options.tasks?.observe(viewer.project_ids,cp) ?? [];
+    const current=options.authenticate(request);
+    if (!current || current.id!==viewer.id || JSON.stringify(current.project_ids)!==JSON.stringify(viewer.project_ids)) fail(401, 'viewer_unauthorized', 'Viewer session expired or scope changed');
+    return [...new Map([...cp,...observed.filter(t=>viewer.project_ids.includes(t.project_id))].map(t=>[t.id,t])).values()];
+  };
+  if (path === '/snapshot') { query(url, []); const snapshot=projection.snapshot(); if(options.tasks)snapshot.tasks=await tasks(snapshot.tasks); json(response, snapshot); return; }
+  if (path === '/tasks' || path.startsWith('/tasks/')) {
+    let id='';try{id=decodeURIComponent(path.slice('/tasks/'.length));}catch{fail(400,'invalid_id','Invalid task ID');}
+    if(path !== '/tasks') {
+      query(url,[]);if(!validId(id))fail(400,'invalid_id','Invalid task ID');
+      const item=(await tasks()).find(t=>t.id===id);if(!item)fail(404,'not_found','Task outside viewer scope or unavailable');
+      json(response,{contract_version:'1.0',authority_verified:false,item});return;
+    }
+    query(url,['project_id','state','role','machine_id','limit','offset']);
+    const project=url.searchParams.get('project_id'),state=url.searchParams.get('state'),role=url.searchParams.get('role'),machine=url.searchParams.get('machine_id');
+    if(project){if(!validId(project))fail(400,'invalid_query','Invalid project');projection.scope(project);}
+    if(state&&!TASK_STATES.includes(state as typeof TASK_STATES[number])||role&&!['coding_executor','reviewer','owner','stage','watcher'].includes(role)||machine&&!validId(machine)||[project,state,role,machine].some(x=>x===''))fail(400,'invalid_query','Invalid task filter');
+    const limit=integer(url.searchParams.get('limit'),100,100),offset=integer(url.searchParams.get('offset'),0,10000);if(!limit)fail(400,'invalid_query','Invalid limit');
+    const items=(await tasks()).filter(t=>(!project||t.project_id===project)&&(!state||t.state===state)&&(!role||t.active_actor?.role===role||t.waiting_for?.role===role)&&(!machine||t.machine?.id===machine)).sort((a,b)=>a.id.localeCompare(b.id));
+    json(response,{contract_version:'1.0',authority_verified:false,items:items.slice(offset,offset+limit),next_offset:items.length>offset+limit?offset+limit:null});return;
+  }
   if (path === '/events/stream') {
     query(url, ['after', 'project_id', 'run_id']);
     if ((request.headersDistinct['last-event-id']?.length ?? 0) > 1 || (url.searchParams.has('after') && request.headers['last-event-id'] !== undefined))

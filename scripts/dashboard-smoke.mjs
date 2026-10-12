@@ -49,7 +49,7 @@ try {
   assert(await page.getByRole('button', { name: '关闭详情' }).isVisible());
   await page.screenshot({ path: `${output}/run-detail.png`, fullPage: true, animations: 'disabled' });
   await page.keyboard.press('Escape'); await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  await page.getByRole('tab', { name: '总览', exact: true }).focus(); await page.keyboard.press('ArrowDown');
+  await page.getByRole('tab', { name: '总览', exact: true }).focus(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown');
   await page.locator('[role="tab"][aria-selected="true"]').filter({ hasText: '项目' }).waitFor();
   await page.getByRole('button', { name: '添加项目', exact: true }).click();
   await page.getByRole('heading', { name: '新增本机项目', exact: true }).waitFor();
