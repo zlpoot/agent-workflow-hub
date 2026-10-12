@@ -170,7 +170,10 @@ export class GithubApp {
         if (!/^codex\/local-fast-[1-9]\d*$/.test(branch) || !/^[a-f0-9]{40}$/.test(head)) return stop();
         await operation({ contents: 'write' }, async (token, valid) => {
           const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(this.#d.env).filter(([k]) => !/^(GIT_|GH_|GITHUB_|AWH_|NODE_|SSH_)/i.test(k)));
-          Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_TERMINAL_PROMPT: '0' });
+          // Empty askPass overrides suppress Git's configured/SSH fallback;
+          // GIT_TERMINAL_PROMPT=0 alone only disables the final terminal prompt.
+          Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+            GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '', SSH_ASKPASS_REQUIRE: 'never' });
           const run = (args: string[]) => {
             try {
               valid();
@@ -182,10 +185,11 @@ export class GithubApp {
           // Effective local + optional worktree keys; --worktree itself fails on
           // ordinary linked worktrees when that extension is not enabled.
           const keys = run(['config','--name-only','--list']);
-          if (keys.split(/\r?\n/).some(k => /^(http\.|https\.|url\.|credential\.|include|filter\.|core\.(gitproxy|sshcommand|fsmonitor))/i.test(k)) ||
+          if (keys.split(/\r?\n/).some(k => /^(http\.|https\.|url\.|credential\.|include|filter\.|gpg\.|push\.gpgsign(?:$|\.)|remote\..*\.(?:vcs|receivepack|uploadpack)(?:$|\.)|core\.(gitproxy|sshcommand|fsmonitor|askpass))/i.test(k)) ||
               run(['branch','--show-current']) !== branch || run(['rev-parse','HEAD']) !== head || run(['status','--porcelain=v1'])) return stop();
           const config = [['credential.helper',''], ['credential.https://github.com.helper',''], ['core.hooksPath', process.platform === 'win32' ? 'NUL' : '/dev/null'],
-            ['http.https://github.com/.extraheader',`AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`]];
+            ['http.https://github.com/.extraheader',`AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`],
+            ['core.askPass', '']]; // Also neutralize a config change after inspection.
           env.GIT_CONFIG_COUNT = String(config.length);
           config.forEach(([k,v],i) => { env[`GIT_CONFIG_KEY_${i}`] = k; env[`GIT_CONFIG_VALUE_${i}`] = v; });
           run(['push', '--no-follow-tags', '--recurse-submodules=no', `https://github.com/${repository}.git`, `${head}:refs/heads/${branch}`]);

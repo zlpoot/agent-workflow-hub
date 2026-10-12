@@ -42,6 +42,8 @@ Each operation mints a fresh short-lived token restricted to one saved repositor
 
 PEM and JWT remain in the trusted Provider closure. The Codex child environment strips App/GitHub credential variables; its prompt and logs contain no credential references. Verification children also strip credential variables. This is not strong isolation between processes running as the same Windows OS user: that user can read their own protected files. Use distinct OS identities if stronger isolation is required.
 
+App Git transport rejects local/worktree `core.askPass`, signing programs and remote helper/pack commands. It supplies empty Git/SSH askPass overrides and a final empty `core.askPass` runtime override, so an HTTP 401 or a late configuration change cannot launch a password helper with the token environment. Terminal prompt suppression alone does not provide this protection.
+
 ## Bot readback and independent Review
 
 AWH authenticates `/app`, discovers `/repos/{owner}/{repo}/installation`, completely inspects the selected set, then resolves `/users/{slug}[bot]`. The returned **Bot user ID** is saved separately from App ID and installation ID. Every accepted PR must have the saved Bot `user.id`, exact login and `type: Bot`, same repository IDs, issue branch, main base, marker and exact candidate HEAD. Both the App transport and Stage confirm native branch/PR readback; a create response alone does not mean delivery passed.

@@ -1,7 +1,8 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { GithubApp, protectedAppPath } from '../dist/workflow/github-app.js';
@@ -17,7 +18,7 @@ const bot = { id: 77, login: 'synthetic-builder[bot]', type: 'Bot' };
 const reviewer = { id: 11, login: 'synthetic-owner', type: 'User' };
 const head = 'a'.repeat(40), old = 'b'.repeat(40);
 const denied = e => e.code === 'github_app';
-function fixture(t, h) {
+function fixture(t, h, overrides = {}) {
   const base = mkdtempSync(join(tmpdir(), 'awh-app-test-'));
   const key = join(base, 'test.pem'), configPath = join(base, 'connection.json');
   writeFileSync(key, pem, { mode: 0o600 });
@@ -58,14 +59,14 @@ function fixture(t, h) {
     return response(v);
   };
   const app = new GithubApp({ configPath, fetch, now: () => now, protect: () => {}, spawn(command, args, settings) {
-    spawnCalls.push({ command, args, settings });
+    spawnCalls.push({ command, args, settings: { ...settings, env: { ...settings.env } } });
     assert.equal(command, 'git');
     if (args[0] === 'config' && expireOnInspection) now += 3600001;
     if (args[0] === 'config' && unsafeKeys) return { status: 0, stdout: unsafeKeys, stderr: '' };
     if (args[0] === 'push' && failPush) return { status: 1, stderr: 'ghs_syntheticOnly', stdout: '' };
     const translated = h && args[0] === 'push' ? ['push', '--no-follow-tags', '--recurse-submodules=no', h.remote, args.at(-1)] : args;
     return { status: 0, stdout: h ? h.git(translated, settings.cwd) : args[0] === 'config' ? '' : args[0] === 'branch' ? 'codex/local-fast-1' : args[0] === 'rev-parse' ? head : '', stderr: '' };
-  } });
+  }, ...overrides });
   const connect = () => app.connect({ app_id: 5, app_slug: 'synthetic-builder', private_key_path: key, repositories: [repository], reviewer: reviewer.login }, true);
   return { app, connect, key, configPath, calls, spawnCalls, mutate, advance(ms) { now += ms; }, loseAck() { loseAck = true; }, invisible(v) { invisible = v; }, creates: () => creates, failPush(v) { failPush = v; }, unsafeKeys(v) { unsafeKeys = v; }, expireOnInspection() { expireOnInspection = true; } };
 }
@@ -147,11 +148,94 @@ test('operation-minimum single-repository push/PR tokens and no persistent crede
 
 test('transport refuses executable/redirecting Git configuration and expiry during inspection before push', async t => {
   const f = fixture(t); await f.connect(); const d = await f.app.preflight(repository);
-  for (const key of ['url.evil.insteadof','http.extraheader','credential.helper','include.path','core.fsmonitor','filter.evil.clean']) {
+  for (const key of ['url.evil.insteadof','http.extraheader','credential.helper','include.path','core.fsmonitor','filter.evil.clean',
+    'core.askPass','CORE.ASKPASS','gpg.program','gpg.ssh.program','push.gpgSign','remote.origin.vcs','remote.origin.receivepack','remote.origin.uploadpack']) {
     f.unsafeKeys(key); await assert.rejects(d.push(process.cwd(),'codex/local-fast-1',head),denied);
   }
   f.unsafeKeys(''); f.expireOnInspection(); await assert.rejects(d.push(process.cwd(),'codex/local-fast-1',head),denied);
   assert(!f.spawnCalls.some(c=>c.args[0]==='push'));
+});
+
+function isolatedAskPassGit(t, overrides = {}) {
+  const f = fixture(t, undefined, overrides), base = dirname(f.configPath), repo = join(base, 'repo'); mkdirSync(repo);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^(GIT_|GH_|GITHUB_|AWH_|NODE_|SSH_)/i.test(k)));
+  Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform === 'win32' ? 'NUL' : '/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_ASKPASS:'',SSH_ASKPASS:''});
+  const git = args => {
+    const r = spawnSync('git',args,{cwd:repo,env,encoding:'utf8',windowsHide:true,timeout:15000});
+    assert(!r.error && r.status === 0,'isolated Git setup failed; diagnostics suppressed'); return r.stdout.trim();
+  };
+  git(['init','-b','codex/local-fast-1']); git(['-c','user.name=Synthetic','-c','user.email=synthetic@example.invalid','commit','--allow-empty','-m','Synthetic baseline']);
+  const marker = join(base,'askpass-marker'), helper = join(base,process.platform === 'win32' ? 'askpass.cmd' : 'askpass.sh');
+  const escapedMarker = marker.replaceAll('\\','/').replaceAll("'", "'\\''");
+  writeFileSync(helper,process.platform === 'win32' ? `@echo off\r\necho invoked>>"${marker}"\r\nif defined GIT_CONFIG_VALUE_3 echo inherited-auth-environment>>"${marker}"\r\necho synthetic-credential\r\n` :
+    `#!/bin/sh\nprintf 'invoked\\n' >> '${escapedMarker}'\nif [ -n "$GIT_CONFIG_VALUE_3" ]; then printf 'inherited-auth-environment\\n' >> '${escapedMarker}'; fi\nprintf 'synthetic-credential\\n'\n`);
+  chmodSync(helper,0o700);
+  return { ...f,repo,env,git,marker,helper,sha:git(['rev-parse','HEAD']) };
+}
+
+for (const scope of ['local','worktree']) test(`askPass ${scope} configuration is rejected before an authenticated Git child`, {timeout:90000}, async t => {
+  let isolated; const spawned = [];
+  isolated = isolatedAskPassGit(t,{spawn(command,args,settings){spawned.push({args,env:{...settings.env}});return spawnSync(command,args,settings);}});
+  if (scope === 'worktree') isolated.git(['config','extensions.worktreeConfig','true']);
+  isolated.git(['config',`--${scope}`,'core.askPass',isolated.helper.replaceAll('\\','/')]);
+  await isolated.connect(); const d = await isolated.app.preflight(repository);
+  await assert.rejects(d.push(isolated.repo,'codex/local-fast-1',isolated.sha),denied);
+  assert(spawned.some(c=>c.args[0]==='config'));
+  assert(!spawned.some(c=>c.args[0]==='push'));
+  assert(spawned.every(c=>!Object.values(c.env).some(v=>typeof v==='string' && v.startsWith('AUTHORIZATION: basic '))));
+  assert(!existsSync(isolated.marker));
+});
+
+async function authChallenge(t) {
+  const source = `const {createServer}=require('node:http');const server=createServer((req,res)=>{req.resume();process.send({kind:'request'});res.writeHead(401,{'WWW-Authenticate':'Basic realm="synthetic"','Content-Length':'0'});res.end();});server.listen(0,'127.0.0.1',()=>process.send({kind:'listening',port:server.address().port}));`;
+  const child = spawn(process.execPath,['-e',source],{env:{PATH:process.env.PATH,SystemRoot:process.env.SystemRoot},windowsHide:true,stdio:['ignore','ignore','ignore','ipc']});
+  let requests = 0;
+  let requestObserved;
+  const observed = new Promise(resolve=>{requestObserved=resolve;});
+  const exited = new Promise(resolve=>child.once('exit',resolve));
+  t.after(async()=>{if(child.exitCode === null)child.kill();await exited;});
+  const port = await new Promise((resolve,reject)=>{
+    const timer = setTimeout(()=>reject(new Error('isolated 401 server did not start')),10000);
+    child.on('message',message=>{if(message.kind==='request'){requests++;requestObserved();}if(message.kind==='listening'){clearTimeout(timer);resolve(message.port);}});
+    child.once('error',()=>{clearTimeout(timer);reject(new Error('isolated 401 server failed'));});
+  });
+  return {url:`http://127.0.0.1:${port}/synthetic.git`,requests:()=>requests,waitForRequest:()=>new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(new Error('isolated endpoint received no request')),5000);
+    observed.then(()=>{clearTimeout(timer);resolve();});
+  })};
+}
+
+test('askPass 401 challenge cannot execute config or inherited helpers with the App token environment', {timeout:90000}, async t => {
+  const server = await authChallenge(t), inherited = {...process.env};
+  let isolated, rejectedPush;
+  isolated = isolatedAskPassGit(t,{env:inherited,spawn(command,args,settings){
+    if(args[0] !== 'push')return spawnSync(command,args,settings);
+    assert.equal(args[3],`https://github.com/${repository}.git`);
+    // Emulate a late config change; the production environment must still block it.
+    isolated.git(['config','core.askPass',isolated.helper.replaceAll('\\','/')]);
+    const localArgs=[...args];localArgs[3]=server.url;
+    const env={...settings.env,NO_PROXY:'127.0.0.1',no_proxy:'127.0.0.1',GIT_CONFIG_KEY_3:`http.${server.url}.extraheader`};
+    const result=spawnSync(command,localArgs,{...settings,env,timeout:10000});
+    rejectedPush={args:localArgs,env,error:result.error?.code,status:result.status};
+    return result;
+  }});
+  inherited.GIT_ASKPASS=isolated.helper; inherited.SSH_ASKPASS=isolated.helper; inherited.SSH_ASKPASS_REQUIRE='force';
+  await isolated.connect(); const d=await isolated.app.preflight(repository);
+  await assert.rejects(d.push(isolated.repo,'codex/local-fast-1',isolated.sha),denied);
+  assert(rejectedPush); assert.equal(rejectedPush.env.GIT_ASKPASS,''); assert.equal(rejectedPush.env.SSH_ASKPASS,''); assert.equal(rejectedPush.env.SSH_ASKPASS_REQUIRE,'never');
+  assert.equal(rejectedPush.env.GIT_CONFIG_KEY_4,'core.askPass'); assert.equal(rejectedPush.env.GIT_CONFIG_VALUE_4,'');
+  assert.equal(rejectedPush.error,undefined); assert.notEqual(rejectedPush.status,0);
+  await server.waitForRequest();assert(server.requests()>0);
+  assert(!existsSync(isolated.marker),'401 must not execute any askPass helper');
+  // Positive control proves this endpoint/helper can reproduce the reviewed leak,
+  // using only the fixture's fake token and recording presence, never its value.
+  const controlEnv={...rejectedPush.env,GIT_CONFIG_COUNT:'4'};
+  delete controlEnv.GIT_ASKPASS;delete controlEnv.SSH_ASKPASS;delete controlEnv.SSH_ASKPASS_REQUIRE;
+  delete controlEnv.GIT_CONFIG_KEY_4;delete controlEnv.GIT_CONFIG_VALUE_4;
+  const control=spawnSync('git',rejectedPush.args,{cwd:isolated.repo,env:controlEnv,encoding:'utf8',windowsHide:true,timeout:10000});
+  assert(!control.error && control.status !== 0,'positive 401 control must complete with authentication failure');
+  assert(existsSync(isolated.marker),'positive control must invoke the benign helper');
+  assert.match(readFileSync(isolated.marker,'utf8'),/inherited-auth-environment/);
 });
 
 test('trusted personal exact-head native decisions only; latest dismissal/old head invalidates PASS', () => {
