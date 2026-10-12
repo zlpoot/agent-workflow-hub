@@ -1,5 +1,7 @@
 # Windows M1 Fast Flow Quick Start
 
+For Windows personal single-repository development without per-Issue administrator approval, use the explicit [Local Fast mode](windows-local-fast.md). This page describes the existing Strict/App delivery flow.
+
 Human 在 Codex App 启动每个 Issue；Codex 在一个任务内完成实现、测试、Commit 和已有受信 Stage 交付。队列 `.awh/flow.json` 只有版本与 Issue 顺序，可以 Commit；进度来自原 Run/Event、Session/Journal/Receipt 和 GitHub 原生事实。队列、Issue、manifest 均不授予权限。
 
 ## 1. 安装、建仓库、一次性接入

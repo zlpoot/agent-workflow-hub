@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "components": {
-    "awh-client": { "name": "@zlpoot/awh-client", "version": "0.4.8", "bin": { "awh": "dist/client/cli.js" }, "roots": ["client/cli.js", "client/index.js"], "docs": ["client.md", "doctor.md", "versioned-profile.md", "project-enrollment.md", "windows-product.md", "develop-to-pr.md"] },
+    "awh-client": { "name": "@zlpoot/awh-client", "version": "0.4.8", "bin": { "awh": "dist/client/cli.js" }, "roots": ["client/cli.js", "client/index.js"], "docs": ["client.md", "doctor.md", "versioned-profile.md", "project-enrollment.md", "windows-product.md", "develop-to-pr.md", "windows-local-fast.md"] },
     "awh-control-plane": { "name": "@zlpoot/awh-control-plane", "version": "0.1.0", "bin": { "awh-control-plane": "dist/control-plane-cli.js" }, "roots": ["control-plane-cli.js"], "docs": ["control-plane.md", "project-enrollment.md"] },
     "awh-viewer": { "name": "@zlpoot/awh-viewer", "version": "0.4.8", "bin": { "awh-viewer": "dist/dashboard-cli.js" }, "roots": ["dashboard-cli.js"], "docs": ["windows-product.md", "doctor.md", "project-enrollment.md"] },
     "awh-builder": { "name": "@zlpoot/awh-builder", "version": "0.1.0", "bin": { "awh-builder": "dist/builder-cli.js", "awh-handoff-check": "dist/cli.js", "awh-admin": "dist/admin-cli.js" }, "roots": ["builder-cli.js", "cli.js", "admin-cli.js"], "docs": ["builder-policy.md", "administrator-cli.md", "delivery.md", "publication-recovery.md"] },

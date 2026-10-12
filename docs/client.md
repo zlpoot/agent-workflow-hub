@@ -1,5 +1,7 @@
 # Client and Resident
 
+[Windows Local Fast](windows-local-fast.md) uses `awh local-fast bind`, `local-fast flow next|status` and `local-fast stage prepare|execute` with existing personal Git/GitHub authentication. It is separate from the Strict configuration, CP and administrator grants described below.
+
 [Windows M1 Fast Flow Quick Start](windows-fast-flow.md) covers new project setup, `flow init --issues 1,2,3`, `flow status`, `flow next` and sequential Codex delivery through independent Review.
 
 The standalone `@zlpoot/awh-client` package exposes `awh`. Its component identity and version come from src/client/version.ts. Node.js 24+ and Git are required. Install a verified tarball into a fresh external directory; package installation does not create a CP, approve a Profile or run a business task.
