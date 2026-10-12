@@ -77,7 +77,7 @@ approval-prepare 仍是提议，--confirm 不授予权限。批准窗口默认�
 ## 后续任务无需改源码或拼大型 JSON
 
 ~~~powershell
-node $admin propose --policy-version project-v1 --profile my-project --workflow develop-to-pr --repo owner/repository --issue 123 --branch codex/task-123 --base-sha <准确远端mainSHA> --executor codex --machine APPROVED-HOST --stages develop,deliver --operations push,draft_pr,evidence,handoff --expires-at 2026-10-18T00:00:00.000Z --version issue123-v1 --out C:\AWH-Admin\issue123-v1.proposal.json
+node $admin propose --policy-version project-v1 --profile my-project --workflow develop-to-pr --repo owner/repository --issue 123 --branch codex/task-123 --base-sha <准确远端mainSHA> --executor codex --machine APPROVED-HOST --stages observe,develop,deliver --operations push,draft_pr,evidence,handoff --expires-at 2026-10-18T00:00:00.000Z --version issue123-v1 --out C:\AWH-Admin\issue123-v1.proposal.json
 node $admin validate --proposal C:\AWH-Admin\issue123-v1.proposal.json
 # 对该任务执行上述 approval-prepare → 独立批准 receipt pin → approve
 node $admin validate --version issue123-v1 --stage deliver

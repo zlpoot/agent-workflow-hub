@@ -182,4 +182,11 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
     function fixedChecks() {return selectWorkflow().workflow.verification_commands.map(command=>({command,exit_code:0}));}
   }
 }
-export const developToPR = (client:AwhClient,options:StageOptions,deps:Partial<DeliveryDependencies> = {}) => executeStage(new CodexExecutorAdapter(client,options,deps));
+export async function developToPR(client:AwhClient,options:StageOptions,deps:Partial<DeliveryDependencies> = {}) {
+  const result = await executeStage(new CodexExecutorAdapter(client,options,deps));
+  if (result.status === 'BLOCKED') return result;
+  const output = (kind:string) => result.facts.outputs.find(v => v.kind === kind);
+  return {...result,issue:result.contract.work_item.id,pr_url:output('draft-pr')!.uri,head:output('head')!.id,
+    evidence_urls:result.facts.evidence.map(e => e.subject.uri),handoff_url:output('confirmed-handoff')!.uri,
+    run_id:result.facts.run.id,next_action:'AWAITING_INDEPENDENT_REVIEW' as const};
+}

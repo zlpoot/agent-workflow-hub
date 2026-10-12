@@ -1,5 +1,7 @@
 # Client and Resident
 
+[Windows M1 Fast Flow Quick Start](windows-fast-flow.md) covers new project setup, `flow init --issues 1,2,3`, `flow status`, `flow next` and sequential Codex delivery through independent Review.
+
 The standalone `@zlpoot/awh-client` package exposes `awh`. Its component identity and version come from src/client/version.ts. Node.js 24+ and Git are required. Install a verified tarball into a fresh external directory; package installation does not create a CP, approve a Profile or run a business task.
 
 The Client validates the real canonical Git root, local origin, HEAD/ref and minimal .awh/project.yaml identity. It rejects credential URLs, URL rewrites, unsafe includes/configuration, redirected paths and identity conflicts. The manifest contains apiVersion=awh/v1, project.id, project.repository and profile.ref only. A repository manifest grants no commands or Provider permissions.

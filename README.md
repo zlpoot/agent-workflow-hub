@@ -1,5 +1,7 @@
 # Agent Workflow Hub
 
+Windows sequential Issue development: [M1 Fast Flow Quick Start](docs/windows-fast-flow.md). Use `awh flow init --issues 1,2,3`, then `awh flow next` under the existing protected project/task launcher.
+
 AWH is a Human-gated development workflow toolkit. It connects repository identity, an approved Profile and Work Item, a local executor, Control Plane Run/Event records, and GitHub App delivery. GitHub remains the source of truth for code, Review and merge. Builder verification is not independent Review.
 
 The Node.js 24+ / TypeScript / pnpm single package contains Protocol, SQLite Control Plane, Client/Resident, Dashboard/Viewer, Project Enrollment and an App-only Builder. Repository identity in a project manifest does not grant execution or Provider authority. There are no built-in business repositories, developer Issue mappings or machine defaults.

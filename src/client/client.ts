@@ -264,6 +264,25 @@ export class AwhClient {
     if (value.develop_to_pr !== 'stage-v1' || value.managed_revision !== 'exact-grant-v1') clientFail('workflow_upgrade','Independently provision the compatible CP before Provider writes');
     return value;
   }
+  /** Queue inspection projects existing Sessions/Journals and exact CP history; no queue state. */
+  async workflowRuns() {
+    const c = this.context(false,true), current = this.load(c), sessions = [...this.history(c), ...(current.initial ? [current] : [])];
+    if (current.pending || current.outbox?.length || this.revisionPending(c).length) clientFail('workflow_pending','Reconcile existing Event/Receipt before continuing the queue');
+    return Promise.all(sessions.map(async s => {
+      if (s.pending || s.outbox?.length) clientFail('workflow_pending','Archived Run has pending Events');
+      const projection = replayRun(s.initial!,s.events), timeline = await this.timeline(s.initial!.id);
+      if (!same(timeline.events.map(e => e.event),s.events) || !same(timeline.run,projection.run)) clientFail('workflow_history','Queue CP history differs from retained Session');
+      if (projection.candidate) {
+        const journal = readJson(join(dirname(c.path),s.initial!.id+'.delivery.json')) as Record<string,any>;
+        if (journal.run_id !== s.initial!.id || journal.source_sha !== s.initial!.source.sha || !same(journal.task_binding,s.task_binding) ||
+            journal.refs?.pull_request !== projection.candidate.pull_request.number || journal.refs?.head_sha !== s.initial!.source.sha ||
+            journal.refs?.base_sha !== projection.candidate.base_sha || !['draft_waiting_for_acceptance','waiting_for_independent_review','completed'].includes(journal.disposition))
+          clientFail('workflow_journal','Queue delivery Journal is missing or uncertain');
+      }
+      return {issue:s.work_item!.reference.number,run:timeline.run,events:s.events,head:timeline.effective_candidate_head,
+        candidate:projection.candidate,current:s === current};
+    }));
+  }
   private makeEvent(c: Context, s: Session, type: EventType, data: unknown, extensions: Record<string, Json> = {}): Event {
     if (!s.initial) clientFail('state', 'Start a Run before reporting an Event');
     const history = [...s.events, ...(s.pending ? [s.pending] : []), ...(s.outbox ?? [])];
