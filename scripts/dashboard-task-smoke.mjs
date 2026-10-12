@@ -26,12 +26,12 @@ try {
       check(`Issue ${i+1} Stage exact-head checks pass`,t.stage.head===expected[i]&&t.stage.status==='passed');
     }
   }else check('Fixtures labeled per task and dataset',snapshot.tasks.some(t=>t.fixture)&&await page.getByText('示例预览 · 模拟数据',{exact:true}).first().isVisible());
-  await page.screenshot({path:`${output}/overview-desktop.png`,fullPage:true});
+  await page.screenshot({path:`${output}/overview-desktop.png`,fullPage:true,animations:'disabled'});
   await page.getByRole('tab',{name:'任务',exact:true}).click();
   await page.getByRole('combobox',{name:'按任务状态筛选'}).waitFor();
-  await page.screenshot({path:`${output}/tasks-desktop.png`,fullPage:true});
+  await page.screenshot({path:`${output}/tasks-desktop.png`,fullPage:true,animations:'disabled'});
   if(!real){
-    await page.getByRole('combobox',{name:'按角色筛选'}).selectOption('reviewer');await page.getByRole('row').filter({hasText:'Codex 正在开发'}).waitFor({state:'hidden'});const reviewerRow=page.getByRole('row').filter({has:page.getByRole('button',{name:/等待 ChatGPT Review/})});await reviewerRow.waitFor();await page.screenshot({path:`${output}/reviewer-filter.png`,fullPage:true});check('Waiting reviewer shown without active reviewer',(await reviewerRow.innerText()).includes('ChatGPT Reviewer')&&(await reviewerRow.innerText()).includes('未观察到执行'));
+    await page.getByRole('combobox',{name:'按角色筛选'}).selectOption('reviewer');await page.getByRole('row').filter({hasText:'Codex 正在开发'}).waitFor({state:'hidden'});const reviewerRow=page.getByRole('row').filter({has:page.getByRole('button',{name:/等待 ChatGPT Review/})});await reviewerRow.waitFor();await page.screenshot({path:`${output}/reviewer-filter.png`,fullPage:true,animations:'disabled'});check('Waiting reviewer shown without active reviewer',(await reviewerRow.innerText()).includes('ChatGPT Reviewer')&&(await reviewerRow.innerText()).includes('未观察到执行'));
     await page.getByRole('combobox',{name:'按角色筛选'}).selectOption('all');
     await page.getByRole('combobox',{name:'按任务状态筛选'}).selectOption('changes_requested');await page.getByRole('button',{name:/REQUEST_CHANGES/}).waitFor();check('REQUEST_CHANGES filter',await page.getByRole('button',{name:/REQUEST_CHANGES/}).isVisible());
     await page.getByRole('combobox',{name:'按任务状态筛选'}).selectOption('all');
@@ -43,12 +43,12 @@ try {
   await page.getByText('正在重新核验任务…',{exact:true}).waitFor({state:'hidden',timeout:60000});
   check('Task detail read and DTO validation succeeded',await page.getByRole('dialog').getByRole('alert').count()===0);
   check('Detail linked issue/PR, source and native review',await page.getByRole('heading',{name:'GitHub 原生 Review / Merge',exact:true}).isVisible());
-  await page.screenshot({path:`${output}/detail-desktop.png`,fullPage:true});await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});
-  await page.setViewportSize({width:390,height:844});await page.screenshot({path:`${output}/tasks-mobile.png`,fullPage:true});
+  await page.screenshot({path:`${output}/detail-desktop.png`,fullPage:true,animations:'disabled'});await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});
+  await page.setViewportSize({width:390,height:844});await page.screenshot({path:`${output}/tasks-mobile.png`,fullPage:true,animations:'disabled'});
   check('390px layout does not overflow document',await page.evaluate(()=>document.documentElement.scrollWidth<=390));
-  await page.getByRole('button',{name:real?/#1 /:/等待 ChatGPT Review/}).first().click();await page.getByRole('dialog').waitFor();await page.screenshot({path:`${output}/detail-mobile.png`,fullPage:true});await page.keyboard.press('Escape');
-  await page.getByRole('textbox',{name:'搜索任务'}).fill('no-such-task');await page.getByRole('heading',{name:'没有匹配的任务',exact:true}).waitFor();await page.screenshot({path:`${output}/empty-mobile.png`,fullPage:true});await page.getByRole('textbox',{name:'搜索任务'}).fill('');
-  await context.setOffline(true);await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('alert').first().waitFor();check('Offline tasks suppress current actor and state',await page.getByText('状态未知',{exact:true}).count()>0);await page.screenshot({path:`${output}/offline-mobile.png`,fullPage:true});await context.setOffline(false);
+  await page.getByRole('button',{name:real?/#1 /:/等待 ChatGPT Review/}).first().click();await page.getByRole('dialog').waitFor();await page.screenshot({path:`${output}/detail-mobile.png`,fullPage:true,animations:'disabled'});await page.keyboard.press('Escape');
+  await page.getByRole('textbox',{name:'搜索任务'}).fill('no-such-task');await page.getByRole('heading',{name:'没有匹配的任务',exact:true}).waitFor();await page.screenshot({path:`${output}/empty-mobile.png`,fullPage:true,animations:'disabled'});await page.getByRole('textbox',{name:'搜索任务'}).fill('');
+  await context.setOffline(true);await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('alert').first().waitFor();check('Offline tasks suppress current actor and state',await page.getByText('状态未知',{exact:true}).count()>0);await page.screenshot({path:`${output}/offline-mobile.png`,fullPage:true,animations:'disabled'});await context.setOffline(false);
   await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('alert').waitFor({state:'hidden',timeout:60000});
   check('No browser runtime errors',evidence.errors.length===0);
   evidence.url=url;evidence.observed_at=new Date().toISOString();evidence.status='PASS';
