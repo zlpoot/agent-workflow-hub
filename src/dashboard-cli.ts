@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readExternalFile, externalFilePath } from './shared/external-files.js';
 import { ControlPlaneError, fail, safeData, validId } from './shared/security.js';
@@ -39,7 +39,11 @@ export async function main(args: string[]) {
   const c = readViewerConfig(args[1]!);
   if(policies.has('--owner-config') && !c.machine_config_file)fail(500,'owner_configuration','Machine setup required');
   const ownerApprove=policies.has('--owner-config') ? createOwnerApproval(c.machine_config_file!,policies.get('--owner-config')!,c.database) : undefined;
-  const githubApp = createGithubAppManagement({ confirm: policies.has('--github-app-owner-config') ? createGithubAppOwnerConfirmation(policies.get('--github-app-owner-config')!) : undefined });
+  const windowsAppAvailable = process.platform === 'win32' && !!process.env.LOCALAPPDATA && isAbsolute(process.env.LOCALAPPDATA);
+  if (!windowsAppAvailable && policies.has('--github-app-owner-config')) fail(500, 'app_owner_configuration', 'GitHub App Owner management requires a Windows App environment');
+  const githubApp = windowsAppAvailable
+    ? createGithubAppManagement({ confirm: policies.has('--github-app-owner-config') ? createGithubAppOwnerConfirmation(policies.get('--github-app-owner-config')!) : undefined })
+    : undefined;
   const enrollment = c.machine_config_file ? createEnrollmentService(c.machine_config_file,ownerApprove) : undefined;
   for (const b of enrollment?.bindings() ?? []) if (!c.viewer.project_ids.includes(b.project_id)) c.viewer.project_ids.push(b.project_id);
   const store = new DashboardReadStore(c.database, () => enrollment?.bindings() ?? []);
