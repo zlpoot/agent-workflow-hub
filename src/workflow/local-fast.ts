@@ -1,12 +1,12 @@
-import { spawnSync } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { atomicJson, clientFail, inspectRepository, readJson, same } from '../client/local.js';
 import { deliveryDependencies, type VerificationLog } from '../client/deliver.js';
 import { initFlow, readFlow } from './flow.js';
+import { localFastRun } from './local-fast-github.js';
+import { selectReview, REVIEW_DELIVERY_INSTRUCTIONS, type ReviewDecision } from './local-fast-review.js';
 
 type Native = Record<string, any>;
-type ReviewDecision = { decision: 'PASS' | 'REQUEST_CHANGES'; source: 'github-native-review' | 'local-fast-commented-review'; native_state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED'; review_id: number; head: string };
 type Task = { issue: number; branch: string; base: string; worktree: string; phase: 'preparing' | 'developing' | 'publishing' | 'awaiting_review' | 'completed'; head?: string; pending_head?: string; pr?: number };
 interface State {
   schema_version: '1.0'; mode: 'local-fast'; repository: string; repository_id: number;
@@ -19,14 +19,7 @@ export interface LocalFastDependencies {
 }
 const defaults: LocalFastDependencies = {
   platform: process.platform, verify: deliveryDependencies.verify,
-  run(command, args, cwd) {
-    // Keep the user's normal Git/gh authentication. Strict/App/CP settings are never inputs.
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^AWH_/i.test(key)));
-    const result = spawnSync(command, args, { cwd, env: { ...env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' },
-      encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
-    if (result.error || result.status !== 0) clientFail('local_fast_' + command, `${command} operation failed; check the existing login, repository permission and transport. No credentials are exported.`);
-    return result.stdout.trim();
-  }
+  run: localFastRun
 };
 const SHA = /^[a-f0-9]{40}$/;
 const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/;
@@ -106,6 +99,10 @@ export class LocalFast {
     return s;
   }
   private save(s: State) { atomicJson(this.file, s); }
+  scope() {
+    const { repository, repository_id, owner, root, issues, checks } = this.load();
+    return { repository, repository_id, owner, root, issues: [...issues], checks: [...checks] };
+  }
   private main(s: State) {
     const ref = this.api(`repos/${s.repository}/git/ref/heads/main`);
     if (ref.ref !== 'refs/heads/main' || !SHA.test(ref.object?.sha)) clientFail('local_fast_main', 'Cannot verify native main.');
@@ -152,28 +149,7 @@ export class LocalFast {
   }
   private review(s: State, p: Native): ReviewDecision | undefined {
     const reviews: Native[] = this.api(`repos/${s.repository}/pulls/${p.number}/reviews?per_page=100`, true);
-    const latest = new Map<number, Native>();
-    for (const r of [...reviews].sort((a, b) => a.id - b.id)) {
-      if (!positive(r.id) || !positive(r.user?.id) || !SHA.test(r.commit_id)) clientFail('local_fast_review', 'Invalid native Review facts.');
-      if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) latest.set(r.user.id, r);
-    }
-    const exact = [...latest.values()].filter(r => r.user.id !== p.user.id && r.commit_id === p.head.sha);
-    const native = exact.find(r => r.state === 'CHANGES_REQUESTED') ?? exact.find(r => r.state === 'APPROVED');
-    if (native) return { decision: native.state === 'APPROVED' ? 'PASS' : 'REQUEST_CHANGES', source: 'github-native-review', native_state: native.state, review_id: native.id, head: native.commit_id };
-    // A same-account personal Review remains COMMENTED, never GitHub APPROVED.
-    // Both the native commit_id and the explicit decision must name this candidate.
-    let commented: ReviewDecision | undefined;
-    for (const r of [...reviews].sort((a, b) => a.id - b.id)) {
-      if (r.state !== 'COMMENTED' || r.user.id !== p.user.id || r.commit_id !== p.head.sha || typeof r.body !== 'string') continue;
-      const blocks = [...r.body.matchAll(/^AWH-LOCAL-FAST-REVIEW v1\r?\n```json\r?\n([\s\S]*?)\r?\n```(?=\r?\n|$)/gm)];
-      if (blocks.length !== 1) continue;
-      try {
-        const record = JSON.parse(blocks[0]![1]!);
-        if (!record || Object.keys(record).sort().join(',') !== 'decision,head' || record.head !== r.commit_id || !['PASS', 'REQUEST_CHANGES'].includes(record.decision)) continue;
-        commented = { decision: record.decision, source: 'local-fast-commented-review', native_state: 'COMMENTED', review_id: r.id, head: r.commit_id };
-      } catch { /* An ordinary or malformed comment is not a Review decision. */ }
-    }
-    return commented;
+    return selectReview(reviews, p.user.id, p.head.sha);
   }
   private checks(s: State, p: Native): boolean {
     const rollup = JSON.parse(this.deps.run('gh', ['pr', 'view', String(p.number), '--repo', s.repository, '--json', 'statusCheckRollup'], this.cwd));
@@ -282,7 +258,7 @@ export class LocalFast {
       exact();
       const prs = this.prs(s, t);
       if (prs.length > 1) clientFail('local_fast_pr_conflict', 'Multiple native PRs exist.');
-      const body = `${marker(s, t.issue)}\nLocal Fast: ordinary GitHub identity, local verification only. Independent Review pending.\n\nCloses #${t.issue}\n\n${options.body}`;
+      const body = `${marker(s, t.issue)}\nLocal Fast: ordinary GitHub identity, local verification only. Independent Review pending.\n\nCloses #${t.issue}\n\n${options.body}\n\n## Independent Review delivery\n\n${REVIEW_DELIVERY_INSTRUCTIONS}`;
       const bodyFile = join(folder, `issue-${t.issue}-pr-body.md`); writeFileSync(bodyFile, body);
       if (prs[0]) {
         const p = this.pr(s, t, prs[0]);
