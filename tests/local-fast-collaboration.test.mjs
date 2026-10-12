@@ -140,14 +140,15 @@ test('scope rejects noninteractive authorization, wrong repository, changed queu
   h.expire(); await assert.rejects(h.instance.run(true), errorCode('local_fast_watch_expired')); assert.equal(h.launches.length, 0);
 });
 
-test('a duplicate live watcher and interrupted executor are blocked until explicit Owner recovery', async t => {
+test('a duplicate live watcher and interrupted executor are blocked until explicit Owner recovery', { timeout: 240000 }, async t => {
   const h = await collaboration(t); h.hold(true); let settled = false;
   const running = h.instance.run(true).finally(() => { settled = true; });
   while (!h.launches.length && !settled) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(settled, false, 'the first watcher must reach the held executor before testing duplicate exclusion');
-  assert.equal((await h.watcher().run(true)).reason, 'local_fast_watch_locked');
-  assert.throws(() => h.watcher().retry(true), errorCode('local_fast_watch_locked'), 'live process lock cannot be cleared');
-  h.release(); await running;
+  try {
+    assert.equal(settled, false, 'the first watcher must reach the held executor before testing duplicate exclusion');
+    assert.equal((await h.watcher().run(true)).reason, 'local_fast_watch_locked');
+    assert.throws(() => h.watcher().retry(true), errorCode('local_fast_watch_locked'), 'live process lock cannot be cleared');
+  } finally { h.release(); await running; }
   const ready = await h.client().flow(true); h.review(h.prs[0].number, 'COMMENTED', 11, ready.head, reviewBody(ready.head, 'REQUEST_CHANGES', 'Repair required.'));
   h.hold(false); h.fail(true); assert.equal((await h.watcher().run(true)).reason, 'local_fast_watch_executor_failed');
   assert.equal((await h.watcher().run(true)).reason, 'local_fast_watch_recovery'); assert.equal(h.launches.length, 2);

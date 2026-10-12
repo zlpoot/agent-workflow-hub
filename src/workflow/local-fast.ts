@@ -5,21 +5,25 @@ import { deliveryDependencies, type VerificationLog } from '../client/deliver.js
 import { initFlow, readFlow } from './flow.js';
 import { localFastRun } from './local-fast-github.js';
 import { selectReview, REVIEW_DELIVERY_INSTRUCTIONS, type ReviewDecision } from './local-fast-review.js';
+import { GithubApp, type AppBinding, type AppDelivery } from './github-app.js';
 
 type Native = Record<string, any>;
-type Task = { issue: number; branch: string; base: string; worktree: string; phase: 'preparing' | 'developing' | 'publishing' | 'awaiting_review' | 'completed'; head?: string; pending_head?: string; pr?: number };
+type Task = { issue: number; branch: string; base: string; worktree: string; phase: 'preparing' | 'developing' | 'publishing' | 'awaiting_review' | 'completed'; head?: string; pending_head?: string; pr?: number; create_attempted?: boolean; coding_executor?: { type: 'codex-cli' }; delivery_actor?: AppBinding['delivery_actor'] };
 interface State {
   schema_version: '1.0'; mode: 'local-fast'; repository: string; repository_id: number;
   owner: { login: string; id: number }; root: string; issues: number[]; checks: string[]; tasks: Task[];
+  delivery?: AppBinding;
 }
 export interface LocalFastDependencies {
   platform: NodeJS.Platform;
   run: (command: 'git' | 'gh', args: string[], cwd: string) => string;
   verify: (command: string, root: string) => Promise<VerificationLog>;
+  app: Pick<GithubApp, 'binding' | 'preflight'>;
 }
 const defaults: LocalFastDependencies = {
   platform: process.platform, verify: deliveryDependencies.verify,
-  run: localFastRun
+  run: localFastRun,
+  app: { binding: repository => new GithubApp().binding(repository), preflight: repository => new GithubApp().preflight(repository) }
 };
 const SHA = /^[a-f0-9]{40}$/;
 const REPO = /^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/;
@@ -84,8 +88,11 @@ export class LocalFast {
         !Array.isArray(s.checks) || !s.checks.length || !s.checks.every(c => typeof c === 'string') || !Array.isArray(s.tasks) || s.tasks.length > s.issues.length)
       clientFail('local_fast_state', 'Invalid Local Fast binding; preserve the local file.');
     s.checks.forEach(checkCommand);
+    if (s.delivery && (s.delivery.provider !== 'github-app' || !same(this.deps.app.binding(s.repository), s.delivery) || s.delivery.repository_id !== s.repository_id))
+      clientFail('local_fast_app_binding', 'Saved App connection differs from this queue; preserve its history.');
     for (const [i, t] of s.tasks.entries()) {
       if (t.issue !== s.issues[i] || t.branch !== `codex/local-fast-${t.issue}` || !SHA.test(t.base) || t.worktree !== join(s.root, '.handoff', 'local-fast', `issue-${t.issue}`) ||
+          t.create_attempted !== undefined && typeof t.create_attempted !== 'boolean' || t.coding_executor && t.coding_executor.type !== 'codex-cli' || t.delivery_actor && (!s.delivery || !same(t.delivery_actor, s.delivery.delivery_actor)) ||
           !['preparing', 'developing', 'publishing', 'awaiting_review', 'completed'].includes(t.phase) || t.head !== undefined && !SHA.test(t.head) || t.pending_head !== undefined && !SHA.test(t.pending_head) || t.pr !== undefined && !positive(t.pr) ||
           (t.phase === 'awaiting_review' || t.phase === 'completed') && (!t.pr || !t.head) || i < s.tasks.length - 1 && t.phase !== 'completed')
         clientFail('local_fast_state', 'Invalid sequential Local Fast history; preserve worktrees.');
@@ -100,8 +107,8 @@ export class LocalFast {
   }
   private save(s: State) { atomicJson(this.file, s); }
   scope() {
-    const { repository, repository_id, owner, root, issues, checks } = this.load();
-    return { repository, repository_id, owner, root, issues: [...issues], checks: [...checks] };
+    const { repository, repository_id, owner, root, issues, checks, delivery } = this.load();
+    return { repository, repository_id, owner, root, issues: [...issues], checks: [...checks], ...(delivery ? { delivery } : {}) };
   }
   private main(s: State) {
     const ref = this.api(`repos/${s.repository}/git/ref/heads/main`);
@@ -113,7 +120,8 @@ export class LocalFast {
     if (issue.number !== number || issue.pull_request || !['open', 'closed'].includes(issue.state) || typeof issue.title !== 'string') clientFail('local_fast_issue', 'Queue entries must be real ordinary GitHub Issues.');
     return issue;
   }
-  async bind(repository: string, issues: string, confirm: boolean, checks: string[] = []) {
+  async bind(repository: string, issues: string, confirm: boolean, checks: string[] = [], provider: 'personal-gh' | 'github-app' = 'personal-gh') {
+    if (!['personal-gh', 'github-app'].includes(provider)) clientFail('local_fast_provider', 'Select personal-gh or github-app explicitly.');
     if (!confirm || !REPO.test(repository) || repository.includes('..')) clientFail('local_fast_confirmation', 'Confirm the exact repository and Issue queue with local-fast bind --repo owner/name --issues 1,2,3 --confirm.');
     if (!/^[1-9]\d*(?:,[1-9]\d*)*$/.test(issues)) clientFail('flow_queue', 'Use distinct positive Issue numbers.');
     const queue = issues.split(',').map(Number);
@@ -121,7 +129,9 @@ export class LocalFast {
     const commands = [...new Set(['git diff --check origin/main...HEAD', ...checks])]; commands.forEach(checkCommand);
     return this.locked(async () => {
       const identity = this.identity(repository);
-      const proposed: State = { schema_version: '1.0', mode: 'local-fast', repository, repository_id: identity.id, owner: identity.user, root: identity.local.root, issues: queue, checks: commands, tasks: [] };
+      const delivery = provider === 'github-app' ? (await this.deps.app.preflight(repository)).binding : undefined;
+      if (delivery && delivery.repository_id !== identity.id) clientFail('local_fast_app_binding', 'App and Owner repository identities differ.');
+      const proposed: State = { schema_version: '1.0', mode: 'local-fast', repository, repository_id: identity.id, owner: identity.user, root: identity.local.root, issues: queue, checks: commands, tasks: [], ...(delivery ? { delivery } : {}) };
       if (existsSync(this.file)) {
         const original = this.load();
         if (!same({ ...original, tasks: [] }, proposed)) clientFail('local_fast_binding_conflict', 'Existing binding differs; progress and scope cannot be overwritten.');
@@ -142,14 +152,15 @@ export class LocalFast {
     return this.api(`repos/${s.repository}/pulls?state=all&head=${s.repository.split('/')[0]}:${t.branch}&base=main&per_page=100`, true);
   }
   private pr(s: State, t: Task, p: Native) {
-    if (!positive(p.number) || p.head?.repo?.id !== s.repository_id || p.base?.repo?.id !== s.repository_id || p.head.ref !== t.branch || p.base.ref !== 'main' || p.user?.id !== s.owner.id ||
+    const author = s.delivery ? same({ id: p.user?.id, login: p.user?.login, type: p.user?.type }, s.delivery.delivery_actor) : p.user?.id === s.owner.id;
+    if (!positive(p.number) || p.head?.repo?.id !== s.repository_id || p.base?.repo?.id !== s.repository_id || p.head.ref !== t.branch || p.base.ref !== 'main' || !author ||
         !SHA.test(p.head.sha) || typeof p.body !== 'string' || !p.body.includes(marker(s, t.issue)) || t.pr && p.number !== t.pr || !['open', 'closed'].includes(p.state))
       clientFail('local_fast_pr_scope', 'Native PR differs from this Local Fast repository, author, branch or Issue.');
     return p;
   }
   private review(s: State, p: Native): ReviewDecision | undefined {
     const reviews: Native[] = this.api(`repos/${s.repository}/pulls/${p.number}/reviews?per_page=100`, true);
-    return selectReview(reviews, p.user.id, p.head.sha);
+    return selectReview(reviews, p.user.id, p.head.sha, s.delivery?.reviewer);
   }
   private checks(s: State, p: Native): boolean {
     const rollup = JSON.parse(this.deps.run('gh', ['pr', 'view', String(p.number), '--repo', s.repository, '--json', 'statusCheckRollup'], this.cwd));
@@ -216,7 +227,12 @@ export class LocalFast {
         'After Human merge, flow next verifies native exact-head Review/checks and fetches latest main for the next queued Issue. No administrator policy, SHA, digest or launcher is required.'] });
   }
   async flow(advance = false) {
-    return advance ? this.locked(async () => this.select(this.load(), true)) : this.select(this.load(), false);
+    const run = async () => {
+      const s = this.load();
+      if (s.delivery && !same((await this.deps.app.preflight(s.repository)).binding, s.delivery)) clientFail('local_fast_app_binding', 'Live App binding changed.');
+      return this.select(s, advance);
+    };
+    return advance ? this.locked(run) : run();
   }
   prepare(): Native {
     const s = this.load(), identity = inspectRepository(this.cwd), t = s.tasks.find(t => t.phase !== 'completed');
@@ -249,32 +265,47 @@ export class LocalFast {
         exact();
       }
       this.identity(s.repository, s.repository_id, s.owner); exact();
+      const app: AppDelivery | undefined = s.delivery ? await this.deps.app.preflight(s.repository) : undefined;
+      if (app && !same(app.binding, s.delivery)) clientFail('local_fast_app_binding', 'Live App identity differs.');
       const remote = this.git(['ls-remote', '--heads', 'origin', `refs/heads/${t.branch}`]).split(/\s/)[0];
       if (remote && remote !== final.sha && remote !== t.head && remote !== t.pending_head) clientFail('local_fast_remote_conflict', 'Remote branch changed outside this recorded candidate; no force push is allowed.');
-      t.pending_head = final.sha; t.phase = 'publishing'; this.save(s); exact();
-      if (remote !== final.sha) this.git(['push', '--set-upstream', 'origin', `HEAD:refs/heads/${t.branch}`]);
+      t.pending_head = final.sha; t.phase = 'publishing';
+      if (s.delivery) { t.coding_executor = { type: 'codex-cli' }; t.delivery_actor = { ...s.delivery.delivery_actor }; }
+      this.save(s); exact();
+      if (remote !== final.sha) {
+        if (app) await app.push(final.root, t.branch, final.sha);
+        else this.git(['push', '--set-upstream', 'origin', `HEAD:refs/heads/${t.branch}`]);
+      }
       const readback = this.api(`repos/${s.repository}/git/ref/heads/${t.branch}`);
       if (readback.object?.sha !== final.sha) clientFail('local_fast_push_readback', 'Pushed branch head was not confirmed; resume this same Stage.');
       exact();
-      const prs = this.prs(s, t);
+      const prs = app ? await app.pulls(t.branch) : this.prs(s, t);
       if (prs.length > 1) clientFail('local_fast_pr_conflict', 'Multiple native PRs exist.');
-      const body = `${marker(s, t.issue)}\nLocal Fast: ordinary GitHub identity, local verification only. Independent Review pending.\n\nCloses #${t.issue}\n\n${options.body}\n\n## Independent Review delivery\n\n${REVIEW_DELIVERY_INSTRUCTIONS}`;
+      const deliveryText = s.delivery ? `Delivery Provider: github-app; Coding Executor: codex-cli; Delivery Actor: ${s.delivery.delivery_actor.login} (${s.delivery.delivery_actor.id}, Bot). Trusted Reviewer: ${s.delivery.reviewer.login} (${s.delivery.reviewer.id}, User). Only native APPROVED/CHANGES_REQUESTED on the current HEAD counts; COMMENTED never opens this gate.` : 'ordinary GitHub identity';
+      const body = `${marker(s, t.issue)}\nLocal Fast: ${deliveryText}, local verification only. Independent Review pending.\n\nCloses #${t.issue}\n\n${options.body}\n\n## Independent Review delivery\n\n${s.delivery ? 'Read the exact GitHub HEAD independently and publish a native APPROVE or REQUEST_CHANGES using the saved trusted personal Reviewer. Read back Review ID, reviewer id/login/type, state and commit_id. Keep the existing Owner queue and merge scope.' : REVIEW_DELIVERY_INSTRUCTIONS}`;
       const bodyFile = join(folder, `issue-${t.issue}-pr-body.md`); writeFileSync(bodyFile, body);
       if (prs[0]) {
         const p = this.pr(s, t, prs[0]);
         if (p.state !== 'open' || p.merged_at || p.head.sha !== final.sha) clientFail('local_fast_pr_changed', 'Cannot update a changed or closed PR.');
         t.pr = p.number; this.save(s);
-        if (!p.draft) this.deps.run('gh', ['pr', 'ready', String(p.number), '--repo', s.repository, '--undo'], this.cwd);
-        this.deps.run('gh', ['pr', 'edit', String(p.number), '--repo', s.repository, '--title', options.title, '--body-file', bodyFile], this.cwd);
+        if (app) await app.update(p.number, options.title, body);
+        else {
+          if (!p.draft) this.deps.run('gh', ['pr', 'ready', String(p.number), '--repo', s.repository, '--undo'], this.cwd);
+          this.deps.run('gh', ['pr', 'edit', String(p.number), '--repo', s.repository, '--title', options.title, '--body-file', bodyFile], this.cwd);
+        }
       } else {
-        this.deps.run('gh', ['pr', 'create', '--repo', s.repository, '--base', 'main', '--head', t.branch, '--title', options.title, '--body-file', bodyFile, '--draft'], this.cwd);
+        if (app) {
+          if (t.create_attempted) clientFail('local_fast_pr_ack_unknown', 'A prior create may have reached GitHub. Read back this same branch; absence cannot authorize automatic replay. Preserve the candidate.');
+          t.create_attempted = true; this.save(s);
+          await app.create(t.branch, options.title, body);
+        } else this.deps.run('gh', ['pr', 'create', '--repo', s.repository, '--base', 'main', '--head', t.branch, '--title', options.title, '--body-file', bodyFile, '--draft'], this.cwd);
       }
-      const confirmed = this.prs(s, t);
+      const confirmed = app ? await app.pulls(t.branch) : this.prs(s, t);
       if (confirmed.length !== 1) clientFail('local_fast_pr_readback', 'Draft PR was not confirmed; preserve state and resume this same Stage.');
       const p = this.pr(s, t, confirmed[0]!);
       if (!p.draft || p.state !== 'open' || p.head.sha !== final.sha) clientFail('local_fast_pr_readback', 'Native exact-head Draft PR was not confirmed.');
       exact(); t.pr = p.number; t.head = final.sha; delete t.pending_head; t.phase = 'awaiting_review'; this.save(s);
-      return result('awaiting_review', { issue: t.issue, pr_url: p.html_url, head: final.sha, local_verification_file: join(folder, `${t.issue}-${final.sha}.json`), next_action: 'AWAITING_INDEPENDENT_REVIEW' });
+      return result('awaiting_review', { issue: t.issue, pr_url: p.html_url, head: final.sha, coding_executor: { type: 'codex-cli' }, delivery_provider: s.delivery ? 'github-app' : 'personal-gh', delivery_actor: s.delivery?.delivery_actor ?? s.owner, local_verification_file: join(folder, `${t.issue}-${final.sha}.json`), next_action: 'AWAITING_INDEPENDENT_REVIEW' });
     });
   }
 }

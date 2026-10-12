@@ -4,6 +4,8 @@ Local Fast is an explicit personal mode for one Windows machine, one repository 
 
 For cross-session Review publication and the optional bounded Windows executor watcher, see [Windows Local Fast collaboration](windows-local-fast-collaboration.md). Existing bind/flow/Stage commands remain unchanged; the watcher requires a separate explicit interactive Owner scope and defaults to waiting for Human merge.
 
+For optional App delivery with an independent trusted personal Reviewer, see [Windows GitHub App connection](windows-github-app.md). Connect once outside Git, then bind a new queue with `--provider github-app`. The default `personal-gh` provider and its existing bindings retain their behavior.
+
 Install Node.js 24+, Git, GitHub CLI and the AWH Client. Sign in normally with `gh auth login` if needed. The repository must already have a committed `main` on GitHub and a canonical GitHub `origin`. The signed-in normal GitHub user must have repository write permission. Local Fast checks the real account, repository ID and effective Git fetch/push URLs on each operation. It does not administer repositories or create initial GitHub Issues.
 
 ## Confirm once
