@@ -149,7 +149,7 @@ export async function main(args: string[]): Promise<unknown> {
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(resolve(process.argv[1]))).href) {
   main(process.argv.slice(2)).then(result => {
     console.log(isDoctorReport(result) && !process.argv.slice(2).includes('--json') ? formatDoctor(result) : JSON.stringify(result));
-    if (isDoctorReport(result) && result.status === 'blocked' || result && typeof result === 'object' && 'status' in result && result.status === 'BLOCKED' || result && typeof result === 'object' && 'kind' in result && result.kind === 'enrollment_doctor' && 'status' in result && result.status === 'blocked') process.exitCode = 2;
+    if (isDoctorReport(result) && result.status === 'blocked' || result && typeof result === 'object' && 'status' in result && ['BLOCKED','REVIEW_NOT_PUBLISHED'].includes(String(result.status)) || result && typeof result === 'object' && 'kind' in result && result.kind === 'enrollment_doctor' && 'status' in result && result.status === 'blocked') process.exitCode = 2;
   }).catch(error => {
     const known = error instanceof ClientError;
     console.error(JSON.stringify({ error: error instanceof DeliveryError ? deliveryDiagnostic(error) : publicationDiagnostic(error) ?? { code: known ? error.code : 'client', message: known ? error.message : 'Client operation failed; configuration, input and remote diagnostics suppressed',

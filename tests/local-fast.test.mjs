@@ -1,99 +1,11 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { LocalFast } from '../dist/workflow/local-fast.js';
 import { localFastMain } from '../dist/workflow/local-fast-cli.js';
-import { deliveryDependencies } from '../dist/client/deliver.js';
 import { main } from '../dist/client/cli.js';
-
-const repository = 'synthetic-org/local-fast';
-const options = { title: 'Synthetic queued change', body: 'Ordinary Issue implementation.', message: 'Implement queued Issue' };
-function harness(t) {
-  const parent = join(process.cwd(), '.handoff', 'local-fast-tests'); mkdirSync(parent, { recursive: true });
-  const base = mkdtempSync(join(parent, 'run-')), repo = join(base, 'repo'), remote = join(base, 'remote.git'); mkdirSync(repo);
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
-    GIT_AUTHOR_NAME: 'Synthetic Owner', GIT_AUTHOR_EMAIL: 'owner@example.invalid', GIT_COMMITTER_NAME: 'Synthetic Owner', GIT_COMMITTER_EMAIL: 'owner@example.invalid' };
-  const git = (args, cwd = repo) => {
-    const r = spawnSync('git', args, { cwd, env, encoding: 'utf8', windowsHide: true, timeout: 15000 });
-    assert.equal(r.status, 0, `isolated Git failed: ${args.join(' ')} ${r.stderr}`); return r.stdout.trim();
-  };
-  git(['init', '-b', 'main']); writeFileSync(join(repo, 'code.txt'), 'baseline\n'); mkdirSync(join(repo, 'tests'));
-  writeFileSync(join(repo, 'tests/smoke.test.mjs'), "import test from 'node:test'; import assert from 'node:assert/strict'; import {readFileSync} from 'node:fs'; test('candidate works',()=>assert(readFileSync('code.txt','utf8').length > 0));\n");
-  git(['add', '.']); git(['commit', '-m', 'Synthetic baseline']); git(['remote', 'add', 'origin', `https://github.com/${repository}.git`]); git(['clone', '--bare', repo, remote]);
-  const initialMain = git(['rev-parse', 'HEAD']), calls = [], prs = [], reviews = new Map(), issueStates = new Map();
-  let userId = 11, permission = true, failCheck = false, mutateCheck = false, loseCreateAck = false, failPush = false, nextPr = 10, rollup = [], interruptPrepare = false;
-  const readRef = branch => git(['--git-dir', remote, 'rev-parse', `refs/heads/${branch}`]);
-  const refresh = p => { p.head.sha = readRef(p.head.ref); return p; };
-  const deps = {
-    platform: 'win32',
-    run(command, args, cwd) {
-      calls.push({ command, args: [...args], cwd });
-      if (command === 'git') {
-        const translated = [...args];
-        if (['fetch', 'push', 'ls-remote'].includes(args[0])) {
-          if (args[0] === 'push' && failPush) throw new Error('synthetic push failure');
-          translated[translated.indexOf('origin')] = remote;
-        }
-        const output = git(translated, cwd);
-        if (interruptPrepare && args[0] === 'worktree' && args[1] === 'add') { interruptPrepare = false; throw new Error('Synthetic interrupted preparation'); }
-        return output;
-      }
-      const value = flag => args[args.indexOf(flag) + 1];
-      if (args[0] === 'api') {
-        const path = args.at(-1), pages = args.includes('--slurp'), wrap = data => JSON.stringify(pages ? [data] : data);
-        if (path === 'user') return wrap({ login: 'synthetic-owner', id: userId, type: 'User' });
-        if (path === `repos/${repository}`) return wrap({ id: 42, full_name: repository, default_branch: 'main', permissions: { push: permission } });
-        const issue = /\/issues\/(\d+)$/.exec(path);
-        if (issue) return wrap({ number: Number(issue[1]), title: `Ordinary Issue ${issue[1]}`, body: 'Synthetic only', state: issueStates.get(Number(issue[1])) ?? 'open' });
-        const ref = /\/git\/ref\/heads\/(.+)$/.exec(path);
-        if (ref) return wrap({ ref: `refs/heads/${ref[1]}`, object: { sha: readRef(ref[1]) } });
-        const review = /\/pulls\/(\d+)\/reviews\?/.exec(path);
-        if (review) return wrap(reviews.get(Number(review[1])) ?? []);
-        const pull = /\/pulls\/(\d+)$/.exec(path);
-        if (pull) return wrap(refresh(prs.find(p => p.number === Number(pull[1]))));
-        if (path.includes('/pulls?')) {
-          const branch = /head=synthetic-org:(.*?)&/.exec(path)[1];
-          return wrap(prs.filter(p => p.head.ref === branch).map(refresh));
-        }
-        throw new Error(`Unexpected Provider read: ${path}`);
-      }
-      if (args[0] === 'pr' && args[1] === 'view') return JSON.stringify({ statusCheckRollup: rollup });
-      if (args[0] === 'pr' && args[1] === 'create') {
-        assert(args.includes('--draft')); assert.equal(value('--repo'), repository); assert.equal(value('--base'), 'main');
-        const branch = value('--head'), number = nextPr++;
-        prs.push({ number, html_url: `https://github.com/${repository}/pull/${number}`, state: 'open', draft: true, merged_at: null,
-          user: { id: 11, login: 'synthetic-owner' }, body: readFileSync(value('--body-file'), 'utf8'),
-          head: { ref: branch, sha: readRef(branch), repo: { id: 42 } }, base: { ref: 'main', repo: { id: 42 } } });
-        if (loseCreateAck) { loseCreateAck = false; throw new Error('Synthetic lost create ACK'); }
-        return prs.at(-1).html_url;
-      }
-      if (args[0] === 'pr' && args[1] === 'edit') { prs.find(p => p.number === Number(args[2])).body = readFileSync(value('--body-file'), 'utf8'); return ''; }
-      if (args[0] === 'pr' && args[1] === 'ready' && args.includes('--undo')) { prs.find(p => p.number === Number(args[2])).draft = true; return ''; }
-      throw new Error('Unexpected Provider mutation; no Review/Merge/Evidence/Handoff/CP API is allowed');
-    },
-    async verify(command, cwd) {
-      if (mutateCheck) writeFileSync(join(cwd, 'unexpected.txt'), 'changed during check');
-      if (failCheck) return { command, exit_code: 1, stdout: 'Synthetic check failure', stderr: '', elapsed_ms: 0 };
-      return deliveryDependencies.verify(command, cwd);
-    }
-  };
-  const client = (cwd = repo) => new LocalFast(cwd, deps);
-  const bind = () => client().bind(repository, '1,2,3', true, ['node --test tests/smoke.test.mjs']);
-  const review = (number, state = 'APPROVED', owner = 22, head, body = '') => {
-    const p = refresh(prs.find(p => p.number === number));
-    const list = reviews.get(number) ?? []; list.push({ id: 100 + list.length, user: { id: owner }, commit_id: head ?? p.head.sha, state, body }); reviews.set(number, list);
-  };
-  // Human merge is simulated only against this fresh local bare remote; product never merges.
-  const merge = number => { const p = refresh(prs.find(p => p.number === number)); git(['--git-dir', remote, 'update-ref', 'refs/heads/main', p.head.sha]); p.merged_at = '2026-10-12T00:00:00Z'; p.state = 'closed'; p.draft = false; };
-  const statePath = join(repo, '.git', 'awh-local-fast', 'state.json');
-  t.after(() => { const rel = relative(realpathSync(parent), realpathSync(base)); assert(rel && !rel.startsWith('..') && rel.startsWith('run-')); rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
-  return { repo, remote, initialMain, calls, prs, deps, client, bind, review, merge, git, readRef, statePath,
-    permission(value) { permission = value; }, user(value) { userId = value; }, failCheck(value) { failCheck = value; }, mutateCheck(value) { mutateCheck = value; },
-    loseCreateAck() { loseCreateAck = true; }, failPush(value) { failPush = value; }, closeIssue(n) { issueStates.set(n, 'closed'); },
-    githubChecks(value) { rollup = value; }, interruptPrepare() { interruptPrepare = true; } };
-}
+import { harness, repository, options } from './helpers/local-fast-harness.mjs';
 const code = expected => error => error.code === expected;
 
 describe('Local Fast isolated workflows', { concurrency: 4 }, () => {
