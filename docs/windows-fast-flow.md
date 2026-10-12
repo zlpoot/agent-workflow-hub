@@ -78,7 +78,7 @@ $profiles = @($issues | ForEach-Object {
      executor_restrictions=@{executor_ids=@($enroll.executor_id);machine_ids=@($enroll.machine.id)} }
 })
 @{clients=@();profiles=$profiles;enrollments=@()} | ConvertTo-Json -Depth 20 |
-  Set-Content C:\AWH\cp\trust.json -Encoding utf8NoBOM -NoClobber
+  Out-File -FilePath C:\AWH\cp\trust.json -Encoding utf8NoBOM -NoClobber
 # 管理员先核对配置/ACL；runtime.json 按 CP 文档指向这个 trust 与全新 SQLite。
 node $cp init --runtime-config C:\AWH\cp\runtime.json
 node $cp serve --runtime-config C:\AWH\cp\runtime.json
@@ -98,6 +98,44 @@ node $awh flow init --issues 1,2,3 # 替换为真实普通 Issue 编号
 Add-Content .gitignore '.handoff/'
 git add .awh/project.yaml .awh/flow.json .gitignore
 git commit -m 'Declare AWH project and Issue queue'
+```
+
+首次 bootstrap 必须先通过已有合法 GitHub 开发身份发布到远端 main，才能生成第一项 Work Item/base SHA。选择下列一种路径；不使用 AWH Stage 发布 bootstrap：
+
+- 新测试仓库 main 允许直推，且 Owner 已授权时：
+
+```powershell
+git push origin HEAD:main
+if ($LASTEXITCODE -ne 0) { throw 'Bootstrap Push failed; do not start Issue #1' }
+```
+
+- main 受保护时，创建 bootstrap PR，由 Human 独立 Review/Merge：
+
+```powershell
+git switch -c codex/awh-bootstrap
+git push --set-upstream origin codex/awh-bootstrap
+if ($LASTEXITCODE -ne 0) { throw 'Bootstrap Push failed; do not start Issue #1' }
+gh pr create --base main --head codex/awh-bootstrap --title 'Declare AWH project and Issue queue' --body 'Bootstrap .awh/project.yaml, .awh/flow.json and the .handoff ignore before Issue #1.' --draft
+# 停在 Human Review/Merge；PR 尚未合并时不开始 Issue #1。
+```
+
+直推成功或 bootstrap PR 经 Human 合并后，回读远端 main 并检查两份 `.awh` 文件；本地 commit 或仅 Push bootstrap 分支不算完成：
+
+```powershell
+git fetch origin main
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read remote main; do not start Issue #1' }
+foreach ($file in @('.awh/project.yaml', '.awh/flow.json')) {
+  git cat-file -e "origin/main:$file"
+  if ($LASTEXITCODE -ne 0) { throw "origin/main missing $file; finish bootstrap publication first" }
+}
+git show origin/main:.awh/project.yaml
+git show origin/main:.awh/flow.json
+$bootstrapBase = (git rev-parse origin/main).Trim()
+```
+
+确认回读的 manifest 和队列内容与本项目一致后，再执行下面的 Flow，并基于此后的最新远端 main 生成/批准 Work Item。首个 Issue 的 `READY.base_sha` 必须包含 bootstrap；若 main 更新，继续按 READY 核对准确 SHA。
+
+```powershell
 # 在已批准 Project 的受保护 launcher 中执行
 node $awh --config $client flow status
 node $awh --config $client flow next
