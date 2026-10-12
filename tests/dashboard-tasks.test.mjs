@@ -47,7 +47,7 @@ function adapterFixture(t){
   const deps={now:()=>clock,alive:pid=>pid===123,command:async(command,args,cwd)=>{
     requests.push({command,args,cwd});if(command==='git')return args[0]==='remote'?`https://github.com/${repo}.git`:'.git';
     if(deny)throw new Error('permission_denied');const path=args.at(-1);
-    if(path===`repos/${repo}/`)return JSON.stringify({id:12,full_name:repo});
+    if(path===`repos/${repo}`)return JSON.stringify({id:12,full_name:repo});
     if(path.includes('/issues/1'))return JSON.stringify({number:1,title:'Real task',state:merge?'closed':'open'});
     if(path.endsWith('/pulls/3'))return JSON.stringify(pr({head:{sha:headDrift?'b'.repeat(40):head,repo:{full_name:repo}},state:merge?'closed':'open',merged_at:merge?'2026-10-12T07:00:00Z':null,merge_commit_sha:merge?'c'.repeat(40):null}));
     if(path.includes('/reviews'))return JSON.stringify([review()]);
@@ -67,7 +67,7 @@ test('read-only adapter checks live GitHub facts, finite queue, cache, scope and
   assertContract('TaskResponse',{contract_version:'1.0',authority_verified:false,item:tasks[0]});
   const serialized=JSON.stringify(tasks);assert(!serialized.includes(h.root));assert(!serialized.includes(h.watcher));assert(!serialized.includes('executable'));
   assert(!serialized.includes('private raw'));assert.equal(tasks[0].stage.status,'passed');
-  assert(h.requests.every(r=>r.command==='git'||r.args[0]==='api'&&r.args[1]==='--method'&&r.args[2]==='GET'&&r.args[3].startsWith(`repos/${repo}/`)));
+  assert(h.requests.every(r=>r.command==='git'||r.args[0]==='api'&&r.args[1]==='--method'&&r.args[2]==='GET'&&(r.args[3]===`repos/${repo}`||r.args[3].startsWith(`repos/${repo}/`))));
   const count=h.requests.length;await h.adapter.observe(['p']);assert.equal(h.requests.length,count);
   h.advance();h.deny();const unknown=(await h.adapter.observe(['p']))[0];assert.equal(unknown.state,'unknown');assert.equal(unknown.review,null);assert.equal(unknown.observations.at(-1).status,'permission_denied');assert.equal(unknown.active_actor,null);
 });

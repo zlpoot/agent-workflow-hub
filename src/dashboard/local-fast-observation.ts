@@ -74,7 +74,7 @@ export class LocalFastObservationAdapter implements TaskAdapter {
   }
   private async api(c:GitHubObservationConfig, suffix:string, pages=false):Promise<any> {
     // Fixed GET-only paths assembled from validated repository/number/SHA.
-    const base=`repos/${c.repository}/${suffix}`;
+    const base=`repos/${c.repository}${suffix?'/'+suffix:''}`;
     if (!pages) return JSON.parse(await this.deps.command('gh',['api','--method','GET',base],c.root));
     const all:Native[]=[];
     for(let page=1;page<=10;page++) {
