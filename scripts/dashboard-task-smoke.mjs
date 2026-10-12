@@ -16,7 +16,10 @@ try {
   browser=await chromium.launch({headless:true,executablePath:process.env.AWH_DASHBOARD_TEST_BROWSER||undefined});
   const context=await browser.newContext({viewport:{width:1440,height:1000}});const page=await context.newPage();page.on('pageerror',e=>evidence.errors.push(e.message));
   await page.goto(url);await page.getByRole('heading',{name:'最近任务',exact:true}).waitFor({timeout:60000});
-  const snapshot=await page.evaluate(async()=>{const r=await fetch('/dashboard/v1/snapshot');if(!r.ok)throw new Error('Snapshot failed');return r.json();});
+  check('Default GitHub interval is 5 minutes',await page.getByRole('combobox',{name:'GitHub 自动刷新间隔'}).inputValue()==='300');
+  if(real)await page.getByRole('button',{name:'刷新 GitHub',exact:true}).click();
+  const snapshot=await page.evaluate(async real=>{const r=await fetch(real?'/dashboard/v1/snapshot?github_interval=300&refresh_github=1':'/dashboard/v1/snapshot');if(!r.ok)throw new Error('Snapshot failed');return r.json();},real);
+  if(real)await page.getByText(/^GitHub：成功/).waitFor({timeout:60000});
   writeFileSync(`${output}/snapshot.json`,JSON.stringify(snapshot,null,2));
   if(real){
     check('Only two explicitly configured real tasks; no fixtures/CP Runs',snapshot.tasks.length===2&&snapshot.runs.length===0&&snapshot.tasks.every(t=>!t.fixture&&t.repository==='zlpoot/awh-local-fast-e2e'));
@@ -26,6 +29,11 @@ try {
       check(`Issue ${i+1} Stage exact-head checks pass`,t.stage.head===expected[i]&&t.stage.status==='passed');
     }
   }else check('Fixtures labeled per task and dataset',snapshot.tasks.some(t=>t.fixture)&&await page.getByText('示例预览 · 模拟数据',{exact:true}).first().isVisible());
+  if(!real){
+    for(const seconds of ['60','0']){const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/dashboard/v1/snapshot'&&new URL(r.url()).searchParams.get('github_interval')===seconds);await page.getByRole('combobox',{name:'GitHub 自动刷新间隔'}).selectOption(seconds);assert.equal((await response).status(),200);}
+    const response=page.waitForResponse(r=>new URL(r.url()).searchParams.get('refresh_github')==='1');await page.getByRole('button',{name:'刷新 GitHub',exact:true}).focus();await page.keyboard.press('Enter');const manual=await response;check('Keyboard manual refresh sends explicit same-origin native refresh',manual.request().method()==='GET'&&new URL(manual.url()).searchParams.get('github_interval')==='0');
+    await page.getByRole('combobox',{name:'GitHub 自动刷新间隔'}).selectOption('300');check('1 minute and manual-only controls preserve local polling',await page.getByText('本机状态每 10 秒观察 · CP 事件使用 SSE · 不改变 Watcher 执行频率',{exact:true}).isVisible());
+  }
   await page.screenshot({path:`${output}/overview-desktop.png`,fullPage:true,animations:'disabled'});
   await page.getByRole('tab',{name:'任务',exact:true}).click();
   await page.getByRole('combobox',{name:'按任务状态筛选'}).waitFor();

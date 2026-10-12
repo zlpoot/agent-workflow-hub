@@ -1,6 +1,7 @@
 import type { DashboardReadView } from '../control-plane/store.js';
 import { selectReview } from '../workflow/local-fast-review.js';
 import { createHash } from 'node:crypto';
+import { standardReviewGate } from './review-authorization.js';
 
 export const TASK_STATES = ['queued','ready','developing','verifying','awaiting_review','changes_requested','review_passed','awaiting_merge','merging','completed','blocked','unknown'] as const;
 export type TaskState = typeof TASK_STATES[number];
@@ -11,6 +12,8 @@ export interface Observation {
   status: 'verified' | 'unknown' | 'not_checked' | 'permission_denied';
   observed_at: string | null; freshness: 'fresh' | 'stale' | 'unknown'; error_code: string | null;
 }
+export interface GitHubRefresh { status:'not_checked'|'querying'|'success'|'failed'|'rate_limited'; last_success_at:string|null; retry_at:string|null; interval_seconds:0|60|300 }
+export interface ObservationOptions { github_interval_seconds?:0|60|300; refresh_github?:boolean }
 export interface Task {
   id: string; project_id: string; repository: string; workflow: 'standard' | 'local-fast'; fixture: boolean;
   issue: { number: number; title: string | null; state: 'open' | 'closed' | null };
@@ -18,14 +21,16 @@ export interface Task {
   state: TaskState; active_actor: Actor | null; waiting_for: Actor | null; machine: { id: string; name: string; platform: string } | null;
   executor: string | null; run_ids: string[]; source_head: string | null; github_head: string | null;
   review: { id: number; state: string; commit_id: string; actor: string; decision: 'PASS' | 'REQUEST_CHANGES' | null; matches_head: boolean } | null;
-  checks: { status: 'passed' | 'pending' | 'failed' | 'not_checked'; count: number };
+  review_gate: { status:'passed'|'changes_requested'|'pending'|'not_checked'|'stale'; source:'administrator_policy'|'local_fast_contract'|'not_checked'; reason:string };
+  github_refresh:GitHubRefresh;
+  checks: { status: 'passed' | 'pending' | 'failed' | 'not_checked' | 'none'; count: number };
   stage: { head: string | null; status: 'passed' | 'failed' | 'not_checked'; checks: { name: string; exit_code: number }[] };
   watcher: { status: string; running: boolean | null; executor_running: boolean | null; stale_lock: boolean | null };
   owner_scope: { status: 'valid' | 'expired' | 'not_checked'; expires_at: string | null; allow_merge: boolean | null };
   next_action: string; blockers: string[]; updated_at: string | null; observations: Observation[];
   history: { source: string; type: string; occurred_at: string | null; observed_at: string; head: string | null; run_id: string | null }[];
 }
-export interface TaskAdapter { observe(projectIds: readonly string[], managedTasks?: readonly Task[]): Promise<Task[]> }
+export interface TaskAdapter { observe(projectIds: readonly string[], managedTasks?: readonly Task[],options?:ObservationOptions): Promise<Task[]> }
 export const actor = (role: Role, name: string): Actor => ({ role, name });
 export const observation = (source: Observation['source'], now: number, status: Observation['status'] = 'verified'): Observation =>
   ({ source, status, observed_at: new Date(now).toISOString(), freshness: status === 'verified' ? 'fresh' : 'unknown', error_code: null });
@@ -33,7 +38,7 @@ export function taskBase(id: string, project: string, repository: string, issue:
   if(id.length>128)id='task:'+createHash('sha256').update(id).digest('hex');
   return { id, project_id: project, repository, workflow: 'standard', fixture: false, issue: { number: issue, title: null, state: null }, pr: null,
     state: 'queued', active_actor: null, waiting_for: actor('coding_executor','Coding Executor'), machine: null, executor: null, run_ids: [],
-    source_head: null, github_head: null, review: null, checks: { status: 'not_checked', count: 0 }, stage: { head: null, status: 'not_checked', checks: [] },
+    source_head: null, github_head: null, review: null, review_gate:{status:'not_checked',source:'not_checked',reason:'Review Gate 尚未核验'},github_refresh:{status:'not_checked',last_success_at:null,retry_at:null,interval_seconds:300},checks: { status: 'not_checked', count: 0 }, stage: { head: null, status: 'not_checked', checks: [] },
     watcher: { status: 'not_checked', running: null, executor_running: null, stale_lock: null }, owner_scope: { status: 'not_checked', expires_at: null, allow_merge: null },
     next_action: '等待 Coding Executor 领取任务', blockers: [], updated_at: null, observations: [], history: [] };
 }
@@ -85,7 +90,7 @@ export function controlPlaneTasks(view: DashboardReadView, now: number): Task[] 
 
 export interface GitHubFacts {
   issue: { number: number; title: string; state: string; pull_request?: unknown };
-  pr?: { number: number; state: string; draft: boolean; merged_at: string | null; merge_commit_sha: string | null; head: { sha: string; repo: { full_name: string } }; base: { repo: { full_name: string } }; user: { id: number } };
+  pr?: { number: number; state: string; draft: boolean; merged_at: string | null; merge_commit_sha: string | null; head: { sha: string; repo: { full_name: string } }; base: { repo: { full_name: string } }; user: { id: number;login?:string } };
   reviews?: Record<string, any>[];
   checks?: Task['checks'];
 }
@@ -98,8 +103,13 @@ export function applyGitHub(task: Task, facts: GitHubFacts, now: number) {
     task.pr = {number:p.number,state:p.state as 'open'|'closed',draft:p.draft,merged_at:p.merged_at,merge_sha:p.merge_commit_sha}; task.github_head = p.head.sha;
     if(task.active_actor?.role==='reviewer'&&task.source_head!==p.head.sha)task.active_actor=null;
     const reviews = facts.reviews ?? [];
+    if(!reviews.every(r=>Number.isSafeInteger(r.id)&&r.id>0&&Number.isSafeInteger(r.user?.id)&&r.user.id>0&&typeof r.user.login==='string'&&/^[a-f0-9]{40}$/.test(r.commit_id)&&['APPROVED','CHANGES_REQUESTED','COMMENTED','DISMISSED','PENDING'].includes(r.state)))throw new Error('Invalid native Review facts');
     // Structured author COMMENTED records are a Local Fast contract only.
-    const selected = selectReview(task.workflow === 'local-fast' ? reviews : reviews.filter(r => r.state !== 'COMMENTED'),p.user.id,p.head.sha);
+    const authorization=task.workflow==='standard'&&typeof p.user.login==='string'?standardReviewGate(task.repository,reviews,p.user.login,p.head.sha):null;
+    const strict=authorization?.selected;
+    const selected = task.workflow==='local-fast'?selectReview(reviews,p.user.id,p.head.sha):strict?{review_id:strict.review.id,decision:strict.decision}:undefined;
+    task.review_gate={status:selected?.decision==='PASS'?'passed':selected?'changes_requested':task.workflow==='standard'&&!authorization?'not_checked':'pending',source:task.workflow==='local-fast'?'local_fast_contract':authorization?'administrator_policy':'not_checked',reason:selected?'已依据身份与原生 Review 核验':task.workflow==='standard'&&reviews.length?authorization?'身份条件已核验；没有当前有效的授权 Review 决定':'GitHub 已观察到 Review，但授权未核验':'等待当前 HEAD 的受信 Review'};
+    if(task.source_head&&task.source_head!==p.head.sha){task.review_gate.status='stale';task.review_gate.reason='源码 HEAD 与 GitHub HEAD 不一致；历史 Review 不适用于当前候选';}
     const r = selected ? reviews.find(r => r.id === selected.review_id) : reviews.filter(r => r.state !== 'PENDING').sort((a,b)=>a.id-b.id).at(-1);
     if (r) {
       if(!['APPROVED','CHANGES_REQUESTED','COMMENTED','DISMISSED'].includes(r.state))throw new Error('Invalid native Review state');
@@ -119,12 +129,12 @@ export function applyGitHub(task: Task, facts: GitHubFacts, now: number) {
     } else if (selected?.decision === 'REQUEST_CHANGES') {
       task.state = task.active_actor?.role === 'coding_executor' ? 'developing' : 'changes_requested'; task.waiting_for = task.active_actor ? null : actor('coding_executor','Coding Executor'); task.next_action = '在同一 PR 修复 Review 意见';
     } else if (selected?.decision === 'PASS' && !task.active_actor) {
-      task.state = task.checks.status === 'passed' ? 'awaiting_merge' : 'review_passed';
+      task.state = ['passed','none'].includes(task.checks.status) ? 'awaiting_merge' : 'review_passed';
       task.waiting_for = task.owner_scope.status === 'valid' && task.owner_scope.allow_merge ? actor('watcher','AWH Watcher') : actor('owner','Owner');
-      task.next_action = task.checks.status === 'passed' ? '等待获授权的合并责任方处理' : 'Review 已通过；等待核验 GitHub checks';
+      task.next_action = ['passed','none'].includes(task.checks.status) ? '等待获授权的合并责任方处理' : 'Review 已通过；等待核验 GitHub checks';
       if (task.checks.status === 'failed') {task.state='blocked';task.blockers.push('GitHub checks 失败');task.waiting_for=actor('coding_executor','Coding Executor');task.next_action='修复失败的 GitHub checks';}
     } else if (!task.active_actor) {
-      task.state='awaiting_review';task.waiting_for=actor('reviewer',task.workflow === 'local-fast' ? 'ChatGPT Reviewer' : '独立 Reviewer');task.next_action='等待当前 HEAD 的独立原生 GitHub Review';
+      task.state='awaiting_review';task.waiting_for=task.workflow==='standard'&&reviews.length&&!authorization?actor('owner','Owner'):actor('reviewer',task.workflow === 'local-fast' ? 'ChatGPT Reviewer' : '独立 Reviewer');task.next_action=task.workflow==='standard'&&reviews.length?authorization?'等待授权 Reviewer 对当前 HEAD 提交有效 Review':'GitHub 已观察到 Review，但授权未核验；核对管理员 Reviewer 策略':'等待当前 HEAD 的独立原生 GitHub Review';
     }
   }
   task.updated_at = new Date(now).toISOString();

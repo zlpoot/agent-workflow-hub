@@ -3,13 +3,15 @@ import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'nod
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fail, validId, safeData } from '../shared/security.js';
 import { externalPath } from '../shared/external-files.js';
-import { actor, applyGitHub, observation, taskBase, type GitHubFacts, type Task, type TaskAdapter } from './tasks.js';
+import { actor, applyGitHub, observation, taskBase, type ObservationOptions, type Task, type TaskAdapter } from './tasks.js';
 
 export interface LocalFastObservationConfig {
   project_id: string; repository: string; root: string;
   watcher_directory?: string; machine: { id: string; name: string; platform: string }; executor_name?: string;
 }
 export type GitHubObservationConfig = Pick<LocalFastObservationConfig,'project_id'|'repository'|'root'>;
+import { sharedGitHubCache, githubReadFailure } from './github-observation-cache.js';
+
 type Native = Record<string, any>;
 export interface ObservationDependencies {
   now: () => number; alive: (pid: number) => boolean | null;
@@ -20,7 +22,7 @@ const defaults: ObservationDependencies = {
   now: Date.now, alive: pid => { try {process.kill(pid,0);return true;} catch(error) {return (error as NodeJS.ErrnoException).code==='ESRCH'?false:null;} },
   command: (command,args,cwd) => new Promise((resolve,reject) => {
     execFile(command,args,{cwd,env:{...env(),GH_HOST:'github.com',GH_PROMPT_DISABLED:'1',GIT_TERMINAL_PROMPT:'0'},windowsHide:true,timeout:10000,maxBuffer:2*1024*1024},(error,stdout,stderr)=>{
-      if (error) { const denied = /HTTP (401|403)|authentication|permission|not accessible/i.test(stderr); reject(new Error(denied ? 'permission_denied' : 'read_failed')); }
+      if (error) reject(githubReadFailure(stdout,stderr,Date.now()));
       else resolve(stdout.trim());
     });
   })
@@ -60,61 +62,59 @@ export class LocalFastObservationAdapter implements TaskAdapter {
   private cache = new Map<string,{at:number;tasks:Task[]}>();
   private pending = new Map<string,Promise<Task[]>>();
   constructor(readonly configs: readonly LocalFastObservationConfig[], overrides: Partial<ObservationDependencies> = {}) {this.deps={...defaults,...overrides};}
-  async observe(projectIds: readonly string[]): Promise<Task[]> {
+  async observe(projectIds: readonly string[], _managed:readonly Task[]=[], options:ObservationOptions={}): Promise<Task[]> {
     const groups: Task[][]=[];
     // Serialize bounded repository reads; no local discovery, scheduling or writes.
     for (const c of this.configs.filter(c=>projectIds.includes(c.project_id))) {
       const cached=this.cache.get(c.project_id);
-      if(cached && this.deps.now()-cached.at>=0 && this.deps.now()-cached.at<15000) {groups.push(structuredClone(cached.tasks));continue;}
+      if(cached && this.deps.now()-cached.at>=0 && this.deps.now()-cached.at<5000) {groups.push(await this.enrich(c,structuredClone(cached.tasks),options));continue;}
       let pending=this.pending.get(c.project_id);
       if(!pending) {pending=this.read(c).then(tasks=>{this.cache.set(c.project_id,{at:this.deps.now(),tasks});return tasks;}).finally(()=>this.pending.delete(c.project_id));this.pending.set(c.project_id,pending);}
-      groups.push(structuredClone(await pending));
+      groups.push(await this.enrich(c,structuredClone(await pending),options));
     }
     return groups.flat();
   }
-  private async api(c:GitHubObservationConfig, suffix:string, pages=false):Promise<any> {
-    // Fixed GET-only paths assembled from validated repository/number/SHA.
-    const base=`repos/${c.repository}${suffix?'/'+suffix:''}`;
-    if (!pages) return JSON.parse(await this.deps.command('gh',['api','--method','GET',base],c.root));
-    const all:Native[]=[];
-    for(let page=1;page<=10;page++) {
-      const values=JSON.parse(await this.deps.command('gh',['api','--method','GET',`${base}${base.includes('?')?'&':'?'}per_page=100&page=${page}`],c.root));
-      if(!Array.isArray(values))throw new Error('invalid_pagination');all.push(...values);if(values.length<100)return all;
+  private repositoryIds=new Map<string,number>();
+  private async enrich(c:GitHubObservationConfig,tasks:Task[],options:ObservationOptions){
+    const cache=sharedGitHubCache(this.deps);
+    await cache.observe(c,tasks.filter(t=>t.issue.number>0),options);
+    for(const task of tasks)if(task.issue.number>0){
+      this.projectGitHub(c,task,options,this.repositoryIds.get(c.project_id));
+      if(task.state!=='completed'&&task.state!=='unknown'){
+        const stopped=task.watcher.running===false&&(task.waiting_for?.role==='watcher'||['ready','queued'].includes(task.state));
+        const blocked=task.watcher.stale_lock||task.history.some(h=>h.source==='watcher'&&h.type==='attempt_blocked');
+        if(task.owner_scope.status==='expired'||stopped||blocked){task.state='blocked';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.blockers.push(task.owner_scope.status==='expired'?'Owner 有界授权已过期':blocked?'Watcher 执行失败或存在失效锁':'Watcher 已停止，无法自动推进');task.next_action='Owner 检查 Watcher 或授权并决定恢复';}
+      }
+      const at=task.observations.find(o=>o.source==='github')?.observed_at;
+      if(at&&task.pr?.merged_at)task.history.push({source:'github',type:'MERGED',occurred_at:task.pr.merged_at,observed_at:at,head:task.pr.merge_sha,run_id:null});
+      if(at&&task.review)task.history.push({source:'github',type:'REVIEW_'+task.review.state,occurred_at:null,observed_at:at,head:task.review.commit_id,run_id:null});
     }
-    throw new Error('history_limit');
+    return tasks;
   }
-  private async github(c:GitHubObservationConfig,task:Task):Promise<GitHubFacts> {
-    const issue=await this.api(c,`issues/${task.issue.number}`);
-    if (!task.pr) return {issue};
-    const pr=await this.api(c,`pulls/${task.pr.number}`);
-    if(!sha(pr.head?.sha))throw new Error('invalid_head');
-    const reviews=await this.api(c,`pulls/${task.pr.number}/reviews`,true);
-    const status=await this.api(c,`commits/${pr.head.sha}/status`);
-    let runs:Native[]=[];
-    for(let page=1;page<=10;page++) {
-      const checks=await this.api(c,`commits/${pr.head.sha}/check-runs?per_page=100&page=${page}&filter=latest`);
-      if(!Array.isArray(checks.check_runs)||!Number.isSafeInteger(checks.total_count))throw new Error('invalid_checks');runs.push(...checks.check_runs);
-      if(runs.length>=checks.total_count)break;if(page===10)throw new Error('checks_limit');
-    }
-    const statuses:Native[]=status.statuses;
-    if(!Array.isArray(statuses)||statuses.length!==status.total_count||!statuses.every(s=>['success','pending','failure','error'].includes(s.state))||!runs.every(r=>['queued','in_progress','completed','waiting','requested','pending'].includes(r.status)))throw new Error('incomplete_statuses');
-    const failed=statuses.some(s=>['failure','error'].includes(s.state))||runs.some(r=>r.status==='completed'&&!['success','neutral','skipped'].includes(r.conclusion));
-    const waiting=statuses.some(s=>s.state==='pending')||runs.some(r=>r.status!=='completed');
-    const again=await this.api(c,`pulls/${task.pr.number}`);
-    if(again.head?.sha!==pr.head.sha||again.state!==pr.state||again.merged_at!==pr.merged_at)throw new Error('github_changed');
-    return {issue,pr,reviews,checks:{status:failed?'failed':waiting?'pending':'passed',count:runs.length+statuses.length}};
-  }
-  async verifyGitHub(c:GitHubObservationConfig,task:Task, repositoryId?:number):Promise<void> {
-    try {
-      if(task.repository!==c.repository||task.project_id!==c.project_id)throw new Error('scope_mismatch');
-      const origin=await this.deps.command('git',['remote','get-url','origin'],c.root);
-      if(![`git@github.com:${c.repository}.git`,`git@github.com:${c.repository}`,`https://github.com/${c.repository}.git`,`https://github.com/${c.repository}`].includes(origin))throw new Error('repository_mismatch');
-      if(repositoryId!==undefined) {const repo=await this.api(c,'');if(repo.id!==repositoryId||repo.full_name!==c.repository)throw new Error('repository_mismatch');}
-      const facts=await this.github(c,task);facts.issue.title=safeLabel(facts.issue.title,512);for(const r of facts.reviews??[])safeLabel(r.user?.login);applyGitHub(task,facts,this.deps.now());
-    } catch(error) {
-      const denied=error instanceof Error&&error.message==='permission_denied';
-      task.observations=task.observations.filter(o=>o.source!=='github').concat({...observation('github',this.deps.now(),denied?'permission_denied':'unknown'),error_code:denied?'permission_denied':'read_failed'});
-      task.state='unknown';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.review=null;task.github_head=null;task.checks={status:'not_checked',count:0};task.next_action='恢复 GitHub 只读访问并重新核验；历史 PASS 不代表当前状态';task.blockers.push('GitHub 当前事实未核验');
+  projectGitHub(c:GitHubObservationConfig,task:Task,options:ObservationOptions={},repositoryId?:number){
+    const cached=sharedGitHubCache(this.deps).read(c.repository,task,options.github_interval_seconds??300);
+    task.github_refresh=cached.refresh;
+    try{
+      if(task.repository!==c.repository||task.project_id!==c.project_id||repositoryId!==undefined&&cached.repositoryId!==null&&cached.repositoryId!==repositoryId)throw new Error('repository_mismatch');
+      if(cached.record){
+        const facts=structuredClone(cached.record.facts);facts.issue.title=safeLabel(facts.issue.title,512);for(const r of facts.reviews??[])safeLabel(r.user?.login);
+        const localUpdated=task.updated_at;
+        applyGitHub(task,facts,cached.record.at);
+        task.updated_at=[localUpdated,task.updated_at].filter((v):v is string=>!!v).sort().at(-1)??null;
+        const gh=task.observations.find(o=>o.source==='github')!;gh.freshness=cached.fresh?'fresh':'stale';
+        if(!cached.fresh||!cached.gateFresh){task.review_gate.status='stale';task.review_gate.reason='历史 Review 仅供查看，当前 Gate 未重新核验';}
+      }else task.observations.push({...observation('github',this.deps.now(),'not_checked'),observed_at:null});
+      if(!cached.fresh){
+        const gh=task.observations.find(o=>o.source==='github')!;
+        gh.status=cached.error==='permission_denied'?'permission_denied':cached.record?'unknown':'not_checked';gh.error_code=cached.error;
+        task.review_gate.status=cached.record?'stale':'not_checked';task.review_gate.reason='历史 Review 仅供查看，当前 Gate 未重新核验';
+        if(!task.active_actor){task.state='unknown';task.waiting_for=actor('owner','Owner');task.next_action='刷新 GitHub 以核验当前事实；历史 Review 不代表当前 Gate';}
+      }
+    }catch{
+      task.github_refresh.status='failed';
+      task.review_gate={status:'not_checked',source:'not_checked',reason:'GitHub 来源身份或数据未核验'};
+      task.observations=task.observations.filter(o=>o.source!=='github').concat({...observation('github',this.deps.now(),'unknown'),observed_at:null,error_code:'read_failed'});
+      if(!task.active_actor){task.state='unknown';task.waiting_for=actor('owner','Owner');task.next_action='检查 GitHub 只读来源并重新核验';}
     }
   }
   private async read(c:LocalFastObservationConfig):Promise<Task[]> {
@@ -125,6 +125,7 @@ export class LocalFastObservationAdapter implements TaskAdapter {
       const common=resolve(c.root,await this.deps.command('git',['rev-parse','--git-common-dir'],c.root));
       state=file(join(common,'awh-local-fast','state.json'));
       if(state.schema_version!=='1.0'||state.mode!=='local-fast'||state.repository!==c.repository||!positive(state.repository_id)||resolve(state.root)!==resolve(c.root)||!Array.isArray(state.issues)||!state.issues.length||state.issues.length>128||!state.issues.every(positive)||new Set(state.issues).size!==state.issues.length||!Array.isArray(state.tasks)||state.tasks.length>state.issues.length)throw new Error('invalid_binding');
+      this.repositoryIds.set(c.project_id,state.repository_id);
       for(const [i,t] of state.tasks.entries()) if(t.issue!==state.issues[i]||!['preparing','developing','publishing','awaiting_review','completed'].includes(t.phase)||t.head!==undefined&&!sha(t.head)||t.pr!==undefined&&!positive(t.pr))throw new Error('invalid_task');
       const operation=join(common,'awh-local-fast','operation.lock');
       if(existsSync(operation))try {const pid=file(operation);if(positive(pid))operationPid=pid;}catch{/* A stale or malformed lock cannot prove Stage execution. */}
@@ -146,7 +147,7 @@ export class LocalFastObservationAdapter implements TaskAdapter {
     } catch {scope=watch=lock=undefined;}
     const tasks:Task[]=[];
     for(const [i,issue] of state.issues.entries()) {
-      const t=state.tasks[i];const task=taskBase(`lf:${c.project_id}:${issue}`,c.project_id,c.repository,issue);task.workflow='local-fast';task.machine=c.machine;task.executor=c.executor_name??'Coding Executor';
+      const t=state.tasks[i];const task=taskBase(`lf:${c.project_id}:${issue}`,c.project_id,c.repository,issue);task.workflow='local-fast';task.machine=c.machine;task.executor=c.executor_name??'Coding Executor';task.updated_at=new Date(now).toISOString();
       task.observations=[observation('local_fast',now),observation('watcher',now,watchRead?'verified':'not_checked'),observation('owner_scope',now,scope?'verified':'not_checked')];
       if(scope)task.owner_scope={status:Date.parse(scope.expires_at)>now?'valid':'expired',expires_at:scope.expires_at,allow_merge:scope.allow_merge};
       const attempt=watch?.attempts.filter((a:Native)=>a.issue===issue).at(-1);
@@ -171,12 +172,8 @@ export class LocalFastObservationAdapter implements TaskAdapter {
           task.history.push({source:'local_fast',type:`stage_${task.stage.status}`,occurred_at:statSync(path).mtime.toISOString(),observed_at:new Date(now).toISOString(),head:check.head,run_id:null});
         } catch {/* Missing evidence is not PASS. */}
       }
-      await this.verifyGitHub(c,task,state.repository_id);
-      if(task.state!=='completed'&&task.state!=='unknown') {
-        if(task.owner_scope.status==='expired') {task.state='blocked';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.blockers.push('Owner 有界授权已过期');task.next_action='Owner 检查并决定是否续期';}
-        if(watchRead&&running===false&&(task.waiting_for?.role==='watcher'||['ready','queued'].includes(task.state))) {task.state='blocked';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.blockers.push('Watcher 已停止，无法自动推进');task.next_action='Owner 检查 Watcher 并决定恢复';}
-        if(attempt?.status==='blocked'||task.watcher.stale_lock) {task.state='blocked';task.active_actor=null;task.waiting_for=actor('owner','Owner');task.blockers.push('Watcher 执行失败或存在失效锁');task.next_action='Owner 检查原始 Watcher 日志并决定恢复';}
-      }
+
+      if(attempt?.status==='blocked')task.history.push({source:'watcher',type:'attempt_blocked',occurred_at:null,observed_at:new Date(now).toISOString(),head:task.source_head,run_id:null});
       if(watch)task.history.push({source:'watcher',type:task.watcher.status,occurred_at:null,observed_at:new Date(now).toISOString(),head:task.source_head,run_id:null});
       if(task.pr?.merged_at)task.history.push({source:'github',type:'MERGED',occurred_at:task.pr.merged_at,observed_at:task.updated_at!,head:task.pr.merge_sha,run_id:null});
       if(task.review)task.history.push({source:'github',type:`REVIEW_${task.review.state}`,occurred_at:null,observed_at:task.updated_at!,head:task.review.commit_id,run_id:null});
@@ -188,19 +185,22 @@ export class LocalFastObservationAdapter implements TaskAdapter {
 /** Optional native-fact verification for CP tasks; never discovers ordinary Issues or creates CP records. */
 export class GitHubObservationAdapter implements TaskAdapter {
   private readonly reader:LocalFastObservationAdapter;
-  private cache=new Map<string,{at:number;binding:string;task:Task}>();
   private readonly deps:ObservationDependencies;
   constructor(readonly configs:readonly GitHubObservationConfig[],overrides:Partial<ObservationDependencies>={}) {this.deps={...defaults,...overrides};this.reader=new LocalFastObservationAdapter([],this.deps);}
-  async observe(projectIds:readonly string[],managedTasks:readonly Task[]=[]):Promise<Task[]> {
+  async observe(projectIds:readonly string[],managedTasks:readonly Task[]=[],options:ObservationOptions={}):Promise<Task[]> {
     const tasks:Task[]=[];
-    for(const c of this.configs.filter(c=>projectIds.includes(c.project_id)))for(const original of managedTasks.filter(t=>t.project_id===c.project_id&&t.repository===c.repository)) {
-      const task=structuredClone(original),binding=JSON.stringify([task.source_head,task.pr?.number,task.state,task.active_actor]),cached=this.cache.get(task.id);
-      if(cached&&cached.binding===binding&&this.deps.now()-cached.at>=0&&this.deps.now()-cached.at<15000){
-        const facts=cached.task;task.issue=facts.issue;task.pr=facts.pr;task.state=facts.state;task.active_actor=facts.active_actor;task.waiting_for=facts.waiting_for;task.github_head=facts.github_head;task.review=facts.review;task.checks=facts.checks;task.next_action=facts.next_action;task.blockers=facts.blockers;task.updated_at=facts.updated_at;task.observations=task.observations.filter(o=>o.source!=='github').concat(facts.observations.filter(o=>o.source==='github'));
-      }else {await this.reader.verifyGitHub(c,task);this.cache.set(task.id,{at:this.deps.now(),binding,task:structuredClone(task)});}
-      tasks.push(task);
+    for(const c of this.configs.filter(c=>projectIds.includes(c.project_id))){
+      const selected=managedTasks.filter(t=>t.project_id===c.project_id&&t.repository===c.repository).map(t=>structuredClone(t));
+      if(!selected.length)continue;
+      const origin=await this.deps.command('git',['remote','get-url','origin'],c.root).catch(()=>null);
+      if(![`git@github.com:${c.repository}.git`,`git@github.com:${c.repository}`,`https://github.com/${c.repository}.git`,`https://github.com/${c.repository}`].includes(origin??'')){
+        for(const task of selected){task.review_gate.status='not_checked';if(!task.active_actor)task.state='unknown';}tasks.push(...selected);continue;
+      }
+      await sharedGitHubCache(this.deps).observe(c,selected,options);
+      for(const task of selected)this.reader.projectGitHub(c,task,options);
+      tasks.push(...selected);
     }
     return tasks;
   }
 }
-export function combineTaskAdapters(...adapters:TaskAdapter[]):TaskAdapter {return {observe:async(scope,managed)=>{const tasks:Task[]=[];for(const adapter of adapters)tasks.push(...await adapter.observe(scope,managed));return tasks;}};}
+export function combineTaskAdapters(...adapters:TaskAdapter[]):TaskAdapter {return {observe:async(scope,managed,options)=>{const tasks:Task[]=[];for(const adapter of adapters)tasks.push(...await adapter.observe(scope,managed,options));return tasks;}};}

@@ -47,12 +47,13 @@ function App() {
   const [view, setView] = useState('Overview'), [search, setSearch] = useState(''), [project, setProject] = useState('all'), [status, setStatus] = useState('all');
   const [state, setState] = useState<State>({ snapshot: null, events: [], phase: 'loading', lastRefresh: null, error: null });
   const reader = useRef<DashboardReader | null>(null);
+  const [githubInterval,setGithubInterval]=useState(300),[githubBusy,setGithubBusy]=useState(false),[githubError,setGithubError]=useState<string|null>(null),[githubCooldown,setGithubCooldown]=useState(0);
   const [selection, setSelection] = useState<{ kind: string; item: Project | Executor | Run } | null>(null);
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null), [detailError, setDetailError] = useState<string | null>(null);
   const [taskId,setTaskId]=useState<string|null>(null),[taskDetail,setTaskDetail]=useState<Task|null>(null),[taskError,setTaskError]=useState<string|null>(null),[taskLoading,setTaskLoading]=useState(false);
-  useEffect(() => { const client = reader.current = new DashboardReader({ publish: setState }); void client.refresh(); return () => client.stop(); }, []);
+  useEffect(() => { const client = reader.current = new DashboardReader({ publish: setState,githubInterval:300 }); void client.refresh(); return () => client.stop(); }, []);
   // Local observations are not CP Events; poll reads independently from SSE invalidations.
-  useEffect(()=>{const timer=setInterval(()=>{if(reader.current&&!['loading','refreshing'].includes(reader.current.state.phase))void reader.current.refresh();},15000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{const timer=setInterval(()=>{if(reader.current&&!['loading','refreshing'].includes(reader.current.state.phase))void reader.current.refresh();},10000);return()=>clearInterval(timer);},[]);
   useEffect(()=>{
     if(!taskId){setTaskDetail(null);return;}
     const abort=new AbortController();setTaskError(null);setTaskLoading(true);
@@ -70,6 +71,10 @@ function App() {
   }, [selection]);
   const snapshot = state.snapshot, registeredProjects = snapshot?.projects ?? [], runs = snapshot?.runs ?? [], executors = snapshot?.executors ?? [];
   const tasks=snapshot?.tasks??[],scopedTasks=tasks.filter(t=>project==='all'||t.project_id===project),offline=['offline','outdated','error'].includes(state.phase);
+  const refreshes=scopedTasks.map(t=>t.github_refresh),retryAt=refreshes.map(r=>r.retry_at).filter((v):v is string=>!!v).sort().at(-1)??null;
+  const ghStatus=githubBusy?'querying':refreshes.some(r=>r.status==='rate_limited')?'rate_limited':refreshes.some(r=>r.status==='failed')?'failed':refreshes.some(r=>r.status==='querying')?'querying':refreshes.some(r=>r.status==='success')?'success':'not_checked';
+  const ghSuccess=refreshes.map(r=>r.last_success_at).filter((v):v is string=>!!v).sort().at(-1)??null;
+  const refreshGithub=async()=>{if(githubBusy)return;setGithubBusy(true);setGithubError(null);try{await reader.current?.refreshGitHub();}catch{setGithubError('GitHub 观察请求失败；历史快照仅供查看');}finally{setGithubBusy(false);setGithubCooldown(Date.now()+10000);}};
   const projects:Project[]=[...registeredProjects,...[...new Map(tasks.filter(t=>t.workflow==='local-fast'&&!registeredProjects.some(p=>p.id===t.project_id)).map(t=>[t.project_id,t])).values()].map(t=>({id:t.project_id,name:t.repository,repository:t.repository,profile_ref:'local-fast',enabled:null,last_activity:t.updated_at,active_runs:[],metadata_provenance:'local_fast_observation'}))];
   const taskProjects=[...new Map([...projects.map(p=>[p.id,p.repository] as const),...tasks.map(t=>[t.project_id,t.repository] as const)]).entries()];
   const openTask=(id:string)=>{setTaskId(id);setTaskDetail(tasks.find(t=>t.id===id)??null);};
@@ -97,6 +102,8 @@ function App() {
     <main><header className="topbar"><Flex direction="column" align="start" gap="1"><Text size="2" color="gray">工作区 <span aria-hidden="true">/</span> <strong>{text(view)}</strong></Text>{fixture && <Badge color="amber" variant="solid" size="2" role="note" aria-label="模拟数据来源">示例预览 · 模拟数据</Badge>}</Flex><Flex gap="3" align="center" wrap="wrap"><Status value={state.phase} /><Button variant="soft" size="2" onClick={() => void reader.current?.refresh()} disabled={state.phase === 'loading' || state.phase === 'refreshing'}>刷新</Button><Button variant="soft" size="2" onClick={() => window.location.assign('/dashboard')}>重新进入 Dashboard</Button><Button size="2" onClick={() => setView('Enrollment')}>添加项目</Button></Flex></header>
       <div className="content"><div className="page-title"><div><Text className="eyebrow" size="1">智能体工作流中心</Text><Heading size="7">{text(view)}</Heading><Text color="gray">{['Overview','Tasks'].includes(view) ? '任务进度、当前实际执行者、等待责任方与下一动作。' : view === 'Timeline' ? '按全局游标顺序查看当前范围内已保存的事件。' : '查看当前范围内已记录的身份信息和活动。'}</Text></div></div>
       <div className="freshness"><Text size="2">{labels[state.phase]} · 最近成功刷新：{state.lastRefresh === null ? '暂无' : stamp(state.lastRefresh)}</Text><Text size="1" color="gray">快照游标 {snapshot?.cursor ?? '—'} · 注册信息与事件存储 · GitHub 授权未核验</Text></div>
+      <Flex gap="3" wrap="wrap" align="center" className="filters github-refresh" aria-label="GitHub 观察设置"><label>GitHub 自动刷新 <select aria-label="GitHub 自动刷新间隔" value={githubInterval} onChange={e=>{const value=Number(e.target.value);setGithubInterval(value);reader.current?.setGitHubInterval(value);void reader.current?.refresh();}}><option value="60">每 1 分钟</option><option value="300">每 5 分钟（默认）</option><option value="0">关闭自动刷新（仅手动）</option></select></label><Button variant="soft" onClick={()=>void refreshGithub()} disabled={githubBusy||Date.now()<githubCooldown||!!retryAt&&Date.parse(retryAt)>Date.now()}>刷新 GitHub</Button><Text size="2">GitHub：{{not_checked:'未核验',querying:'查询中',success:'成功',failed:'失败',rate_limited:'限流 / 退避'}[ghStatus]} · 最近实际成功：{stamp(ghSuccess)}</Text>{retryAt&&<Text size="2">下次允许查询：{stamp(retryAt)}</Text>}<Text size="1" color="gray">本机状态每 10 秒观察 · CP 事件使用 SSE · 不改变 Watcher 执行频率</Text></Flex>
+      {githubError&&<div className="notice" role="alert">{githubError}</div>}
       {state.error && <div className="notice" role="alert">{errorText(state.error)}。{snapshot ? '显示上次成功读取的快照；在线状态可能已过期。' : '暂无可用快照。'}</div>}
       {view === 'Enrollment' ? <Tabs.Content value="Enrollment"><section className="enrollment" aria-label="项目接入"><Enrollment
         onConnected={id => { setProject(id); setSearch(''); setStatus('all'); setView('Executors');void reader.current?.refresh(); }} /></section></Tabs.Content> : !snapshot ? <Card className="empty"><Heading size="4">{state.phase === 'loading' ? '正在加载活动记录…' : '面板暂不可用'}</Heading><Text color="gray">{state.phase === 'loading' ? '正在读取一致的快照与已保存的时间线。' : '需要受保护的同源查看会话，并启用只读网关。'}</Text></Card> : <>

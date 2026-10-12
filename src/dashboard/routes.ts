@@ -4,7 +4,7 @@ import type { DashboardStore } from '../control-plane/store.js';
 import { DashboardProjection, integer } from './projection.js';
 import type { AuthenticateViewer } from './security.js';
 import { streamCache } from './stream-cache.js';
-import { TASK_STATES, controlPlaneTasks, type TaskAdapter } from './tasks.js';
+import { TASK_STATES, controlPlaneTasks, type TaskAdapter, type ObservationOptions } from './tasks.js';
 
 function query(url: URL, keys: string[]) {
   for (const key of url.searchParams.keys()) if (!keys.includes(key) || url.searchParams.getAll(key).length !== 1)
@@ -23,21 +23,24 @@ export async function dashboardRoute(request: IncomingMessage, response: ServerR
   if (request.method !== 'GET') fail(405, 'read_only', 'Dashboard sessions have read-only access');
   const projection = new DashboardProjection(options.store, viewer, options.now);
   const path = url.pathname.slice('/dashboard/v1'.length);
+  const interval=url.searchParams.get('github_interval'),manual=url.searchParams.get('refresh_github');
+  if(interval!==null&&!['0','60','300'].includes(interval)||manual!==null&&manual!=='1')fail(400,'invalid_query','Invalid GitHub observation option');
+  const observationOptions:ObservationOptions={github_interval_seconds:interval===null?300:Number(interval) as 0|60|300,refresh_github:manual==='1'};
   const tasks = async (cp = controlPlaneTasks(projection.view(), (options.now ?? Date.now)())) => {
-    const observed = await options.tasks?.observe(viewer.project_ids,cp) ?? [];
+    const observed = await options.tasks?.observe(viewer.project_ids,cp,observationOptions) ?? [];
     const current=options.authenticate(request);
     if (!current || current.id!==viewer.id || JSON.stringify(current.project_ids)!==JSON.stringify(viewer.project_ids)) fail(401, 'viewer_unauthorized', 'Viewer session expired or scope changed');
     return [...new Map([...cp,...observed.filter(t=>viewer.project_ids.includes(t.project_id))].map(t=>[t.id,t])).values()];
   };
-  if (path === '/snapshot') { query(url, []); const snapshot=projection.snapshot(); if(options.tasks)snapshot.tasks=await tasks(snapshot.tasks); json(response, snapshot); return; }
+  if (path === '/snapshot') { query(url, ['github_interval','refresh_github']); const snapshot=projection.snapshot(); if(options.tasks)snapshot.tasks=await tasks(snapshot.tasks); json(response, snapshot); return; }
   if (path === '/tasks' || path.startsWith('/tasks/')) {
     let id='';try{id=decodeURIComponent(path.slice('/tasks/'.length));}catch{fail(400,'invalid_id','Invalid task ID');}
     if(path !== '/tasks') {
-      query(url,[]);if(!validId(id))fail(400,'invalid_id','Invalid task ID');
+      query(url,['github_interval']);if(!validId(id))fail(400,'invalid_id','Invalid task ID');
       const item=(await tasks()).find(t=>t.id===id);if(!item)fail(404,'not_found','Task outside viewer scope or unavailable');
       json(response,{contract_version:'1.0',authority_verified:false,item});return;
     }
-    query(url,['project_id','state','role','machine_id','limit','offset']);
+    query(url,['project_id','state','role','machine_id','limit','offset','github_interval','refresh_github']);
     const project=url.searchParams.get('project_id'),state=url.searchParams.get('state'),role=url.searchParams.get('role'),machine=url.searchParams.get('machine_id');
     if(project){if(!validId(project))fail(400,'invalid_query','Invalid project');projection.scope(project);}
     if(state&&!TASK_STATES.includes(state as typeof TASK_STATES[number])||role&&!['coding_executor','reviewer','owner','stage','watcher'].includes(role)||machine&&!validId(machine)||[project,state,role,machine].some(x=>x===''))fail(400,'invalid_query','Invalid task filter');

@@ -20,7 +20,30 @@
             "ViewerSession": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "github_interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "60",
+                "300"
+              ]
+            },
+            "description": "Observation only: manual / 1 minute / default 5 minutes. Does not change Watcher."
+          },
+          {
+            "name": "refresh_github",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Request a real native read; coalesced and constrained by shared budget/backoff."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Read projection; GitHub authority is never established.",
@@ -1145,6 +1168,28 @@
               "type": "string"
             },
             "required": false
+          },
+          {
+            "name": "github_interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "60",
+                "300"
+              ]
+            },
+            "description": "Observation only: manual / 1 minute / default 5 minutes. Does not change Watcher."
+          },
+          {
+            "name": "refresh_github",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "1"
+            },
+            "description": "Request a real native read; coalesced and constrained by shared budget/backoff."
           }
         ],
         "responses": {
@@ -1177,6 +1222,19 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "github_interval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "60",
+                "300"
+              ]
+            },
+            "description": "Observation only: manual / 1 minute / default 5 minutes. Does not change Watcher."
           }
         ],
         "responses": {
@@ -2570,7 +2628,9 @@
           "blockers",
           "updated_at",
           "observations",
-          "history"
+          "history",
+          "review_gate",
+          "github_refresh"
         ],
         "properties": {
           "id": {
@@ -2867,7 +2927,8 @@
                   "passed",
                   "pending",
                   "failed",
-                  "not_checked"
+                  "not_checked",
+                  "none"
                 ]
               },
               "count": {
@@ -3091,6 +3152,12 @@
                 }
               }
             }
+          },
+          "review_gate": {
+            "$ref": "#/components/schemas/ReviewGate"
+          },
+          "github_refresh": {
+            "$ref": "#/components/schemas/GitHubRefresh"
           }
         }
       },
@@ -3144,6 +3211,86 @@
               {
                 "type": "null"
               }
+            ]
+          }
+        }
+      },
+      "ReviewGate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "passed",
+              "changes_requested",
+              "pending",
+              "not_checked",
+              "stale"
+            ]
+          },
+          "source": {
+            "enum": [
+              "administrator_policy",
+              "local_fast_contract",
+              "not_checked"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "GitHubRefresh": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "last_success_at",
+          "retry_at",
+          "interval_seconds"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "not_checked",
+              "querying",
+              "success",
+              "failed",
+              "rate_limited"
+            ]
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interval_seconds": {
+            "enum": [
+              0,
+              60,
+              300
             ]
           }
         }

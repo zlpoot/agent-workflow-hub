@@ -63,20 +63,20 @@ test('read-only adapter checks live GitHub facts, finite queue, cache, scope and
   assert.deepEqual(await h.adapter.observe(['foreign']),[]);assert.equal(h.requests.length,0);
   mkdirSync(join(h.root,'.handoff','local-fast','checks'),{recursive:true});
   writeFileSync(join(h.root,'.handoff','local-fast','checks',`1-${head}.json`),JSON.stringify({mode:'local-fast',head,logs:[{command:h.state.checks[0],exit_code:0,stdout:'private raw output',stderr:'private raw error'}]}));
-  const tasks=await h.adapter.observe(['p']);assert.equal(tasks[0].state,'completed');assert.equal(tasks[0].watcher.running,false);assert.equal(tasks[0].machine.name,'Test machine');
+  const tasks=await h.adapter.observe(['p'],[],{refresh_github:true});assert.equal(tasks[0].state,'completed');assert.equal(tasks[0].watcher.running,false);assert.equal(tasks[0].machine.name,'Test machine');
   assertContract('TaskResponse',{contract_version:'1.0',authority_verified:false,item:tasks[0]});
   const serialized=JSON.stringify(tasks);assert(!serialized.includes(h.root));assert(!serialized.includes(h.watcher));assert(!serialized.includes('executable'));
   assert(!serialized.includes('private raw'));assert.equal(tasks[0].stage.status,'passed');
-  assert(h.requests.every(r=>r.command==='git'||r.args[0]==='api'&&r.args[1]==='--method'&&r.args[2]==='GET'&&(r.args[3]===`repos/${repo}`||r.args[3].startsWith(`repos/${repo}/`))));
-  const count=h.requests.length;await h.adapter.observe(['p']);assert.equal(h.requests.length,count);
-  h.advance();h.deny();const unknown=(await h.adapter.observe(['p']))[0];assert.equal(unknown.state,'unknown');assert.equal(unknown.review,null);assert.equal(unknown.observations.at(-1).status,'permission_denied');assert.equal(unknown.active_actor,null);
+  assert(h.requests.every(r=>r.command==='git'||r.args[0]==='api'&&r.args.includes('--method')&&r.args.includes('GET')&&(r.args.at(-1)===`repos/${repo}`||r.args.at(-1).startsWith(`repos/${repo}/`))));
+  const count=h.requests.length;await h.adapter.observe(['p'],[],{refresh_github:true});assert.equal(h.requests.length,count);
+  h.advance();h.deny();const unknown=(await h.adapter.observe(['p'],[],{refresh_github:true}))[0];assert.equal(unknown.state,'unknown');assert.equal(unknown.review_gate.status,'stale');assert.equal(unknown.observations.at(-1).status,'permission_denied');assert.equal(unknown.active_actor,null);
 });
 test('Watcher stopped, HEAD drift, actual executor PID, incomplete Stage and invalid binding stay honest',async t=>{
-  const h=adapterFixture(t);h.unmerged();h.state.tasks[0].phase='awaiting_review';h.save();mkdirSync(join(h.root,'.handoff','local-fast','checks'),{recursive:true});writeFileSync(join(h.root,'.handoff','local-fast','checks',`1-${head}.json`),JSON.stringify({mode:'local-fast',head,logs:[]}));let task=(await h.adapter.observe(['p']))[0];assert.equal(task.state,'blocked');assert.equal(task.stage.status,'not_checked');assert.match(task.blockers.join(' '),/Watcher/);
-  h.advance();h.drift();task=(await h.adapter.observe(['p']))[0];assert.equal(task.state,'blocked');assert.match(task.blockers.join(' '),/HEAD/);
-  h.advance();h.state.tasks[0].phase='developing';h.watch.attempts[0]={issue:1,status:'running',executor_pid:123};h.save();h.saveWatch();writeFileSync(join(h.watcher,'watcher.lock'),JSON.stringify({scope_version:'v1',pid:123}));task=(await h.adapter.observe(['p']))[0];assert.equal(task.active_actor.name,'Other Agent');assert.equal(task.state,'developing');
-  h.advance();h.state.tasks[0].phase='publishing';h.watch.attempts[0]={issue:1,status:'published'};h.save();h.saveWatch();writeFileSync(join(h.root,'.git','awh-local-fast','operation.lock'),'123');task=(await h.adapter.observe(['p']))[0];assert.equal(task.active_actor.role,'stage');assert.equal(task.state,'verifying');
-  h.advance();h.state.repository='foreign/repo';h.save();task=(await h.adapter.observe(['p']))[0];assert.equal(task.state,'unknown');assert.equal(task.issue.number,0);
+  const h=adapterFixture(t);h.unmerged();h.state.tasks[0].phase='awaiting_review';h.save();mkdirSync(join(h.root,'.handoff','local-fast','checks'),{recursive:true});writeFileSync(join(h.root,'.handoff','local-fast','checks',`1-${head}.json`),JSON.stringify({mode:'local-fast',head,logs:[]}));let task=(await h.adapter.observe(['p'],[],{refresh_github:true}))[0];assert.equal(task.state,'blocked');assert.equal(task.stage.status,'not_checked');assert.match(task.blockers.join(' '),/Watcher/);
+  h.advance();h.drift();task=(await h.adapter.observe(['p'],[],{refresh_github:true}))[0];assert.equal(task.state,'blocked');assert.match(task.blockers.join(' '),/HEAD/);
+  h.advance();h.state.tasks[0].phase='developing';h.watch.attempts[0]={issue:1,status:'running',executor_pid:123};h.save();h.saveWatch();writeFileSync(join(h.watcher,'watcher.lock'),JSON.stringify({scope_version:'v1',pid:123}));task=(await h.adapter.observe(['p'],[],{refresh_github:true}))[0];assert.equal(task.active_actor.name,'Other Agent');assert.equal(task.state,'developing');
+  h.advance();h.state.tasks[0].phase='publishing';h.watch.attempts[0]={issue:1,status:'published'};h.save();h.saveWatch();writeFileSync(join(h.root,'.git','awh-local-fast','operation.lock'),'123');task=(await h.adapter.observe(['p'],[],{refresh_github:true}))[0];assert.equal(task.active_actor.role,'stage');assert.equal(task.state,'verifying');
+  h.advance();h.state.repository='foreign/repo';h.save();task=(await h.adapter.observe(['p'],[],{refresh_github:true}))[0];assert.equal(task.state,'unknown');assert.equal(task.issue.number,0);
 });
 test('all fixtures conform to closed DTO; browser rejects injected credentials and unknown nested fields',()=>{
   for(const item of taskFixtures(now))assertContract('TaskResponse',{contract_version:'1.0',authority_verified:false,item});
@@ -94,9 +94,17 @@ test('CP native GitHub observer joins only configured managed tasks; cache inval
   const h=adapterFixture(t),c={project_id:'p',repository:repo,root:h.root};const adapter=new GitHubObservationAdapter([c],h.deps);
   const original=task();original.workflow='standard';original.id='cp:test';
   assert.deepEqual(await adapter.observe(['foreign'],[original]),[]);
-  let results=await adapter.observe(['p'],[original]);assert.equal(results[0].state,'completed');assert.equal(original.github_head,null);
-  h.unmerged();h.advance();results=await adapter.observe(['p'],[original]);assert.equal(results[0].state,'awaiting_merge');
-  h.advance();h.deny();results=await adapter.observe(['p'],[original]);assert.equal(results[0].state,'unknown');assert.equal(results[0].review,null);
+  let results=await adapter.observe(['p'],[original],{refresh_github:true});assert.equal(results[0].state,'completed');assert.equal(original.github_head,null);
+  h.unmerged();h.advance();results=await adapter.observe(['p'],[original],{refresh_github:true});assert.equal(results[0].state,'awaiting_review');
+  h.advance();h.deny();results=await adapter.observe(['p'],[original],{refresh_github:true});assert.equal(results[0].state,'unknown');assert.equal(results[0].review_gate.status,'stale');
+});
+test('two Viewer adapters share native reads while live local process state refreshes independently',async t=>{
+  const h=adapterFixture(t);h.unmerged();h.state.tasks[0].phase='developing';h.watch.attempts[0]={issue:1,status:'running',executor_pid:123};h.save();h.saveWatch();writeFileSync(join(h.watcher,'watcher.lock'),JSON.stringify({scope_version:'v1',pid:123}));
+  const second=new LocalFastObservationAdapter([h.config],h.deps);
+  const [one,two]=await Promise.all([h.adapter.observe(['p'],[],{refresh_github:true}),second.observe(['p'],[],{refresh_github:true})]);assert.equal(one[0].active_actor.name,'Other Agent');assert.equal(two[0].active_actor.name,'Other Agent');assert.equal(h.requests.filter(r=>r.command==='gh').length,7);
+  const ghAt=one[0].observations.find(o=>o.source==='github').observed_at;
+  h.advance();h.watch.attempts[0]={issue:1,status:'published'};h.saveWatch();rmSync(join(h.watcher,'watcher.lock'));
+  const updated=(await h.adapter.observe(['p']))[0];assert.equal(updated.active_actor,null);assert.equal(updated.watcher.running,false);assert.equal(updated.observations.find(o=>o.source==='github').observed_at,ghAt);assert.equal(h.requests.filter(r=>r.command==='gh').length,7);
 });
 test('task API authenticates, scopes adapters, rejects mutations/invalid filters and reads details',async t=>{
   const view={cursor:0,projects:[],runs:[],work_items:[],executors:[],events:[],policies:[]};
