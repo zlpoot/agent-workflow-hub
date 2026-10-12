@@ -3,8 +3,8 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { relative, isAbsolute, dirname, join } from 'node:path';
 import { validateHandoff } from './validator.js';
-import { allowedInstallation, loadTrustedPolicy, bindWorkflow, supportsRevision, type TaskBinding, type BuilderSelection } from './profiles.js';
-import { managedContext, digest, encode } from './admin/registry.js';
+import { allowedInstallation, loadTrustedPolicy, bindWorkflow, selectWorkflow, validateBuilderPolicy, supportsRevision, type TaskBinding, type BuilderSelection } from './profiles.js';
+import { managedContext, projectObservationContext, digest, encode } from './admin/registry.js';
 
 const API = 'https://api.github.com';
 const PERMISSIONS = { contents: 'write', issues: 'write', metadata: 'read', pull_requests: 'write' };
@@ -75,15 +75,21 @@ export function createJwt(appId: string, pem: Buffer | string, now: number): str
 }
 
 // Returns only fixed Builder operations. Credentials and generic API requests stay in this closure.
-export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' | 'revision' | 'revise' = 'deliver', adoption?: CommentAdoption) {
-  if (!['deliver','observe','recover','revision','revise'].includes(mode)) fail('Only frozen Tasks support restricted Builder modes');
-  const policy = loadTrustedPolicy();
-  const { profile, workflow } = bindWorkflow(selection, binding, policy);
-  const managedEnv = { ...process.env }, managed = managedContext(managedEnv);
+export async function connectBuilder(overrides: Partial<Dependencies> = {}, selection?: BuilderSelection, binding?: TaskBinding, mode: 'deliver' | 'observe' | 'recover' | 'revision' | 'revise' | 'queue' = 'deliver', adoption?: CommentAdoption) {
+  if (!['deliver','observe','recover','revision','revise','queue'].includes(mode)) fail('Only frozen Tasks support restricted Builder modes');
+  if (mode === 'queue' && (binding || adoption)) fail('Queue observation cannot bind delivery or adoption');
+  const managedEnv = { ...process.env }, queue = mode === 'queue' ? projectObservationContext(managedEnv) : null;
+  const policy = queue ? validateBuilderPolicy(queue.project.builder_policy,true) : loadTrustedPolicy();
+  const { profile, workflow } = queue ? selectWorkflow(selection,policy) : bindWorkflow(selection, binding, policy);
+  const managed = queue ? null : managedContext(managedEnv);
   const revision = managed?.proposed.task?.revision;
   if (mode === 'revise' && !revision || revision && mode === 'deliver') fail('Revision requires a separate exact-head administrator grant and revise mode');
-  if (mode !== 'deliver' && !binding && !(managed && ['observe','revise','revision'].includes(mode))) fail('Only frozen Tasks support restricted Builder modes');
+  if (mode !== 'deliver' && !queue && !binding && !(managed && ['observe','revise','revision'].includes(mode))) fail('Only frozen Tasks support restricted Builder modes');
   const checkManaged = () => {
+    if (queue) {
+      const current = projectObservationContext(managedEnv);
+      if (current.version !== queue.version || digest(encode(current.project)) !== digest(encode(queue.project))) fail('Queue project approval changed');
+    }
     if (!managed) return;
     const current = managedContext(managedEnv), task = managed.proposed.task!;
     if (!current || current.version !== managed.version || digest(encode(current.policy)) !== digest(encode(policy)) ||
@@ -346,7 +352,7 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       fail('Revision comment-only token scope, permissions or expiry mismatch');
     secrets.push(v.token); return { token: v.token as string, expiry: Date.parse(v.expires_at) };
   };
-  if (managed) {
+  if (managed || queue) {
     // Read actual Issue/base with a single-repository read token before any write token.
     const permissions = { contents: 'read', issues: 'read', pull_requests: 'read' };
     const observed = await request(`/app/installations/${inst.id}/access_tokens`, jwt, 'POST', { repositories: [REPO.split('/')[1]], permissions });
@@ -357,13 +363,15 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     observer = { token: observed.token, expiry: Date.parse(observed.expires_at) };
     knownSecrets.push({ value: observed.token, reason: 'known_installation_token' },
       { value: Buffer.from(`x-access-token:${observed.token}`).toString('base64'), reason: 'known_basic_credential' });
-    const task = managed.proposed.task!;
-    const issue = await request(`${ROOT}/issues/${task.issue}`, observed.token);
-    const base = await request(`${ROOT}/git/ref/heads/${profile.base}`, observed.token);
-    if (issue.number !== task.issue || issue.pull_request || !['open','closed'].includes(issue.state) || issue.html_url !== `https://github.com/${REPO}/issues/${task.issue}` ||
-        mode !== 'observe' && (issue.state !== 'open' || base.object?.sha !== task.base_sha)) fail('Managed Issue or remote base differs; obtain a new approval');
+    if (managed) {
+      const task = managed.proposed.task!;
+      const issue = await request(`${ROOT}/issues/${task.issue}`, observed.token);
+      const base = await request(`${ROOT}/git/ref/heads/${profile.base}`, observed.token);
+      if (issue.number !== task.issue || issue.pull_request || !['open','closed'].includes(issue.state) || issue.html_url !== `https://github.com/${REPO}/issues/${task.issue}` ||
+          mode !== 'observe' && (issue.state !== 'open' || base.object?.sha !== task.base_sha)) fail('Managed Issue or remote base differs; obtain a new approval');
+    }
   }
-  const { token, expiry } = managed ? observer! : mode === 'revision' ? await revisionToken() : mode !== 'deliver' ? observer! : await mint(true);
+  const { token, expiry } = managed || queue ? observer! : mode === 'revision' ? await revisionToken() : mode !== 'deliver' ? observer! : await mint(true);
   const live = () => { checkManaged(); if (d.now() >= expiry) fail('Installation token expired; rerun the command'); };
   const authorizeOperation = (operation: 'push' | 'draft_pr' | 'evidence' | 'handoff') => {
     live(); if (managed && !managed.proposed.task!.provider_operations.includes(operation)) fail('Managed Provider operation is not authorized');
@@ -507,6 +515,13 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
     if (!Array.isArray(prs) || prs.length !== 0) fail('Recovery requires no PR on the canonical Task branch');
   }
   return Object.freeze({
+    readFlowIssue: async (issue: number) => {
+      if (!queue || !positive(issue)) fail('Project queue observation required');
+      const value = await call(`${ROOT}/issues/${issue}`), base = await call(`${ROOT}/git/ref/heads/${profile.base}`);
+      if (value.number !== issue || value.pull_request || !['open','closed'].includes(value.state) || value.html_url !== `https://github.com/${REPO}/issues/${issue}` ||
+          !sha(base.object?.sha)) fail('Queue Issue or remote base mismatch');
+      return {repository:REPO,issue,state:value.state as 'open'|'closed',url:value.html_url as string,base:profile.base,base_sha:base.object.sha as string};
+    },
     readRevisionRef: async () => {
       if (!['observe','revision','revise'].includes(mode)) fail('Only revision observation can read its fixed remote ref');
       return readFeatureRefState();
@@ -686,11 +701,15 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       revisionComments.add(c.id); return c;
     },
     // Read-only closeout: never submit Review, merge or Issue mutations.
-    readLifecycle: async (number: number, expectedHead: string) => {
+    readLifecycle: async (number: number, expectedHead: string, item?: {issue:number;branch:string}) => {
+      if (item && (!queue || !positive(item.issue) || item.branch !== (workflow.branch_mode === 'issue_prefix' ? workflow.branch + item.issue : workflow.branch) ||
+          workflow.branch_mode === 'fixed' && item.issue !== workflow.work_item.issue)) fail('Queue lifecycle scope mismatch');
+      if (queue && !item) fail('Queue lifecycle requires exact Work Item');
+      const branch = item?.branch ?? BRANCH, issueNumber = item?.issue ?? workflow.work_item.issue;
       if (!sha(expectedHead) || binding && expectedHead !== binding.source_sha) fail('Invalid expected head');
       const inspect = (p: Json) => {
         if (p.number !== id(number) || p.user?.login !== actor || p.user?.type !== 'Bot' ||
-            p.head?.sha !== expectedHead || p.head?.ref !== BRANCH || p.base?.ref !== profile.base ||
+            p.head?.sha !== expectedHead || p.head?.ref !== branch || p.base?.ref !== profile.base ||
             p.head?.repo?.full_name !== REPO || p.base?.repo?.full_name !== REPO ||
             !['open','closed'].includes(p.state) || typeof p.merged !== 'boolean' ||
             p.merged && (p.state !== 'closed' || !sha(p.merge_commit_sha)))
@@ -717,9 +736,9 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
       const blocked = decisions.some(r => r.state === 'CHANGES_REQUESTED');
       const approval = blocked ? undefined : decisions.find(r => r.state === 'APPROVED' && r.commit_id === expectedHead);
       let issueClosed = false;
-      if (workflow.work_item.repo === REPO) {
-        const issue = await call(ROOT + '/issues/' + workflow.work_item.issue);
-        if (issue.number !== workflow.work_item.issue || issue.pull_request || !['open','closed'].includes(issue.state))
+      if (item || workflow.work_item.repo === REPO) {
+        const issue = await call(ROOT + '/issues/' + issueNumber);
+        if (issue.number !== issueNumber || issue.pull_request || !['open','closed'].includes(issue.state))
           fail('Lifecycle Work Item mismatch');
         issueClosed = issue.state === 'closed';
       }
@@ -728,10 +747,12 @@ export async function connectBuilder(overrides: Partial<Dependencies> = {}, sele
         fail('Lifecycle changed during read; retry read explicitly');
       return { repository: REPO, pull_request: number, head_sha: expectedHead,
         state: after.state, merged: after.merged as boolean, merge_sha: after.merged ? after.merge_commit_sha as string : null,
-        issue: workflow.work_item.issue, issue_repository: workflow.work_item.repo, issue_closed: issueClosed,
+        issue: issueNumber, issue_repository: item ? REPO : workflow.work_item.repo, issue_closed: issueClosed,
         review: approval ? { id: approval.id as number, login: approval.user.login as string,
           subject_sha: approval.commit_id as string, url: 'https://github.com/' + REPO + '/pull/' + number + '#pullrequestreview-' + approval.id } : null,
-        changes_requested: blocked, authority_verified: false as const };
+        changes_requested: blocked,
+        changes_review: blocked ? {id:decisions.find(r => r.state === 'CHANGES_REQUESTED')!.id as number} : null,
+        authority_verified: false as const };
     },
     createComment: async (number: number, body: string) => {
       writable();

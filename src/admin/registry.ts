@@ -196,6 +196,19 @@ export function approvedProject(trust: Trust, state: State, version: string, now
   if (index < 0 || state.entries.some(entry => entry.target_version === version)) deny('project_unapproved_or_revoked');
   return projectPolicy(readEntry(trust,state.entries[index]!,state.receipt_ids[index]!,now).policy);
 }
+/** Observation uses an existing independently approved Project, never a task proposal. */
+export function projectObservationContext(env: NodeJS.ProcessEnv = process.env, now = new Date().toISOString()) {
+  if (!timestamp(now)) deny('clock');
+  const context = trustContext(env), {state} = snapshot(context.trust), selected = env.AWH_ADMIN_VERSION;
+  if (!id(selected)) deny('explicit_approved_version_required');
+  const index = state.entries.findIndex(e => e.version === selected && e.action !== 'revoke');
+  if (index < 0 || state.entries.some(e => e.target_version === selected)) deny('unapproved_or_revoked');
+  const entry = state.entries[index]!, record = readEntry(context.trust,entry,state.receipt_ids[index]!,now);
+  const version = entry.action === 'project' ? selected : record.proposed.policy_version!;
+  const project = approvedProject(context.trust,state,version,now);
+  if (!project.stages.includes('observe')) deny('stage_not_authorized');
+  return {...context,version,project};
+}
 /** Revision is a new immutable grant; its original task and policy remain independently readable. */
 export function revisionOriginal(trust: Trust, state: State, proposed: Proposal, now: string) {
   const task = proposed.task!, r = task.revision;
