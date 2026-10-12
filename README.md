@@ -4,6 +4,8 @@ Windows sequential Issue development: [M1 Fast Flow Quick Start](docs/windows-fa
 
 AWH is a Human-gated development workflow toolkit. It connects repository identity, an approved Profile and Work Item, a local executor, Control Plane Run/Event records, and GitHub App delivery. GitHub remains the source of truth for code, Review and merge. Builder verification is not independent Review.
 
+[Windows Local Fast](docs/windows-local-fast.md) provides an explicit personal alternative: confirm one repository and Issue queue once, then use existing Git/GitHub CLI authentication for sequential development, automatic Commit/Push and Draft PRs. It needs no administrator Policy, digest, launcher or CP; it produces local verification and ordinary PRs only. Strict delivery below keeps its existing authorization and artifacts.
+
 The Node.js 24+ / TypeScript / pnpm single package contains Protocol, SQLite Control Plane, Client/Resident, Dashboard/Viewer, Project Enrollment and an App-only Builder. Repository identity in a project manifest does not grant execution or Provider authority. There are no built-in business repositories, developer Issue mappings or machine defaults.
 
 The [develop-to-pr Stage contract and Codex adapter](docs/develop-to-pr.md) provide one controlled entry through Draft PR, exact-head Evidence, confirmed Handoff and acknowledged CP Run/Event facts, then stop for independent Review. Managed same-PR revisions require a separate exact old/new HEAD authorization.
