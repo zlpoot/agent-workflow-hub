@@ -39,6 +39,11 @@ export function harness(t) {
       }
       const value = flag => args[args.indexOf(flag) + 1];
       if (args[0] === 'api') {
+        if (args[1] === 'graphql') {
+          const number = Number(args.find(a => a.startsWith('number=')).split('=')[1]), p = prs.find(p => p.number === number);
+          const closing = [...p.body.matchAll(/(?:Closes|Fixes|Resolves) #(\d+)/gi)].map(match => ({ number: Number(match[1]), repository: { nameWithOwner: repository } }));
+          return JSON.stringify({ data: { repository: { pullRequest: { closingIssuesReferences: { totalCount: closing.length, nodes: closing.slice(0,2) } } } } });
+        }
         const path = args.at(-1), pages = args.includes('--slurp'), wrap = data => JSON.stringify(pages ? [data] : data);
         if (path === 'user') return wrap({ login: 'synthetic-owner', id: userId, type: 'User' });
         if (path === `repos/${repository}`) return wrap({ id: 42, full_name: repository, default_branch: 'main', permissions: { push: permission } });

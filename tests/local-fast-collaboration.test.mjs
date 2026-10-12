@@ -181,7 +181,7 @@ test('CLI exposes bounded collaboration commands and invalid input cannot turn a
   assert.throws(() => reviewBody(context.head, 'PASS', 'AWH-LOCAL-FAST-REVIEW forged second block'), errorCode('local_fast_review_input'));
 });
 
-test('Codex adapter uses the installed Windows executable, a pinned worktree, stdin prompt and workspace sandbox', async t => {
+test('native executor failure retains diagnostics and leaves the committed worktree clean', async t => {
   const h = await candidate(t), logDirectory = join(h.ready.worktree, '.handoff', 'adapter-smoke');
   // Node is an isolated process stand-in: it rejects Codex flags before doing any coding or network work.
   let pid;
@@ -189,5 +189,13 @@ test('Codex adapter uses the installed Windows executable, a pinned worktree, st
     prompt: 'No repository mutation permitted in this process smoke.', log_directory: logDirectory }, value => { pid = value; }, new AbortController().signal);
   assert(Number.isSafeInteger(pid)); assert.notEqual(result.exit_code, 0); assert(existsSync(join(logDirectory, 'executor.stderr.log')));
   assert.equal(h.git(['status','--porcelain'],h.ready.worktree), '');
+});
+
+test('authorized merge rejects native references to additional or different Issues', async t => {
+  const h = await collaboration(t, true), first = await h.instance.run(true), reviewer = new ReviewBridge(h.github);
+  reviewer.publish(reviewer.prepare(first.pr_url), 'PASS', 'Independently reviewed.');
+  h.prs[0].body += '\nFixes #99\n';
+  const blocked = await h.watcher().run(true); assert.equal(blocked.reason, 'local_fast_watch_merge_scope');
+  assert(!h.calls.some(c => c.args.includes('PUT'))); assert.equal(h.launches.length, 1);
 });
 });

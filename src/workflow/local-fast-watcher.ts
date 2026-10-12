@@ -147,6 +147,10 @@ export class LocalFastWatcher {
     this.exact(grant);
     const gate = await this.fast().flow();
     if (gate.head !== facts.head || gate.review?.decision !== 'PASS' || !same(gate.review, facts.review) || !gate.github_checks_passed) clientFail('local_fast_watch_head', 'Review changed while making the authorized PR ready.');
+    const closing = this.deps.github.closingIssues(grant.repository, pr);
+    if (closing.total !== 1 || closing.issues.length !== 1 || closing.issues[0]?.repository !== grant.repository || closing.issues[0]?.number !== facts.issue)
+      clientFail('local_fast_watch_merge_scope', 'The native merge would close a different or additional Issue; the saved queue cannot authorize it.');
+    this.exact(grant);
     const merged = this.deps.github.write(`repos/${grant.repository}/pulls/${pr}/merge`, 'PUT', { sha: facts.head, merge_method: 'merge' });
     const readback = this.deps.github.read(`repos/${grant.repository}/pulls/${pr}`), issue = this.deps.github.read(`repos/${grant.repository}/issues/${facts.issue}`);
     if (!merged.merged || !readback.merged_at || readback.head?.sha !== facts.head || issue.state !== 'closed') clientFail('local_fast_watch_merge_readback', 'Actual merge and Issue closure were not confirmed; do not advance.');
