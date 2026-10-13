@@ -86,10 +86,10 @@ test('cache refreshes own/external writes, cursor-constant metadata and presence
   // A new connection from a just-fetched REST watermark must not be rejected by the 250ms cache.
   assert.equal(read(true).projection.timeline(null, 1, 100).snapshot_cursor, 1);
 });
-async function service(t, enabled = true) {
+async function service(t, enabled = true, v2 = false) {
   const h = setup(t), token = randomBytes(32).toString('base64url');
   const authenticate = createViewerAuthenticator([{ ...h.viewer, session_sha256: createHash('sha256').update(token).digest('hex'), expires_at: new Date(Date.now() + 3600000).toISOString() }]);
-  const gateway = createDashboardGateway(enabled ? { enabled, store: h.reader, authenticate, assets: 'dist/dashboard-ui' } : {});
+  const gateway = createDashboardGateway(enabled ? { enabled, store: h.reader, authenticate, assets: 'dist/dashboard-ui', ...(v2 ? { assetsV2: 'dist/dashboard-v2' } : {}) } : {});
   await new Promise(resolve => gateway.server.listen(0, '127.0.0.1', resolve)); t.after(() => gateway.close());
   const origin = `http://127.0.0.1:${gateway.server.address().port}`;
   const get = (path, headers = {}, method = 'GET') => fetch(origin + path, { method, headers: { Cookie: 'awh_viewer=' + token, ...headers } });
@@ -98,6 +98,44 @@ async function service(t, enabled = true) {
 test('gateway defaults OFF and opt-in rejects incomplete configuration', async t => {
   assert.throws(() => createDashboardGateway({ enabled: true }), /explicit read store/);
   const h = await service(t, false); assert.equal((await h.get('/dashboard')).status, 404); assert.equal((await h.get('/dashboard/v1/snapshot')).status, 404);
+});
+
+test('V2 assets use the same scoped session, closed CSP routes and GET-only boundary while V1 stays available', async t => {
+  const h = await service(t, true, true);
+  for (const path of ['/dashboard/v2', '/dashboard/v2/', '/dashboard/v2/app.js', '/dashboard/v2/app.css']) {
+    const response = await h.get(path); assert.equal(response.status, 200);
+    assert(response.headers.get('content-security-policy').includes("script-src 'self'"));
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const body = await response.text();
+    if (path.endsWith('v2') || path.endsWith('v2/')) { assert(body.includes('/dashboard/v2/app.js')); assert(!body.includes('awh-dataset')); }
+    for (const method of ['POST','PUT','PATCH','DELETE','OPTIONS','HEAD']) assert.equal((await h.get(path, {}, method)).status, 405);
+    for (const headers of [{Cookie:''},{Origin:'https://evil.invalid'},{'Sec-Fetch-Site':'cross-site'},{Authorization:'Bearer invalid'}])
+      assert.equal((await h.get(path, headers)).status, 401);
+  }
+  for (const path of ['/dashboard/v2/validators.cjs','/dashboard/v2/build-report.json','/dashboard/v2?token=invalid','/dashboard/v2/unknown'])
+    assert.equal((await h.get(path)).status, 404);
+  assert.equal((await h.get('/dashboard')).status, 200);
+  assert.equal((await h.get('/dashboard/app.js')).status, 200);
+  const snapshot = await (await h.get('/dashboard/v1/snapshot')).json();
+  assert.deepEqual(snapshot.projects.map(p => p.id), h.viewer.project_ids);
+  assert(snapshot.tasks.every(task => !task.fixture)); assert.equal(snapshot.authority_verified, false);
+  const v1 = await service(t); assert.equal((await v1.get('/dashboard/v2')).status, 404);
+});
+
+test('V2 document navigation bootstraps and renews one scoped HttpOnly session; APIs and assets cannot bootstrap', async t => {
+  const h = setup(t); let clock = Date.now();
+  const gateway = createDashboardGateway({enabled:true,store:h.reader,assets:'dist/dashboard-ui',assetsV2:'dist/dashboard-v2',localBrowserViewer:h.viewer,now:()=>clock});
+  await new Promise(resolve => gateway.server.listen(0,'127.0.0.1',resolve)); t.after(() => gateway.close());
+  const origin = `http://127.0.0.1:${gateway.server.address().port}`;
+  const navigation = {'Sec-Fetch-Site':'none','Sec-Fetch-Mode':'navigate','Sec-Fetch-Dest':'document'};
+  const navigate = path => new Promise((resolve,reject) => { const req = request(origin+path,{headers:navigation},res => {res.resume();res.on('end',()=>resolve({status:res.statusCode,cookie:res.headers['set-cookie']?.[0]}));});req.on('error',reject);req.end(); });
+  for (const path of ['/dashboard/v2/app.js','/dashboard/v1/snapshot','/dashboard/v2?token=invalid']) assert.equal((await navigate(path)).status,401);
+  const first = await navigate('/dashboard/v2'); assert.equal(first.status,200); assert(first.cookie.includes('HttpOnly; SameSite=Strict; Path=/dashboard'));
+  const headers = {Cookie:first.cookie.split(';')[0]};
+  assert.equal((await fetch(origin+'/dashboard',{headers})).status,200);
+  assert.equal((await fetch(origin+'/dashboard/v1/snapshot',{headers})).status,200);
+  clock+=3600001; assert.equal((await fetch(origin+'/dashboard/v1/snapshot',{headers})).status,401);
+  const renewed = await navigate('/dashboard/v2/'); assert.equal(renewed.status,200); assert.notEqual(first.cookie,renewed.cookie);
 });
 test('protected same-origin UI/assets/REST have CSP and closed routes without Client or provider writes', async t => {
   const h = await service(t);

@@ -31,7 +31,9 @@ try {
     const spec=specs[component], pkgStage=join(stage,component); mkdirSync(pkgStage);
     let build, filename;
     if(component==='awh-dashboard-ui') {
-      const files=tree(join(root,'dist/dashboard-ui')); delete files['build-inputs.json']; files['dashboard-v1.openapi.json']=readFileSync(join(root,'contracts/dashboard-v1.openapi.json'));
+      const files=tree(join(root,'dist/dashboard-ui')); delete files['build-inputs.json'];
+      for (const name of ['index.html','app.js','app.css']) files['v2/'+name]=readFileSync(join(root,'dist/dashboard-v2',name));
+      files['dashboard-v1.openapi.json']=readFileSync(join(root,'contracts/dashboard-v1.openapi.json'));
       build=metadata(component,files,{}); files['awh-build.json']=Buffer.from(JSON.stringify(build,null,2)+'\n'); filename=`${component}-${spec.version}-static.zip`; writeFileSync(join(output,filename),zipFiles(files),{flag:'wx'});
     } else {
       const seen=new Set(), direct=new Set();
@@ -50,6 +52,7 @@ try {
       for(const p of seen) { const dest=join(pkgStage,'dist',p); mkdirSync(dirname(dest),{recursive:true}); cpSync(join(root,'dist',p),dest); }
       if(component==='awh-viewer') {
         for(const name of ['index.html','app.js','app.css','validators.cjs']) { const path=join(pkgStage,'dist/dashboard-ui',name); mkdirSync(dirname(path),{recursive:true}); cpSync(join(root,'dist/dashboard-ui',name),path); }
+        for(const name of ['index.html','app.js','app.css']) { const path=join(pkgStage,'dist/dashboard-v2',name); mkdirSync(dirname(path),{recursive:true}); cpSync(join(root,'dist/dashboard-v2',name),path); }
         cpSync(join(root,'dist/dashboard/owner-confirm.ps1'),join(pkgStage,'dist/dashboard/owner-confirm.ps1'));
       }
       // Exact contract bytes accompany every package, independent of external configuration.

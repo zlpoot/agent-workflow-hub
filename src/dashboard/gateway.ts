@@ -13,7 +13,7 @@ import { enrollmentBody, type createEnrollmentService } from './enrollment.js';
 import type { TaskAdapter } from './tasks.js';
 import { githubAppBody, type createGithubAppManagement } from './github-app-management.js';
 
-export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; now?: () => number;
+export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; assetsV2?: string; now?: () => number;
   localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding>; enrollment?: ReturnType<typeof createEnrollmentService>; tasks?: TaskAdapter;
   githubApp?: ReturnType<typeof createGithubAppManagement> }
 export const dashboardHeaders = {
@@ -35,6 +35,15 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
     ['/dashboard/app.js', { type: 'text/javascript; charset=utf-8', body: readFileSync(resolve(options.assets!, 'app.js')) }],
     ['/dashboard/app.css', { type: 'text/css; charset=utf-8', body: readFileSync(resolve(options.assets!, 'app.css')) }]
   ]) : new Map();
+  // V2 is a separate closed asset set; V1-only sidecars remain supported.
+  if (options.enabled && options.assetsV2) {
+    for (const [route, name, type] of [
+      ['/dashboard/v2', 'index.html', 'text/html; charset=utf-8'],
+      ['/dashboard/v2/', 'index.html', 'text/html; charset=utf-8'],
+      ['/dashboard/v2/app.js', 'app.js', 'text/javascript; charset=utf-8'],
+      ['/dashboard/v2/app.css', 'app.css', 'text/css; charset=utf-8']
+    ] as const) files.set(route, { type, body: readFileSync(resolve(options.assetsV2, name)) });
+  }
   const streams = new Set<ServerResponse>();
   const server = createServer({ maxHeaderSize: 16384, requestTimeout: 15000, headersTimeout: 10000 }, async (request, response) => {
     for (const [key, value] of Object.entries(dashboardHeaders)) response.setHeader(key, value);

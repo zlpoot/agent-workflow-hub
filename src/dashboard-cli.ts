@@ -49,12 +49,13 @@ export async function main(args: string[]) {
   const store = new DashboardReadStore(c.database, () => enrollment?.bindings() ?? []);
   // Assets are relative to the installed product, never an editable config path.
   const assets = join(dirname(fileURLToPath(import.meta.url)), 'dashboard-ui');
+  const assetsV2 = join(dirname(fileURLToPath(import.meta.url)), 'dashboard-v2');
   readFileSync(join(assets, 'index.html'));
-  const gateway = createDashboardGateway({ enabled: true, store, assets, localBrowserViewer: c.viewer, onboarding: createLocalOnboarding(c.local_bindings), enrollment,
+  const gateway = createDashboardGateway({ enabled: true, store, assets, assetsV2, localBrowserViewer: c.viewer, onboarding: createLocalOnboarding(c.local_bindings), enrollment,
     tasks:combineTaskAdapters(new LocalFastObservationAdapter(c.local_fast_observations??[]),new GitHubObservationAdapter(c.github_observations??[])), githubApp });
   try { await new Promise<void>((resolve, reject) => { gateway.server.once('error', reject); gateway.server.listen(c.port, '127.0.0.1', resolve); }); }
   catch { await gateway.close(); store.close(); return fail(500, 'viewer_start', 'Viewer port unavailable; preserve the existing listener'); }
-  console.log(JSON.stringify({ url: `http://127.0.0.1:${c.port}/dashboard`, access: 'explicit_local_os_user', expires_in_seconds: 3600, database: 'existing_v2_readonly', authority_verified: false }));
+  console.log(JSON.stringify({ url: `http://127.0.0.1:${c.port}/dashboard`, v2_url: `http://127.0.0.1:${c.port}/dashboard/v2`, access: 'explicit_local_os_user', expires_in_seconds: 3600, database: 'existing_v2_readonly', authority_verified: false }));
   await new Promise<void>(resolve => {
     const stop = () => { process.off('SIGINT', stop); process.off('SIGTERM', stop); void gateway.close().finally(() => { store.close(); resolve(); }); };
     process.once('SIGINT', stop); process.once('SIGTERM', stop);

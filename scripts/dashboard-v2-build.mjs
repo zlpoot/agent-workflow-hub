@@ -29,7 +29,7 @@ const result = await build({
   define: { "process.env.NODE_ENV": '"production"' },
 });
 const forbidden = Object.keys(result.metafile.inputs).filter((path) =>
-  /^(?:\.\.\/)?src\/|^node:|^.*\/builder\.(?:ts|js)$/.test(path),
+  /^(?:\.\.\/)?(?:src|tests|examples|scripts)\/|^node:|^.*\/builder\.(?:ts|js)$/.test(path),
 );
 if (forbidden.length)
   throw new Error(

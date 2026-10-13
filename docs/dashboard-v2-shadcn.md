@@ -1,5 +1,7 @@
 # Dashboard V2 PoC B · Issue #87
 
+> 历史 PoC 与选型记录。PR #88 已合并，Owner 取消第二轮同题实验。当前正式只读 Viewer 接入、构建和回退方式见 [Issue #90 集成说明](dashboard-v2-viewer.md)；下文 PoC 限制与验证仅对应原提交。
+
 本 PoC 从 PR #85 已合并的固定 main 基线 `8470e51bec7c5a5a5c4301b6900c6a8c5cc05503` 创建，分支 `codex/dashboard-poc-shadcn`。Owner 于 2026-10-13 正式启动；后续明确豁免本任务 AGENTS.md 的发布授权要求。发布使用已有受保护 GitHub App，保持 Draft，停在 `AWAITING_INDEPENDENT_REVIEW`。最终精确 HEAD 和验证命令退出码记录在 Draft PR 与本地 `.handoff/final-verification.json`；不生成正式 Builder Evidence / Handoff / CP Run。
 
 ## 原 PR 复审修复（R1）

@@ -36,6 +36,11 @@ export function validateRelease(directory,expectedHead) {
   assert.deepEqual(readdirSync(base).sort(),[...manifest.artifacts.map(a=>a.filename),'release-manifest.json','SHA256SUMS','install-windows.md'].sort(),'Unexpected release directory contents');
   const viewer=manifest.artifacts.find(a=>a.component==='awh-viewer'),ui=manifest.artifacts.find(a=>a.component==='awh-dashboard-ui');
   for(const name of ['index.html','app.js','app.css','validators.cjs'])assert.equal(viewer.build.files['dist/dashboard-ui/'+name],ui.build.files[name],'Viewer/UI built bytes differ');
+  for(const name of ['index.html','app.js','app.css']) {
+    assert(ui.build.files['v2/'+name], 'Missing V2 UI bytes: '+name);
+    assert(viewer.build.files['dist/dashboard-v2/'+name], 'Missing V2 Viewer bytes: '+name);
+    assert.equal(viewer.build.files['dist/dashboard-v2/'+name],ui.build.files['v2/'+name],'Viewer/V2 UI built bytes differ');
+  }
   return {...result,checksums:'PASS',archive_audit:'PASS',runtime_closure:'PASS'};
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(resolve(process.argv[1])).href) {

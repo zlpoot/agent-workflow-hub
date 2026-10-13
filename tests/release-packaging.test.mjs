@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { gzipSync } from 'node:zlib';
+import { mkdtempSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, basename } from 'node:path';
 import { ids,specs,provenancePaths,sha256,checkArtifact,checkPortableClosure,auditFiles } from '../scripts/release-lib.mjs';
 import { zipFiles,readZip,readTar,executableTar } from '../scripts/release-archive.mjs';
-import { checkManifest,checkSums } from '../scripts/release-validate.mjs';
+import { checkManifest,checkSums,validateRelease } from '../scripts/release-validate.mjs';
 
 // Synthetic archive bytes test rejection modes; never platform acceptance evidence.
 const source='a'.repeat(40),provenance=Object.fromEntries(provenancePaths.map(p=>[p,sha256(Buffer.from(p))]));
@@ -21,14 +24,16 @@ function asset(component,modify=()=>{}) {
     files['package.json']=Buffer.from(JSON.stringify({name:spec.name,version:spec.version,private:true,type:'module',engines:{node:'>=24'},bin:spec.bin,dependencies:{}}));
     for(const path of Object.values(spec.bin))files[path]=Buffer.from('#!/usr/bin/env node\n');
   }
+  if(component==='awh-viewer')for(const path of ['index.html','app.js','app.css','validators.cjs'])files['dist/dashboard-ui/'+path]=Buffer.from(path);
+  if(component==='awh-viewer'||target==='static')for(const name of ['index.html','app.js','app.css'])files[(target==='static'?'v2/':'dist/dashboard-v2/')+name]=Buffer.from('v2/'+name);
   files[target==='static'?'dashboard-v1.openapi.json':'contracts/dashboard-v1.openapi.json']=Buffer.from('contracts/dashboard-v1.openapi.json');
   const build={schema_version:'1.0',kind:'awh_build',component,target,source_commit:source,source_clean:true,version:spec.version,node_major_min:24,build_environment:{os:'win32',cpu:'x64',node:'v24.21.0',npm:'11.0.0',pnpm:'not-used',typescript:'5.9.3',esbuild:'0.28.2'},provenance,runtime_dependencies:{},files:{}};
   modify(files,build);build.files=Object.fromEntries(Object.entries(files).map(([path,bytes])=>[path,sha256(bytes)]));files['awh-build.json']=Buffer.from(JSON.stringify(build));
   const bytes=target==='static'?zipFiles(files):tar(files);
   return {bytes,record:{component,target,filename:`${component}-${spec.version}-${target}.${target==='static'?'zip':'tgz'}`,source_commit:source,size_bytes:bytes.length,sha256:sha256(bytes),build}};
 }
-function setup() {
-  const assets=ids.map(id=>asset(id)),files=new Map(assets.map(a=>[a.record.filename,a.bytes])),manifest={schema_version:'1.0',kind:'awh_release_manifest',source_commit:source,source_clean:true,build_environment:assets[0].record.build.build_environment,provenance,components:specs,artifacts:assets.map(a=>a.record),compatibility:{node:'>=24',node_tarballs:'OS-neutral JS; Git required by Client/Builder',windows:['PowerShell 5.1','PowerShell 7'],cp_database_schema:2,protocol:'1.0',dashboard_api:'1.0.0',handoff:'0.1',new_external_database_required:true,mac_execution:'NOTRUN'},package_verification:'NOTRUN',release_gate:'NOT_AUTHORIZED'};
+function setup(modify=()=>{}) {
+  const assets=ids.map(id=>asset(id,(files,build)=>modify(id,files,build))),files=new Map(assets.map(a=>[a.record.filename,a.bytes])),manifest={schema_version:'1.0',kind:'awh_release_manifest',source_commit:source,source_clean:true,build_environment:assets[0].record.build.build_environment,provenance,components:specs,artifacts:assets.map(a=>a.record),compatibility:{node:'>=24',node_tarballs:'OS-neutral JS; Git required by Client/Builder',windows:['PowerShell 5.1','PowerShell 7'],cp_database_schema:2,protocol:'1.0',dashboard_api:'1.0.0',handoff:'0.1',new_external_database_required:true,mac_execution:'NOTRUN'},package_verification:'NOTRUN',release_gate:'NOT_AUTHORIZED'};
   files.set('install-windows.md',Buffer.from('Windows'));files.set('release-manifest.json',Buffer.from(JSON.stringify(manifest)));
   return {manifest,files,read:name=>{assert(files.has(name));return files.get(name);}};
 }
@@ -37,6 +42,29 @@ test('Manifest rejects missing/duplicate assets, source/version/toolchain drift 
   for(const mutate of [m=>m.artifacts.pop(),m=>m.artifacts[1]=m.artifacts[0],m=>m.source_commit='b'.repeat(40),m=>m.artifacts[0].build.build_environment.node='v25.0.0',m=>m.artifacts[0].build.version='9.0.0',m=>m.package_verification='PASS',m=>m.release_gate='PASS',m=>m.compatibility.mac_execution='PASS']) {
     const h=setup();mutate(h.manifest);assert.throws(()=>checkManifest(h.manifest,h.read,source));
   }
+});
+
+function releaseKit(t,modify) {
+  const h=setup(modify),base=mkdtempSync(join(tmpdir(),'awh-v2-release-regression-'));
+  t.after(()=>{const target=realpathSync(base);assert.equal(dirname(target),realpathSync(tmpdir()));assert(basename(target).startsWith('awh-v2-release-regression-'));rmSync(target,{recursive:true,force:true});});
+  for(const [name,bytes] of h.files)writeFileSync(join(base,name),bytes);
+  writeFileSync(join(base,'SHA256SUMS'),[...h.files].map(([name,bytes])=>sha256(bytes)+'  '+name).join('\n')+'\n');
+  // Every altered archive, build file map and checksum is rebuilt consistently,
+  // so failures must come from the V2 format requirement, not damaged archives.
+  return ()=>validateRelease(base,source);
+}
+test('V2 release accepts complete identical UI and Viewer assets',t=>{assert(releaseKit(t)().valid);});
+test('V2 release rejects both sides missing all V2 assets even with valid hashes',t=>{
+  const validate=releaseKit(t,(component,files)=>{if(component==='awh-viewer'||component==='awh-dashboard-ui')for(const name of ['index.html','app.js','app.css'])delete files[(component==='awh-viewer'?'dist/dashboard-v2/':'v2/')+name];});
+  assert.throws(validate,/Missing V2 (UI|Viewer) bytes/);
+});
+test('V2 release requires every asset on each side and rejects differing bytes',t=>{
+  for(const component of ['awh-viewer','awh-dashboard-ui'])for(const name of ['index.html','app.js','app.css']){
+    const validate=releaseKit(t,(id,files)=>{if(id===component)delete files[(id==='awh-viewer'?'dist/dashboard-v2/':'v2/')+name];});
+    assert.throws(validate,/Missing V2 (UI|Viewer) bytes/,component+' '+name);
+  }
+  const differing=releaseKit(t,(component,files)=>{if(component==='awh-viewer')files['dist/dashboard-v2/app.js']=Buffer.from('different V2 bytes');});
+  assert.throws(differing,/Viewer\/V2 UI built bytes differ/);
 });
 test('unsafe artifact paths are rejected before external reads',()=>{const h=setup();h.manifest.artifacts[0].filename='../secret';let reads=0;assert.throws(()=>checkManifest(h.manifest,()=>{reads++;},source));assert.equal(reads,0);});
 test('SHA256SUMS rejects substituted bytes, missing/duplicate records, unsafe names and self hashes',()=>{

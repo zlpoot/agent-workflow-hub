@@ -63,7 +63,6 @@ export function AppShell({
           <ShieldCheck size={18} aria-hidden="true" />
           <strong>只读工作区</strong>
           <p>观察任务，保留事实来源。独立 Review 由下一责任方完成。</p>
-          <span>SHADCN/UI · TAILWIND 4</span>
         </div>
       </aside>
       <main id="main-content" tabIndex={-1}>
@@ -133,7 +132,7 @@ export function AppShell({
           )}
           {children}
           <footer>
-            只读预览 · 注册 / 心跳不代表 GitHub 授权 · 运行时声明不代表独立
+            只读 Viewer · 注册 / 心跳不代表 GitHub 授权 · 运行时声明不代表独立
             Review
           </footer>
         </div>
