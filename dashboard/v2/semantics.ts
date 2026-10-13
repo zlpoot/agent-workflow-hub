@@ -100,12 +100,18 @@ export const isFixture = (task: Task) => task.fixture === true;
 export const actorName = (actor: Task['active_actor'] | Task['waiting_for']) => actor?.name ?? null;
 /** Who is responsible for the next step when nobody is currently acting. */
 export const nextOwner = (task: Task) => task.active_actor ?? task.waiting_for;
-export const nextOwnerLabel = (task: Task) => roleLabel(nextOwner(task)?.role ?? null) ?? '未记录';
+export const nextOwnerLabel = (task: Task) => roleLabel(nextOwner(task)?.role ?? null) ?? (task.state === 'unknown' ? '未知 · 待核验' : '未记录');
 
-export const isAwaitingReview = (task: Task) =>
-  task.state === 'awaiting_review' || task.state === 'review_passed' || task.waiting_for?.role === 'reviewer';
-export const isBlocked = (task: Task) => task.state === 'blocked' || task.blockers.length > 0;
-export const isActive = (task: Task) => ['developing', 'verifying', 'merging'].includes(task.state);
+export type TaskCategory = 'active' | 'review' | 'pending' | 'completed' | 'unknown';
+export const TASK_CATEGORIES: Record<Task['state'], TaskCategory> = {
+  queued: 'pending', ready: 'pending', developing: 'active', verifying: 'active',
+  awaiting_review: 'review', changes_requested: 'pending', review_passed: 'pending',
+  awaiting_merge: 'pending', merging: 'active', completed: 'completed', blocked: 'pending', unknown: 'unknown',
+};
+export const taskCategory = (task: Task) => TASK_CATEGORIES[task.state];
+export const isAwaitingReview = (task: Task) => taskCategory(task) === 'review';
+export const isBlocked = (task: Task) => taskCategory(task) === 'pending';
+export const isActive = (task: Task) => taskCategory(task) === 'active';
 
 export const searchText = (task: Task) => [
   task.id, task.project_id, task.repository, task.issue.title, `#${task.issue.number}`,

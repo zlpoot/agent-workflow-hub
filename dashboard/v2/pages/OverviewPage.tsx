@@ -1,13 +1,13 @@
 import { Button, Card, Col, Empty, Grid, List, Row, Space, Tag, Typography } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined, ProjectOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import type { Task } from '../../../src/dashboard/tasks.js';
+import type { PresentedTask as Task } from '../presentation.js';
 import type { Snapshot } from '../useDashboard.js';
 import { MetricCard } from '../components/MetricCard.js';
 import { StatusTag } from '../components/StatusTag.js';
 import { EmptyState, LoadingBlock } from '../components/StateViews.js';
 import { SourceNote } from '../components/SourceNote.js';
 import { nextActionGroups, overviewMetrics, projectRows, sortedByUpdate } from '../selectors.js';
-import { isAwaitingReview, isBlocked, nextOwnerLabel, stamp } from '../semantics.js';
+import { isActive, isAwaitingReview, isBlocked, nextOwnerLabel, stamp } from '../semantics.js';
 
 const heading = (value: string) => <Typography.Title level={5} style={{ margin: 0 }}>{value}</Typography.Title>;
 
@@ -43,17 +43,18 @@ export function OverviewPage({ snapshot, tasks, loading, onOpen }: {
   const metrics = overviewMetrics(snapshot, tasks);
   const awaiting = sortedByUpdate(tasks.filter(isAwaitingReview));
   const blocked = sortedByUpdate(tasks.filter(isBlocked));
-  const developing = sortedByUpdate(tasks.filter(task => ['developing', 'verifying', 'merging'].includes(task.state)));
+  const developing = sortedByUpdate(tasks.filter(isActive));
   const groups = nextActionGroups(tasks);
   const projects = projectRows(snapshot, tasks);
 
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <Typography.Text type="secondary">状态未知 / 待核验 {metrics.unknown} 项 · 任务总数 {tasks.length}</Typography.Text>
     <Row gutter={[16, 16]}>
       <Col xs={12} md={8} xl={4}><MetricCard title="项目" value={metrics.projects} note="CP 登记或显式本机观察" icon={<ProjectOutlined />} /></Col>
       <Col xs={12} md={8} xl={4}><MetricCard title="执行器" value={metrics.executors} note="登记执行者数量" /></Col>
       <Col xs={12} md={8} xl={4}><MetricCard title="进行中" value={metrics.developing} note="开发 / 验证 / 合并" icon={<ThunderboltOutlined />} tone="healthy" /></Col>
       <Col xs={12} md={8} xl={4}><MetricCard title="等待独立 Review" value={metrics.awaitingReview} note="当前 HEAD 尚无有效授权决定" icon={<ClockCircleOutlined />} tone="attention" /></Col>
-      <Col xs={12} md={8} xl={4}><MetricCard title="阻塞 / 待处理" value={metrics.blocked} note="含 HEAD 漂移与停止的 Watcher" icon={<ExclamationCircleOutlined />} tone="blocked" /></Col>
+      <Col xs={12} md={8} xl={4}><MetricCard title="阻塞 / 待处理" value={metrics.blocked} note="队列 / 修改 / PASS / 待合并 / 阻塞" icon={<ExclamationCircleOutlined />} tone="blocked" /></Col>
       <Col xs={12} md={8} xl={4}><MetricCard title="已完成" value={metrics.completed} note="GitHub Merge 与 Issue CLOSED 已核实" icon={<CheckCircleOutlined />} tone="healthy" /></Col>
     </Row>
 
@@ -105,13 +106,13 @@ export function OverviewPage({ snapshot, tasks, loading, onOpen }: {
             <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{project.repository}</Typography.Text></div>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {project.provenance === 'local_fast_observation' ? 'Local Fast 只读观察 · 尚未登记为 CP 项目' : '已保存的注册信息'}
-              {' · 配置档 '}{project.profile_ref}{' · 活动运行 '}{project.active_runs}
+              {' · 配置档 '}{project.profile_ref}{' · 上次快照活动运行 '}{project.active_runs}
             </Typography.Text>
           </Card>
         </Col>) : <Col span={span}><Typography.Text type="secondary">当前范围没有项目记录。</Typography.Text></Col>}
       </Row>
       <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}>
-        执行者 {metrics.executors} 个 · 活动运行 {metrics.activeRuns} 个 · 在线状态来自服务端记录的注册或心跳，不是 GitHub 授权核验结果。
+        执行者 {metrics.executors} 个 · 上次快照活动运行 {metrics.activeRuns} 个 · 在线状态来自服务端记录的注册或心跳，不是 GitHub 授权核验结果。
       </Typography.Paragraph>
     </Card>
     <SourceNote />

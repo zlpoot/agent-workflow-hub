@@ -1,4 +1,5 @@
-import type { Task } from '../../src/dashboard/tasks.js';
+import type { PresentedTask as Task } from './presentation.js';
+import type { Task as RawTask } from '../../src/dashboard/tasks.js';
 import type { Snapshot } from './useDashboard.js';
 import { GITHUB_REFRESH_LABELS, ROLE_LABELS, isActive, isAwaitingReview, isBlocked } from './semantics.js';
 
@@ -45,6 +46,7 @@ export function overviewMetrics(snapshot: Snapshot | null, tasks: Task[]) {
     awaitingReview: tasks.filter(isAwaitingReview).length,
     blocked: tasks.filter(isBlocked).length,
     completed: tasks.filter(task => task.state === 'completed').length,
+    unknown: tasks.filter(task => task.state === 'unknown').length,
     activeRuns: runs.filter(run => !['completed', 'failed'].includes(run.state)).length,
     events: 0,
   };
@@ -54,9 +56,9 @@ export function overviewMetrics(snapshot: Snapshot | null, tasks: Task[]) {
 export function nextActionGroups(tasks: Task[]) {
   const groups = new Map<string, { role: string; label: string; count: number; actions: string[]; tasks: Task[] }>();
   for (const task of tasks) {
-    if (!task.waiting_for && !task.active_actor) continue;
-    const role = task.active_actor?.role ?? task.waiting_for!.role;
-    const name = task.active_actor?.name ?? task.waiting_for!.name;
+    if (task.state === 'completed') continue;
+    const role = task.waiting_for?.role ?? task.active_actor?.role ?? 'unknown';
+    const name = task.waiting_for?.name ?? task.active_actor?.name ?? '未知 · 待核验';
     const entry = groups.get(role) ?? { role, label: name, count: 0, actions: [], tasks: [] };
     entry.count += 1;
     entry.tasks.push(task);
@@ -67,7 +69,7 @@ export function nextActionGroups(tasks: Task[]) {
     .map(group => ({ ...group, label: ROLE_LABELS[group.role] ?? group.label }));
 }
 
-export function githubObservation(tasks: Task[]) {
+export function githubObservation(tasks: RawTask[]) {
   const refreshes = tasks.map(task => task.github_refresh);
   const status = refreshes.some(item => item.status === 'rate_limited') ? 'rate_limited'
     : refreshes.some(item => item.status === 'querying') ? 'querying'

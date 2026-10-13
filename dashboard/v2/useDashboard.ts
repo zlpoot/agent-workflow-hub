@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { DashboardReader } from '../adapter.mjs';
 import type { Task } from '../../src/dashboard/tasks.js';
 import type { DashboardPhase } from './semantics.js';
+import { presentationState } from './presentation.js';
 
 // The V2 PoC reuses the existing DashboardReader verbatim: same same-origin read-only
 // endpoints, same contract validators, same SSE semantics and the same phase machine.
@@ -25,6 +26,7 @@ export interface TimelineEvent {
   cursor: number; run_id: string; project_id: string; type: string; result: string; timestamp: string;
 }
 export interface DashboardState {
+  factsUnavailable?: boolean;
   snapshot: Snapshot | null;
   events: TimelineEvent[];
   phase: DashboardPhase;
@@ -41,9 +43,15 @@ const initial: DashboardState = { snapshot: null, events: [], phase: 'loading', 
 
 export function useDashboard() {
   const [state, setState] = useState<DashboardState>(initial);
+  const [, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const reader = useRef<DashboardReader | null>(null);
   useEffect(() => {
-    const client = reader.current = new DashboardReader({ publish: setState, githubInterval: 300 });
+    const client = reader.current = new DashboardReader({ publish: (incoming: DashboardState) =>
+      setState(previous => presentationState(previous, incoming)), githubInterval: 300 });
     void client.refresh();
     return () => client.stop();
   }, []);
@@ -72,7 +80,7 @@ export function useDashboard() {
     setDetail({ item: null, loading: false, error: null });
   }, []);
 
-  return { state, refresh, detail, openTask, closeTask };
+  return { state, now: Date.now(), refresh, detail, openTask, closeTask };
 }
 
 export const isFixtureDataset = () =>

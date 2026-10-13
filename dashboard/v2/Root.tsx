@@ -9,14 +9,20 @@ import { TaskDetailDrawer } from './components/TaskDetailDrawer.js';
 import { OverviewPage } from './pages/OverviewPage.js';
 import { TasksPage } from './pages/TasksPage.js';
 import { isFixtureDataset, useDashboard } from './useDashboard.js';
+import { presentTasks, presentDetail } from './presentation.js';
 import { PHASE_META } from './semantics.js';
 
 /** Composition root: navigation, data hook and the two pages. No page logic lives here. */
 export function App() {
-  const { state, refresh, detail, openTask, closeTask } = useDashboard();
+  const { state, now, refresh, detail, openTask, closeTask } = useDashboard();
   const [view, setView] = useState<V2View>('Overview');
   const fixture = isFixtureDataset();
-  const tasks = state.snapshot?.tasks ?? [];
+  const tasks = presentTasks(state, now);
+  const displayedDetail = presentDetail(detail, state, now);
+  const openPresentedTask = (task: typeof tasks[number]) => {
+    const raw = state.snapshot?.tasks?.find(item => item.id === task.id);
+    if (raw) openTask(raw);
+  };
   const meta = PHASE_META[state.phase] ?? PHASE_META.error;
 
   return <ConfigProvider locale={zhCN} theme={awhTheme}>
@@ -26,10 +32,10 @@ export function App() {
           tasks={tasks} fixture={fixture} refreshing={state.phase === 'refreshing'} onRefresh={refresh} />
         <PhaseAlert phase={state.phase} error={state.error} hasSnapshot={state.snapshot !== null} />
         {view === 'Overview'
-          ? <OverviewPage snapshot={state.snapshot} tasks={tasks} loading={state.phase === 'loading'} onOpen={openTask} />
-          : <TasksPage snapshot={state.snapshot} tasks={tasks} loading={state.phase === 'loading'} onOpen={openTask} />}
+          ? <OverviewPage snapshot={state.snapshot} tasks={tasks} loading={state.phase === 'loading'} onOpen={openPresentedTask} />
+          : <TasksPage snapshot={state.snapshot} tasks={tasks} loading={state.phase === 'loading'} onOpen={openPresentedTask} />}
       </AppShell>
-      <TaskDetailDrawer detail={detail} open={detail.item !== null} onClose={closeTask} />
+      <TaskDetailDrawer detail={displayedDetail} open={detail.item !== null} onClose={closeTask} />
     </AntApp>
   </ConfigProvider>;
 }

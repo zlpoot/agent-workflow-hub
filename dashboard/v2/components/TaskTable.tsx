@@ -1,6 +1,6 @@
 import { Button, Table, Typography } from 'antd';
 import type { TableProps } from 'antd';
-import type { Task } from '../../../src/dashboard/tasks.js';
+import type { PresentedTask as Task } from '../presentation.js';
 import { GitHubLink } from './GitHubLink.js';
 import { FixtureTag, StatusTag } from './StatusTag.js';
 import { EmptyState } from './StateViews.js';
@@ -28,12 +28,12 @@ export function TaskTable({ tasks, loading, onOpen, compact }: {
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>{task.repository}</Typography.Text>
       </>,
     },
-    { title: '状态', key: 'state', width: 140, render: (_value, task) => <StatusTag value={task.state} note={task.next_action} /> },
+    { title: '状态', key: 'state', width: 140, render: (_value, task) => <><StatusTag value={task.state} note={task.next_action} />{!task.factsCurrent && <div>历史快照 · {task.factReason}</div>}</> },
     {
       title: '当前执行者', key: 'active', width: 150,
       render: (_value, task) => task.active_actor
         ? <>{task.active_actor.name}<div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{task.executor ?? '—'}</Typography.Text></div></>
-        : <Typography.Text type="secondary">无 · 未开始</Typography.Text>,
+        : <Typography.Text type="secondary">{task.factsCurrent ? '无 · 未开始' : '未知 · 待核验'}</Typography.Text>,
     },
     {
       title: '下一责任方 / 动作', key: 'next', width: 220,
@@ -54,7 +54,7 @@ export function TaskTable({ tasks, loading, onOpen, compact }: {
       render: (_value, task) => <>
         <div><GitHubLink url={safeIssueUrl(task.repository, task.issue.number)}>Issue #{task.issue.number}</GitHubLink></div>
         {task.pr && <div><GitHubLink url={safePullUrl(task.repository, task.pr.number)}>PR #{task.pr.number}</GitHubLink></div>}
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>HEAD {shortSha(task.source_head)}</Typography.Text>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{task.factsCurrent ? 'HEAD' : '历史 HEAD'} {shortSha(task.source_head)}</Typography.Text>
       </>,
     },
     { title: '最近更新', key: 'updated', width: 160, render: (_value, task) => stamp(task.updated_at) },

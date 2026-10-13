@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Input, Select, Space } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import type { Task } from '../../../src/dashboard/tasks.js';
+import type { PresentedTask as Task } from '../presentation.js';
 import type { Snapshot } from '../useDashboard.js';
 import { STATE_LABELS, searchText } from '../semantics.js';
 import { projectOptions } from '../selectors.js';

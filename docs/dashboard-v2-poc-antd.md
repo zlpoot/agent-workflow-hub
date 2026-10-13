@@ -66,7 +66,7 @@ pnpm dashboard:v2:smoke               # Playwright 桌面 + 390px 冒烟
 - V2 将样式交给 cssinjs 运行时注入，因此 CSS 文件接近 0；传输体积 gzip 口径比 V1 多约 142 KB，原始字节数反而少 26 KB。
 - `dist/dashboard-v2/build-inputs.json` 记录全部打包输入，`tests/dashboard-v2.test.mjs` 断言不含任何 `src/` 服务端模块、node: 内建或 builder 代码。
 
-## 7. 验证记录（Windows，Node v24.21.0，pnpm 11.25.0）
+## 7. 初版验证记录（第一轮修复的记录见第 10 节）（Windows，Node v24.21.0，pnpm 11.25.0）
 
 | 命令 | 退出码 |
 | --- | --- |
@@ -98,3 +98,30 @@ Overview 四段指标 + 等待独立 Review / 阻塞待处理 / 进行中 / 下�
 ## 9. 第二轮 AI 修改实验
 
 按 Owner 指令暂不执行（Tasks 新增「仅显示等待独立 Review」筛选、执行机器信息、详情最近更新时间）。当前实现已为该实验保留扩展点：筛选逻辑集中在 `TasksPage`，机器与更新时间字段已在 `Task` 契约中存在。
+
+
+## 10. 第一轮独立 Review 修复（2026-10-13）
+
+保持原 PR #89 为 Draft / AWAITING_INDEPENDENT_REVIEW；固定基线与方案 B 不变。Owner 明确授权 Windows local-fast 普通交付。
+
+- **P2-1**：新增 `presentation.ts`，复用 `task-freshness.mjs`，统一 Overview、Tasks、搜索/阶段筛选、责任方分组及 Drawer 的展示任务。offline/outdated/error/partial、事件水位领先快照、观察过期、详情 loading/失败均清除当前状态、执行者、机器、责任方、动作、Owner 范围和 Watcher 运行字段；历史 HEAD/Review/Checks 标注明确。普通刷新保留新鲜事实；从失效状态刷新时保留失效标记，成功快照及事件水位追平后恢复。新快照覆盖 Drawer 中更旧的成功详情。
+- **P2-2**：覆盖全部 12 种 TaskState 的互斥分类：进行中、等待独立 Review、待处理、完成、未知。13 行共享 fixture 的统计为 3 / 1 / 7 / 1 / 1。queued/ready/changes_requested/review_passed/awaiting_merge/blocked 都进入待处理；Review 已通过与等待合并各保留原阶段标签，只有 awaiting_review 进入 Review 队列。分组优先明确 waiting_for，每个未完成任务只进入一个责任方组，未知责任方不遗漏。
+- **P2-3**：PR 正文采用 `Refs #86`；Issue 是否关闭仍由 Owner 决定。
+
+[六张已提交桌面/390px 截图与 Smoke 摘要](dashboard-v2-poc-antd/README.md)，均为模拟数据。无生产服务或凭据。
+
+| 本轮命令 | 退出码 / 数量 |
+| --- | --- |
+| `node node_modules/typescript/bin/tsc --noEmit` | 0 |
+| `node node_modules/typescript/bin/tsc -p dashboard/tsconfig.json` | 0 |
+| `node node_modules/typescript/bin/tsc -p dashboard/v2/tsconfig.json` | 0 |
+| `node scripts/dashboard-v2-build.mjs` | 0 |
+| `node --test --test-concurrency=2 tests/dashboard-v2.test.mjs tests/dashboard-v2-presentation.test.mjs tests/dashboard-tasks.test.mjs tests/dashboard-refresh.test.mjs tests/dashboard-ui.test.mjs tests/dashboard.test.mjs tests/dashboard-gateway.test.mjs` | 0 · 70 pass / 0 fail（新增 11 项） |
+| `node scripts/dashboard-v2-smoke.mjs`（已有 Chromium 路径由 AWH_DASHBOARD_TEST_BROWSER 指定） | 0 · 9 张原始截图，提交其中 6 张 |
+| `git diff --check` 与 `git diff --check ff909b2dd69d31350541d3652efa68fb5da2db16...HEAD` | 0 / 0 |
+
+浏览器：0 非预期控制台错误、0 page error、0 CSP violation；2 条故障注入预期资源错误单独计数。1440px/390px 各截图无页面横向溢出，Drawer 在移动视口内。
+本轮 V2 JS：1,372,160 B（gzip 392,773 B）；CSS：270 B（gzip 196 B）。V1 源码与产物不变。
+
+原始结果和开发失败保留在 `.handoff/review-fix/`。开发过程中修复了展示时钟边界、普通 refreshing 的过度降级及 Smoke 的 Ant Select 虚拟选项/Drawer 遮罩交互；环境失败包括默认 Playwright 浏览器缺失、沙箱拒绝 Chromium 与 loopback 请求。最终验证在 clean final HEAD 上重新执行；精确 HEAD 和回读结果由 PR 正文给出。
+不执行大型全量 CI、打包安装测试或第二轮 AI 修改稳定性实验；不声明独立 Review PASS。
