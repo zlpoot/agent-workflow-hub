@@ -2,7 +2,7 @@
 
 The browser entry dashboard/app.tsx builds with React and Radix Themes. dashboard/semantics.json records this UI's local component choices. The browser bundle imports no server, filesystem, Builder or SQLite implementation. Static contract validators are generated locally at build time; no eval or third-party browser resources are needed.
 
-Dashboard V2 at `/dashboard/v2` uses the selected React 19 + shadcn/ui + Tailwind 4 UI. Overview and Tasks share the existing DashboardReader, validated `/dashboard/v1` REST/SSE and scoped Viewer session. `/dashboard` remains V1, including its existing Enrollment and settings. See [V2 Viewer integration](dashboard-v2-viewer.md) for startup, fallback and isolated Windows verification.
+Dashboard V2 at `/dashboard/v2` uses the selected React 19 + shadcn/ui + Tailwind 4 UI. Overview and Tasks share the existing DashboardReader, validated `/dashboard/v1` REST/SSE and scoped Viewer session. Settings → GitHub App shares the existing V1 client hook and protected local management routes; ordinary Viewer stays read-only. `/dashboard` remains V1, including its existing Enrollment and settings. See [V2 Viewer integration](dashboard-v2-viewer.md) and [App settings](dashboard-github-app.md).
 
 Overview, Projects, Executors, Runs and Timeline present scoped observed data in Simplified Chinese. Loading, empty, error, partial, offline and outdated states remain distinct. Failed refresh retains the last successful snapshot and marks presence unknown. Connected appears only after SSE opens. Detail dialogs support visible close, Escape and keyboard navigation.
 

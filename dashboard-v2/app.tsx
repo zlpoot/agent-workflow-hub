@@ -5,6 +5,7 @@ import { Card } from "./components/ui/card";
 import { TaskDetail } from "./components/task-detail";
 import { Overview } from "./pages/overview";
 import { Tasks } from "./pages/tasks";
+import { GithubAppSettings } from "./pages/github-app-settings";
 import { useDashboard, useTaskDetail } from "./hooks/use-dashboard";
 import { GitHubObservation } from "./components/github-observation";
 import { taskSnapshotUnreliable } from "./lib/task-model.mjs";
@@ -46,8 +47,8 @@ function App() {
         fixture={fixture}
         refresh={refresh}
       >
-        <GitHubObservation tasks={tasks} reader={reader} now={now} />
-        {!state.snapshot ? (
+        {view !== "Settings" && <GitHubObservation tasks={tasks} reader={reader} now={now} />}
+        {view === "Settings" ? <GithubAppSettings /> : !state.snapshot ? (
           <Card className="empty">
             <h2>
               {state.phase === "loading" ? "正在加载活动记录…" : "面板暂不可用"}

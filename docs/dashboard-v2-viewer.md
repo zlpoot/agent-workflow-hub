@@ -12,7 +12,7 @@ pnpm viewer --config <绝对路径的外置-viewer.json>
 
 Viewer 使用原配置、只读数据库与现有任务观察适配器，打印 `url`（V1）和 `v2_url`（V2）。直接打开 `http://127.0.0.1:<port>/dashboard/v2` 或末尾带 `/` 的路径，通过正常本机文档导航建立一小时 HttpOnly / SameSite=Strict 会话。V2 的 Dashboard V1 链接返回 `/dashboard`，两者共用 `/dashboard` Cookie、项目范围及只读 DTO。V1 继续作为默认启动 URL，并保留项目接入和设置。
 
-V2 的独立静态资源为 `/dashboard/v2/app.js`、`/dashboard/v2/app.css`。页面使用现有 DashboardReader、`/dashboard/v1` REST/SSE 和 OpenAPI 静态校验器，只有同源 GET 请求。CSP、Host/Origin/Fetch Metadata、会话有效期和权限模型保持原有规则。当前实际执行者、责任方和任务阶段在断线或 SSE 领先快照时降级，历史 Review / HEAD 与来源继续分开标注；CP 声明不能替代 GitHub 原生核验或管理员授权。
+V2 的独立静态资源为 `/dashboard/v2/app.js`、`/dashboard/v2/app.css`。Overview/Tasks 使用现有 DashboardReader、`/dashboard/v1` REST/SSE 和 OpenAPI 静态校验器，只有同源 GET 请求。设置 → GitHub App 读取原 status；只有已显式启用本机 Owner 管理时才使用既有有界 detect/connect/preflight POST，见 [App 设置边界](dashboard-github-app.md)。CSP、Host/Origin/Fetch Metadata、会话有效期和权限模型保持原有规则。当前实际执行者、责任方和任务阶段在断线或 SSE 领先快照时降级，历史 Review / HEAD 与来源继续分开标注；CP 声明不能替代 GitHub 原生核验或管理员授权。
 
 真实 Viewer 不接收 fixture 开关、假任务或配置指定的资源目录。`pnpm dashboard:v2:preview` 仍是独立随机端口、独立内存 SQLite 的明确模拟预览，始终标明“示例预览 · 模拟数据”，不能接收生产路径或凭据。
 
@@ -36,4 +36,4 @@ pnpm dashboard:v2:smoke
 
 原始日志、失败、安装包、截图与准确干净 HEAD 的最终验证记录保留在 gitignored `.handoff/`。这些是本地验证，不是正式 Builder Evidence / Handoff / CP Run，也不是独立 Review。没有运行大型全量 CI。
 
-Mac 真机、生产 Cutover、真实 GitHub 任务端到端交付：**NOTRUN**。生产配置、CP/Viewer/Resident 与业务 worktree 不用于本轮测试。#84 的 V2 GitHub App 设置 UI 属于后续功能阶段；本轮未迁移写操作界面。停在独立 Review，不自动批准、Merge、Tag、Release 或生产部署。
+Mac 真机、生产 Cutover、真实 GitHub 任务端到端交付：**NOTRUN**。生产配置、CP/Viewer/Resident 与业务 worktree 不用于本轮测试。#84 在此基线上增加 V2 GitHub App 设置 UI；原 #90 的验证只对应当时 HEAD，#84 的准确 HEAD 与证据另见其 Draft PR。停在独立 Review，不自动批准、Merge、Tag、Release 或生产部署。

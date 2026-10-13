@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { taskFixtures } from "./task-fixture.mjs";
 import {
   filterTasks,
@@ -10,6 +11,13 @@ import {
 import { TASK_STATES, taskBase } from "../dist/dashboard/tasks.js";
 const now = Date.now(),
   tasks = taskFixtures(now);
+
+test('V1 and V2 build the shared App lifecycle without importing V1 Themes or server/fixture code into V2',()=>{
+  const v1=JSON.parse(readFileSync(new URL('../dist/dashboard-ui/build-inputs.json',import.meta.url)));
+  const v2=JSON.parse(readFileSync(new URL('../dist/dashboard-v2/build-report.json',import.meta.url))).inputs;
+  assert(v1.includes('dashboard/use-github-app.ts'));assert(v2.includes('dashboard/use-github-app.ts'));
+  assert(v2.every(path=>!/@radix-ui\/themes|antd|^(?:src|tests|scripts|examples)\/|^node:/.test(path)));
+});
 
 test("Overview partitions every TaskState exactly once, including queued and post-Review stages", () => {
   const expected = {

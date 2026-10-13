@@ -4,13 +4,14 @@ import {
   RefreshCw,
   ArrowUpRight,
   ShieldCheck,
+  Settings,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "./ui/button";
 import { Status } from "./status";
 import { stamp, taskSnapshotPending } from "../lib/task-model.mjs";
 import type { DashboardState } from "../hooks/use-dashboard";
-export type View = "Overview" | "Tasks";
+export type View = "Overview" | "Tasks" | "Settings";
 export function AppShell({
   view,
   setView,
@@ -42,7 +43,7 @@ export function AppShell({
         </div>
         <p className="nav-label">WORKSPACE / 工作区</p>
         <nav aria-label="面板导航">
-          {(["Overview", "Tasks"] as View[]).map((name) => (
+          {(["Overview", "Tasks", "Settings"] as View[]).map((name) => (
             <Button
               key={name}
               variant="ghost"
@@ -51,14 +52,15 @@ export function AppShell({
             >
               {name === "Overview" ? (
                 <LayoutDashboard aria-hidden="true" />
-              ) : (
+              ) : name === "Tasks" ? (
                 <ListTodo aria-hidden="true" />
-              )}
-              {name === "Overview" ? "总览" : "任务"}
+              ) : <Settings aria-hidden="true" />}
+              {name === "Overview" ? "总览" : name === "Tasks" ? "任务" : "设置"}
               <span className="nav-english">{name}</span>
             </Button>
           ))}
         </nav>
+        {view === "Settings" && <a className="settings-subnav" href="#github-app-settings" aria-current="page">GitHub App</a>}
         <div className="sidebar-note">
           <ShieldCheck size={18} aria-hidden="true" />
           <strong>只读工作区</strong>
@@ -69,7 +71,7 @@ export function AppShell({
         <header className="topbar">
           <span>
             工作区 <span className="muted">/</span>{" "}
-            {view === "Overview" ? "总览" : "任务"}
+            {view === "Overview" ? "总览" : view === "Tasks" ? "任务" : "设置 / GitHub App"}
           </span>
           <div className="flex flex-wrap items-center gap-2">
             <Status value={state.phase} />
@@ -92,11 +94,11 @@ export function AppShell({
           <div className="page-heading">
             <div>
               <p className="eyebrow">WORKFLOW COMMAND CENTER</p>
-              <h1>{view === "Overview" ? "工作流总览" : "任务工作台"}</h1>
+              <h1>{view === "Overview" ? "工作流总览" : view === "Tasks" ? "任务工作台" : "设置"}</h1>
               <p className="muted">
                 {view === "Overview"
                   ? "让每一次交接，都有清晰的下一步。"
-                  : "查看阶段、实际执行者、等待责任方与下一动作。"}
+                  : view === "Tasks" ? "查看阶段、实际执行者、等待责任方与下一动作。" : "查看本机 GitHub App 连接，按可信 Owner 配置启用管理。"}
               </p>
             </div>
             {fixture && (
@@ -105,14 +107,14 @@ export function AppShell({
               </div>
             )}
           </div>
-          <div className="freshness" aria-live="polite">
+          {view !== "Settings" && <div className="freshness" aria-live="polite">
             <span>
               最近成功刷新：{stamp(state.lastRefresh)} · 快照游标{" "}
               {state.snapshot?.cursor ?? "—"}
             </span>
             <span>注册信息与事件存储 · GitHub 授权未核验</span>
-          </div>
-          {state.snapshot &&
+          </div>}
+          {view !== "Settings" && state.snapshot &&
             taskSnapshotPending(
               state.phase,
               state.snapshot.cursor,
@@ -122,7 +124,7 @@ export function AppShell({
                 有新事件待同步；当前显示历史快照。任务阶段、执行者、责任方和下一动作已降级，等待快照同步完成。
               </div>
             )}
-          {state.error && (
+          {view !== "Settings" && state.error && (
             <div className="notice" role="alert">
               读取或实时连接暂不可用。
               {state.snapshot

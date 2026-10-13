@@ -1,6 +1,6 @@
 # Dashboard GitHub App 接入
 
-用户在现有 Dashboard 打开 **设置 → GitHub App**。首次填写 App ID、slug、已有 PEM 的本机绝对路径及个人 Reviewer，默认 slug 为 `zlpoot-awh-builder`、Reviewer 为 `zlpoot`。不上传或粘贴 PEM，不填写 Token，不手工拼接仓库列表。
+用户在正式 Viewer 的 **`/dashboard/v2` → 设置 → GitHub App** 打开本机 App 设置。V2 使用 React 19 + shadcn/ui + Tailwind 4；`/dashboard` V1 的原设置与回退继续可用。两套页面共用 `dashboard/use-github-app.ts` 请求与状态流程，使用原服务端接口、受保护状态和 Windows 原生确认；不新增权限或后端入口。首次填写 App ID、slug、已有 PEM 的本机绝对路径及个人 Reviewer，默认 slug 为 `zlpoot-awh-builder`、Reviewer 为 `zlpoot`。不上传或粘贴 PEM，不填写 Token，不手工拼接仓库列表。
 
 点击 **检测配置** 后，服务器调用现有 `GithubApp.detect`：通过 App JWT 核验真实 App；完整读取该 App 的安装列表，逐一核验账号、暂停状态、Selected 模式和所需权限；使用 Metadata-only Token 完整读取每个合法安装的选中仓库，并核验 Bot 和个人 Reviewer 的真实数值 ID/login/type。安装列表、Selected 集合均最多 128 项；分页不完整、重复、身份不一致或权限不符时失败关闭。多个安装由用户选择，不自动合并范围。
 
@@ -49,6 +49,8 @@ JWT/PEM/Token 只留在现有 Provider 闭包；浏览器仅获得非秘密事�
 
 ## 定向验收
 
-构建后打包 Client/Viewer，运行 `tests/github-app-dashboard.test.mjs`、`tests/github-app-owner.test.mjs`、既有 App/网关/Enrollment 回归和 `scripts/github-app-dashboard-smoke.mjs`。所有数据库、身份、key/config/安装目录均新建隔离；测试注入不存在生产配置/REST 开关。
+构建后打包 Viewer，运行 `tests/github-app-dashboard.test.mjs`、`tests/github-app-owner.test.mjs`、Gateway/UI/V2 定向测试、`scripts/github-app-dashboard-smoke.mjs`（V1）和 `pnpm dashboard:v2:app-smoke`。所有数据库、身份、key/config/安装目录均新建隔离；测试注入不存在生产配置/REST 开关。`pnpm dashboard:v2:viewer-smoke` 使用真实安装的 Viewer + 独立配置/数据库验证正式 V2/V1 的只读设置与原任务路径，不使用 App Fixture host。
 
-浏览器 Smoke 使用固定本机 Fixture host，覆盖未连接、输入拒绝、完整范围、确认/取消 Fixture、自动 Preflight Fixture、漂移/权限/网络、刷新/服务重启、普通 Viewer、390px 和键盘。Windows Owner 测试使用已安装固定 helper、真实 ACL/SID 与摘要检查，同时注入 child ACK 验证取消/篡改/确认边界；真实原生窗口人工确认验收单独标记，不用 child ACK 声称真人已确认。当前无真实 PEM 时真实 GitHub Preflight 保持 NOTRUN。
+V2 App 浏览器 Smoke 在既有本机 Fixture host + 正式 Gateway 上覆盖未连接/已连接、输入拒绝、完整范围与重新勾选、取消/自动 Preflight Fixture、并发锁、页面离开中止待确认、漂移/权限/网络、刷新/重启、普通 Viewer、390px、键盘、CSP 与空浏览器存储。每次 POST 前重新读取 status；管理能力撤销时客户端也停止 POST。模拟通过显示“模拟检查通过”，所有 Fixture 截图明确 `真实 Preflight NOTRUN`，PEM 路径被遮蔽。截图见 [V2 设置证据](dashboard-v2-app-settings.md)。
+
+Windows Owner 测试使用已安装固定 helper、真实 ACL/SID 与摘要检查，同时注入 child ACK 验证取消/篡改/确认边界；真实原生窗口人工确认验收单独标记，不用 child ACK 声称真人已确认。本任务没有另行 provision 独立真实 App 新连接/Owner UI 验收环境，因此真实 detect/connect/自动 Preflight、真人 Windows 原生 Owner UI 均 **NOTRUN**。用于 Draft PR 发布的既有受保护 App 身份预检属于发布动作，不替代设置页面的真人连接验收。Mac、生产 Cutover、完整 Release 同样 NOTRUN。
