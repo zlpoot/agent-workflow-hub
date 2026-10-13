@@ -6,6 +6,7 @@ import './style.css';
 import { DashboardReader, safeGitHubUrl, safeSourceUrl } from './adapter.mjs';
 import { text, errorText, searchText } from './zh-CN.mjs';
 import { Enrollment } from './enrollment.js';
+import { GithubAppSettings } from './github-app.js';
 import { Tasks, TaskOverview, TaskDetail, TaskTable } from './tasks.js';
 import type { Task } from '../src/dashboard/tasks.js';
 
@@ -26,7 +27,7 @@ type State = { snapshot: { cursor: number; projects: Project[]; runs: Run[]; exe
   events: Event[]; phase: string; lastRefresh: number | null; error: string | null };
 type Comparison = { status: string; provenance: string; action_hint: string; observed: unknown; expected: unknown };
 type Diagnostics = Record<string, Comparison | string | number | null>;
-const views = ['Overview', 'Tasks', 'Projects', 'Executors', 'Runs', 'Timeline', 'Enrollment'];
+const views = ['Overview', 'Tasks', 'Projects', 'Executors', 'Runs', 'Timeline', 'Enrollment', 'Settings'];
 const labels: Record<string, string> = { loading: '加载中', refreshing: '刷新中', connecting: '连接实时更新中', live: '已连接', partial: '部分数据 · 同步中',
   offline: '离线 · 显示上次快照', outdated: '数据已过期 · 显示上次快照', error: '暂不可用' };
 const color = (status: string): 'teal' | 'red' | 'amber' | 'gray' =>
@@ -97,15 +98,15 @@ function App() {
       <div className="secondary">运行时声明 · GitHub 授权未核验</div></Table.Cell></Table.Row>)}</Table.Body></Table.Root></div>;
   return <Theme accentColor="teal" grayColor="slate" radius="medium" scaling="100%"><Tabs.Root value={view} onValueChange={value => { setView(value); setSearch(''); setStatus('all'); }} orientation="vertical" className="shell">
     <aside className="sidebar"><div className="brand"><span className="brandmark">A</span><div><strong>AWH</strong><div className="secondary">工作流中心</div></div></div>
-      <Text size="1" color="gray" className="nav-label">工作区</Text><Tabs.List className="nav" aria-label="面板导航">{views.map((name, i) => <Tabs.Trigger key={name} value={name}><span className="nav-symbol" aria-hidden="true">{['◫', '☷', '▣', '◇', '▷', '≡', '+'][i]}</span>{name==='Tasks'?'任务':text(name)}</Tabs.Trigger>)}</Tabs.List>
+      <Text size="1" color="gray" className="nav-label">工作区</Text><Tabs.List className="nav" aria-label="面板导航">{views.map((name, i) => <Tabs.Trigger key={name} value={name}><span className="nav-symbol" aria-hidden="true">{['◫', '☷', '▣', '◇', '▷', '≡', '+', '⚙'][i]}</span>{name==='Tasks'?'任务':text(name)}</Tabs.Trigger>)}</Tabs.List>
       <div className="sidebar-bottom"><Badge variant="outline">本机工作区</Badge><p>运行时记录，保留原始数据来源。</p><Text size="1" color="gray">GitHub 授权未核验</Text></div></aside>
     <main><header className="topbar"><Flex direction="column" align="start" gap="1"><Text size="2" color="gray">工作区 <span aria-hidden="true">/</span> <strong>{text(view)}</strong></Text>{fixture && <Badge color="amber" variant="solid" size="2" role="note" aria-label="模拟数据来源">示例预览 · 模拟数据</Badge>}</Flex><Flex gap="3" align="center" wrap="wrap"><Status value={state.phase} /><Button variant="soft" size="2" onClick={() => void reader.current?.refresh()} disabled={state.phase === 'loading' || state.phase === 'refreshing'}>刷新</Button><Button variant="soft" size="2" onClick={() => window.location.assign('/dashboard')}>重新进入 Dashboard</Button><Button size="2" onClick={() => setView('Enrollment')}>添加项目</Button></Flex></header>
-      <div className="content"><div className="page-title"><div><Text className="eyebrow" size="1">智能体工作流中心</Text><Heading size="7">{text(view)}</Heading><Text color="gray">{['Overview','Tasks'].includes(view) ? '任务进度、当前实际执行者、等待责任方与下一动作。' : view === 'Timeline' ? '按全局游标顺序查看当前范围内已保存的事件。' : '查看当前范围内已记录的身份信息和活动。'}</Text></div></div>
-      <div className="freshness"><Text size="2">{labels[state.phase]} · 最近成功刷新：{state.lastRefresh === null ? '暂无' : stamp(state.lastRefresh)}</Text><Text size="1" color="gray">快照游标 {snapshot?.cursor ?? '—'} · 注册信息与事件存储 · GitHub 授权未核验</Text></div>
+      <div className="content"><div className="page-title"><div><Text className="eyebrow" size="1">智能体工作流中心</Text><Heading size="7">{text(view)}</Heading><Text color="gray">{view === 'Settings' ? '管理本机 GitHub App 连接和只读检查。' : ['Overview','Tasks'].includes(view) ? '任务进度、当前实际执行者、等待责任方与下一动作。' : view === 'Timeline' ? '按全局游标顺序查看当前范围内已保存的事件。' : '查看当前范围内已记录的身份信息和活动。'}</Text></div></div>
+      {view !== 'Settings' && <><div className="freshness"><Text size="2">{labels[state.phase]} · 最近成功刷新：{state.lastRefresh === null ? '暂无' : stamp(state.lastRefresh)}</Text><Text size="1" color="gray">快照游标 {snapshot?.cursor ?? '—'} · 注册信息与事件存储 · GitHub 授权未核验</Text></div>
       <Flex gap="3" wrap="wrap" align="center" className="filters github-refresh" aria-label="GitHub 观察设置"><label>GitHub 自动刷新 <select aria-label="GitHub 自动刷新间隔" value={githubInterval} onChange={e=>{const value=Number(e.target.value);setGithubInterval(value);reader.current?.setGitHubInterval(value);void reader.current?.refresh();}}><option value="60">每 1 分钟</option><option value="300">每 5 分钟（默认）</option><option value="0">关闭自动刷新（仅手动）</option></select></label><Button variant="soft" onClick={()=>void refreshGithub()} disabled={githubBusy||Date.now()<githubCooldown||!!retryAt&&Date.parse(retryAt)>Date.now()}>刷新 GitHub</Button><Text size="2">GitHub：{{not_checked:'未核验',querying:'查询中',success:'成功',failed:'失败',rate_limited:'限流 / 退避'}[ghStatus]} · 最近实际成功：{stamp(ghSuccess)}</Text>{retryAt&&<Text size="2">下次允许查询：{stamp(retryAt)}</Text>}<Text size="1" color="gray">本机状态每 10 秒观察 · CP 事件使用 SSE · 不改变 Watcher 执行频率</Text></Flex>
       {githubError&&<div className="notice" role="alert">{githubError}</div>}
-      {state.error && <div className="notice" role="alert">{errorText(state.error)}。{snapshot ? '显示上次成功读取的快照；在线状态可能已过期。' : '暂无可用快照。'}</div>}
-      {view === 'Enrollment' ? <Tabs.Content value="Enrollment"><section className="enrollment" aria-label="项目接入"><Enrollment
+      {state.error && <div className="notice" role="alert">{errorText(state.error)}。{snapshot ? '显示上次成功读取的快照；在线状态可能已过期。' : '暂无可用快照。'}</div>}</>}
+      {view === 'Settings' ? <Tabs.Content value="Settings"><GithubAppSettings/></Tabs.Content> : view === 'Enrollment' ? <Tabs.Content value="Enrollment"><section className="enrollment" aria-label="项目接入"><Enrollment
         onConnected={id => { setProject(id); setSearch(''); setStatus('all'); setView('Executors');void reader.current?.refresh(); }} /></section></Tabs.Content> : !snapshot ? <Card className="empty"><Heading size="4">{state.phase === 'loading' ? '正在加载活动记录…' : '面板暂不可用'}</Heading><Text color="gray">{state.phase === 'loading' ? '正在读取一致的快照与已保存的时间线。' : '需要受保护的同源查看会话，并启用只读网关。'}</Text></Card> : <>
       {<Flex gap="3" wrap="wrap" className="filters">{!['Overview','Tasks'].includes(view)&&<TextField.Root aria-label={`搜索${text(view)}`} placeholder={`搜索${text(view)}…`} value={search} onChange={event => setSearch(event.target.value)} className="search" />}
         <Select.Root value={project} onValueChange={setProject}><Select.Trigger aria-label="按项目筛选" /><Select.Content><Select.Item value="all">全部项目</Select.Item>{taskProjects.map(([id,repo]) => <Select.Item key={id} value={id}>{id} · {repo}</Select.Item>)}</Select.Content></Select.Root>
@@ -118,7 +119,7 @@ function App() {
       <Tabs.Content value="Tasks"><Tasks tasks={scopedTasks} open={openTask} offline={offline}/></Tabs.Content>
       <Tabs.Content value="Runs">{runTable(scopedRuns)}</Tabs.Content><Tabs.Content value="Timeline">{eventTable(scopedEvents)}</Tabs.Content>
       </>}
-      <footer>只读查看 · 运行时声明不代表独立审查或 GitHub 批准。</footer></div></main>
+      <footer>{view === 'Settings' ? '本机连接设置 · 保存连接需要 Windows Owner 确认。' : '只读查看 · 运行时声明不代表独立审查或 GitHub 批准。'}</footer></div></main>
     </Tabs.Root>
     <TaskDetail task={taskId?taskDetail:null} close={()=>setTaskId(null)} offline={offline} loading={taskLoading} error={taskError} openRun={id=>{setTaskId(null);const run=runs.find(r=>r.id===id);if(run)setSelection({kind:'Run',item:run});}}/>
     <Dialog.Root open={selection !== null} onOpenChange={open => { if (!open) setSelection(null); }}><Dialog.Content maxWidth="780px"><Flex justify="between" align="start" gap="3"><Dialog.Title>{selection ? text(selection.kind) : ''}：{selection?.item.id}</Dialog.Title><Dialog.Close><Button variant="soft">关闭详情</Button></Dialog.Close></Flex><Dialog.Description>当前查看范围内已记录的事实。GitHub 授权状态未核验。</Dialog.Description>

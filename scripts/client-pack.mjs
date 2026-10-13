@@ -25,6 +25,7 @@ try {
   cpSync(join(root, 'docs/doctor.md'), join(stage, 'doctor.md'));
   cpSync(join(root, 'docs/versioned-profile.md'), join(stage, 'versioned-profile.md'));
   cpSync(join(root, 'docs/windows-product.md'), join(stage, 'windows-product.md'));
+  cpSync(join(root, 'docs/dashboard-github-app.md'), join(stage, 'dashboard-github-app.md'));
   cpSync(join(root, 'docs/project-enrollment.md'), join(stage, 'project-enrollment.md'));
   cpSync(join(root,'docs/develop-to-pr.md'),join(stage,'develop-to-pr.md'));
   cpSync(join(root,'docs/windows-fast-flow.md'),join(stage,'windows-fast-flow.md'));
@@ -36,7 +37,7 @@ try {
   if (viewer) rmSync(join(stage, 'dist/dashboard-ui/build-inputs.json'), { force: true });
   const packageName = viewer ? '@zlpoot/awh-viewer' : CLIENT_PACKAGE;
   const packageJson = { name: packageName, version: CLIENT_VERSION, private: true, type: 'module', engines: { node: '>=24' },
-    bin: viewer ? { 'awh-viewer': 'dist/dashboard-cli.js' } : { awh: 'dist/client/cli.js' }, ...(viewer ? {} : { exports: { '.': './dist/client/index.js' } }), files: ['dist', 'doctor.md', 'versioned-profile.md','windows-product.md','project-enrollment.md','develop-to-pr.md','windows-fast-flow.md',...(viewer ? [] : ['windows-local-fast.md','windows-local-fast-collaboration.md','windows-github-app.md']),'client-machine.schema.json','local-viewer.schema.json'],
+    bin: viewer ? { 'awh-viewer': 'dist/dashboard-cli.js' } : { awh: 'dist/client/cli.js' }, ...(viewer ? {} : { exports: { '.': './dist/client/index.js' } }), files: ['dist', 'doctor.md', 'versioned-profile.md','windows-product.md','dashboard-github-app.md','project-enrollment.md','develop-to-pr.md','windows-fast-flow.md',...(viewer ? [] : ['windows-local-fast.md','windows-local-fast-collaboration.md','windows-github-app.md']),'client-machine.schema.json','local-viewer.schema.json'],
     dependencies: manifest.dependencies, bundledDependencies: Object.keys(manifest.dependencies) };
   writeFileSync(join(stage, 'package.json'), JSON.stringify(packageJson, null, 2));
   const copied = new Map();

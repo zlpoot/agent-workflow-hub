@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readExternalFile, externalFilePath } from './shared/external-files.js';
 import { ControlPlaneError, fail, safeData, validId } from './shared/security.js';
@@ -9,6 +9,8 @@ import { createDashboardGateway } from './dashboard/gateway.js';
 import { createLocalOnboarding, type LocalBinding } from './dashboard/onboarding.js';
 import { createEnrollmentService } from './dashboard/enrollment.js';
 import { createOwnerApproval } from './dashboard/owner-approval.js';
+import { createGithubAppOwnerConfirmation } from './dashboard/github-app-owner.js';
+import { createGithubAppManagement } from './dashboard/github-app-management.js';
 import { readMachineConfig } from './client/enrollment.js';
 import { LocalFastObservationAdapter, GitHubObservationAdapter, combineTaskAdapters, validateObservationConfigs, validateGitHubObservationConfigs, type LocalFastObservationConfig, type GitHubObservationConfig } from './dashboard/local-fast-observation.js';
 
@@ -27,11 +29,21 @@ export function readViewerConfig(path: string): ViewerConfig {
   externalFilePath(c.database); createLocalOnboarding(c.local_bindings); return c;
 }
 export async function main(args: string[]) {
-  if (args.length === 1 && args[0] === '--help') return console.log('awh-viewer --config <absolute-external-json-file>\nExplicit IPv4 loopback OS-user viewer, existing CP v2 read-only database, scoped browser cookie and opt-in offline installed-Client diagnosis. Optional --owner-config <absolute-external-json-file> enables local administrator confirmation. Ctrl+C stops the viewer.');
-  if (![2,4].includes(args.length) || args[0] !== '--config' || args.length === 4 && args[2] !== '--owner-config') fail(500, 'configuration', 'Viewer requires exactly one explicit external configuration');
+  if (args.length === 1 && args[0] === '--help') return console.log('awh-viewer --config <absolute-external-json-file> [--owner-config <external-json>] [--github-app-owner-config <external-json>]\nExplicit IPv4 loopback OS-user viewer, read-only CP database. Owner options are separately provisioned protected local policies. Ctrl+C stops the viewer.');
+  if (![2,4,6].includes(args.length) || args[0] !== '--config') fail(500, 'configuration', 'Explicit Viewer configuration required');
+  const policies = new Map<string,string>();
+  for (let i = 2; i < args.length; i += 2) {
+    if (!['--owner-config','--github-app-owner-config'].includes(args[i]!) || policies.has(args[i]!) || !args[i+1]) fail(500, 'configuration', 'Closed Owner options required');
+    policies.set(args[i]!, args[i+1]!);
+  }
   const c = readViewerConfig(args[1]!);
-  if(args.length === 4 && !c.machine_config_file)fail(500,'owner_configuration','Machine setup required');
-  const ownerApprove=args.length === 4 ? createOwnerApproval(c.machine_config_file!,args[3]!,c.database) : undefined;
+  if(policies.has('--owner-config') && !c.machine_config_file)fail(500,'owner_configuration','Machine setup required');
+  const ownerApprove=policies.has('--owner-config') ? createOwnerApproval(c.machine_config_file!,policies.get('--owner-config')!,c.database) : undefined;
+  const windowsAppAvailable = process.platform === 'win32' && !!process.env.LOCALAPPDATA && isAbsolute(process.env.LOCALAPPDATA);
+  if (!windowsAppAvailable && policies.has('--github-app-owner-config')) fail(500, 'app_owner_configuration', 'GitHub App Owner management requires a Windows App environment');
+  const githubApp = windowsAppAvailable
+    ? createGithubAppManagement({ confirm: policies.has('--github-app-owner-config') ? createGithubAppOwnerConfirmation(policies.get('--github-app-owner-config')!) : undefined })
+    : undefined;
   const enrollment = c.machine_config_file ? createEnrollmentService(c.machine_config_file,ownerApprove) : undefined;
   for (const b of enrollment?.bindings() ?? []) if (!c.viewer.project_ids.includes(b.project_id)) c.viewer.project_ids.push(b.project_id);
   const store = new DashboardReadStore(c.database, () => enrollment?.bindings() ?? []);
@@ -39,7 +51,7 @@ export async function main(args: string[]) {
   const assets = join(dirname(fileURLToPath(import.meta.url)), 'dashboard-ui');
   readFileSync(join(assets, 'index.html'));
   const gateway = createDashboardGateway({ enabled: true, store, assets, localBrowserViewer: c.viewer, onboarding: createLocalOnboarding(c.local_bindings), enrollment,
-    tasks:combineTaskAdapters(new LocalFastObservationAdapter(c.local_fast_observations??[]),new GitHubObservationAdapter(c.github_observations??[])) });
+    tasks:combineTaskAdapters(new LocalFastObservationAdapter(c.local_fast_observations??[]),new GitHubObservationAdapter(c.github_observations??[])), githubApp });
   try { await new Promise<void>((resolve, reject) => { gateway.server.once('error', reject); gateway.server.listen(c.port, '127.0.0.1', resolve); }); }
   catch { await gateway.close(); store.close(); return fail(500, 'viewer_start', 'Viewer port unavailable; preserve the existing listener'); }
   console.log(JSON.stringify({ url: `http://127.0.0.1:${c.port}/dashboard`, access: 'explicit_local_os_user', expires_in_seconds: 3600, database: 'existing_v2_readonly', authority_verified: false }));
