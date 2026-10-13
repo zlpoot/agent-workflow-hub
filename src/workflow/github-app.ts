@@ -277,7 +277,9 @@ export class GithubApp {
       },
       create: async (branch, title, body) => {
         if (!/^codex\/local-fast-[1-9]\d*$/.test(branch)) return stop();
-        await operation({ pull_requests: 'write' }, token => live.request(`${root}/pulls`, token, 'POST', { head: branch, base: 'main', draft: true, title, body }));
+        // Creating a private-repository PR must resolve its head/base commits.
+        // Read those contents without granting another code-write capability.
+        await operation({ pull_requests: 'write', contents: 'read' }, token => live.request(`${root}/pulls`, token, 'POST', { head: branch, base: 'main', draft: true, title, body }));
       },
       update: async (pr, title, body) => {
         if (!positive(pr)) return stop();

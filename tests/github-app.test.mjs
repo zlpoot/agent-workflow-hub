@@ -24,7 +24,7 @@ function fixture(t, h, overrides = {}) {
   writeFileSync(key, pem, { mode: 0o600 });
   t.after(() => { const target = realpathSync(base); assert(relative(realpathSync(tmpdir()), target).startsWith('awh-app-test-')); rmSync(target, { recursive: true, force: true }); });
   const calls = [], spawnCalls = [], mutate = new Map();
-  let now = Date.parse('2026-10-12T12:00:00Z'), loseAck = false, invisible = false, creates = 0, failPush = false, unsafeKeys = '', expireOnInspection = false;
+  let now = Date.parse('2026-10-12T12:00:00Z'), loseAck = false, invisible = false, creates = 0, failPush = false, unsafeKeys = '', expireOnInspection = false, requireReferenceRead = false, lastPermissions;
   const response = v => new Response(JSON.stringify(v));
   const fetch = async (url, init) => {
     const path = new URL(url).pathname + new URL(url).search, body = init.body ? JSON.parse(init.body) : undefined;
@@ -34,6 +34,7 @@ function fixture(t, h, overrides = {}) {
     if (path === '/app') v = { id: 5, slug: 'synthetic-builder' };
     else if (path.endsWith('/installation')) v = { id: 9, app_id: 5, app_slug: 'synthetic-builder', account: { id: 15, login: repository.split('/')[0], type: 'Organization' }, repository_selection: 'selected', suspended_at: null, permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } };
     else if (path.endsWith('/access_tokens')) {
+      lastPermissions = body.permissions;
       const write = Object.values(body.permissions).includes('write');
       if (write) assert.deepEqual(body.repository_ids, [42]);
       v = { token: 'ghs_syntheticOnly', expires_at: new Date(now + 3600000).toISOString(), permissions: { metadata: 'read', ...body.permissions }, ...(body.repository_ids ? { repositories: [{ id: 42, full_name: repository }] } : {}) };
@@ -43,6 +44,7 @@ function fixture(t, h, overrides = {}) {
     else if (path.includes('/git/ref/heads/')) v = { ref: 'refs/heads/' + path.split('/git/ref/heads/')[1], object: { sha: h?.readRef(path.split('/git/ref/heads/')[1]) ?? head } };
     else if (path.includes('/pulls?')) { const branch = new URL(url).searchParams.get('head').split(':')[1]; v = invisible ? [] : h?.prs.filter(p => p.head.ref === branch) ?? []; if (h) v.forEach(p => { p.head.sha = h.readRef(p.head.ref); }); }
     else if (path.endsWith('/pulls') && init.method === 'POST') {
+      if (requireReferenceRead && lastPermissions?.contents !== 'read') return new Response(JSON.stringify({message:'Private branch references are inaccessible'}),{status:403});
       creates++;
       const number = 9 + creates;
       if (h && !invisible) h.prs.push({ number, node_id: `PR_${number}`, html_url: `https://github.com/${repository}/pull/${number}`, state: 'open', draft: true, user: bot, body: body.body,
@@ -68,7 +70,7 @@ function fixture(t, h, overrides = {}) {
     return { status: 0, stdout: h ? h.git(translated, settings.cwd) : args[0] === 'config' ? '' : args[0] === 'branch' ? 'codex/local-fast-1' : args[0] === 'rev-parse' ? head : '', stderr: '' };
   }, ...overrides });
   const connect = () => app.connect({ app_id: 5, app_slug: 'synthetic-builder', private_key_path: key, repositories: [repository], reviewer: reviewer.login }, true);
-  return { app, connect, key, configPath, calls, spawnCalls, mutate, advance(ms) { now += ms; }, loseAck() { loseAck = true; }, invisible(v) { invisible = v; }, creates: () => creates, failPush(v) { failPush = v; }, unsafeKeys(v) { unsafeKeys = v; }, expireOnInspection() { expireOnInspection = true; } };
+  return { app, connect, key, configPath, calls, spawnCalls, mutate, requireReferenceRead() {requireReferenceRead=true;}, advance(ms) { now += ms; }, loseAck() { loseAck = true; }, invisible(v) { invisible = v; }, creates: () => creates, failPush(v) { failPush = v; }, unsafeKeys(v) { unsafeKeys = v; }, expireOnInspection() { expireOnInspection = true; } };
 }
 
 test('one-time connect discovers installation, resolves real Bot/User IDs, stores only external references; preflight is read-only', async t => {
@@ -131,7 +133,7 @@ test('operation-minimum single-repository push/PR tokens and no persistent crede
   const f = fixture(t); await f.connect(); const delivery = await f.app.preflight(repository);
   await delivery.push(process.cwd(), 'codex/local-fast-1', head); await delivery.pulls('codex/local-fast-1'); await delivery.create('codex/local-fast-1','title','body');
   const operations = f.calls.filter(c => c.path.endsWith('/access_tokens') && c.body.repository_ids);
-  assert.deepEqual(operations.map(c => c.body.permissions), [{contents:'write'}, {pull_requests:'read'}, {pull_requests:'write'}]);
+  assert.deepEqual(operations.map(c => c.body.permissions), [{contents:'write'}, {pull_requests:'read'}, {pull_requests:'write',contents:'read'}]);
   assert(operations.every(c => c.body.repository_ids.length === 1 && c.body.repository_ids[0] === 42));
   const pushed = f.spawnCalls.find(c => c.args[0] === 'push'); assert.equal(pushed.args[3], `https://github.com/${repository}.git`);
   assert(pushed.args.includes('--no-follow-tags')); assert(pushed.args.includes('--recurse-submodules=no'));
@@ -144,6 +146,17 @@ test('operation-minimum single-repository push/PR tokens and no persistent crede
   f.mutate.clear();
   f.mutate.set('/app/installations/9/access_tokens',(v,b)=>b.repository_ids ? {...v,expires_at:'2020-01-01T00:00:00Z'} : v);
   await assert.rejects(delivery.create('codex/local-fast-1','title','body'),denied);
+});
+
+test('private repository Draft creation can resolve branches without requesting Contents write', async t => {
+  const f=fixture(t);await f.connect();f.requireReferenceRead();const d=await f.app.preflight(repository);
+  await d.create('codex/local-fast-1','Private repository draft','body');
+  assert.equal(f.creates(),1);
+  const mint=f.calls.filter(c=>c.path.endsWith('/access_tokens')&&c.body.repository_ids).at(-1);
+  assert.deepEqual(mint.body,{repository_ids:[42],permissions:{pull_requests:'write',contents:'read'}});
+  f.mutate.set('/app/installations/9/access_tokens',(v,b)=>b.repository_ids?{...v,permissions:{...v.permissions,contents:'write'}}:v);
+  await assert.rejects(d.create('codex/local-fast-1','Private repository draft','body'),e=>denied(e)&&e.reason==='token_permissions');
+  assert.equal(f.creates(),1,'excess Contents write must be rejected before PR creation');
 });
 
 test('transport refuses executable/redirecting Git configuration and expiry during inspection before push', async t => {
