@@ -31,7 +31,8 @@
     "dashboard:v2:build": "node scripts/dashboard-v2-build.mjs",
     "dashboard:v2:preview": "node scripts/dashboard-v2-preview.mjs",
     "dashboard:v2:smoke": "node scripts/dashboard-v2-smoke.mjs",
-    "dashboard:v2:viewer-smoke": "node scripts/dashboard-v2-viewer-smoke.mjs"
+    "dashboard:v2:viewer-smoke": "node scripts/dashboard-v2-viewer-smoke.mjs",
+    "dashboard:v2:app-smoke": "node scripts/dashboard-v2-app-smoke.mjs"
   },
   "devDependencies": {
     "@radix-ui/themes": "3.3.0",

@@ -86,6 +86,14 @@ try {
   const snapshot=await (await context.request.get(origin+'/dashboard/v1/snapshot')).json();
   assert.equal(snapshot.authority_verified,false);assert.equal(snapshot.tasks.length,1);assert.equal(snapshot.tasks[0].fixture,false);assert.equal(snapshot.tasks[0].state,'developing');
   assert(snapshot.tasks[0].observations.some(o=>o.source==='github'&&o.status==='not_checked'));
+  await page.getByRole('button',{name:/^设置/}).click();
+  await page.getByRole('heading',{name:'GitHub App',exact:true}).waitFor();
+  await page.getByText('当前 Viewer 仅可查看。本机可信 Owner 启用管理功能后，才能检测和连接。',{exact:true}).waitFor();
+  assert(await page.getByRole('button',{name:'检测配置',exact:true}).isDisabled());
+  assert(await page.getByRole('textbox',{name:'PEM 本机路径',exact:true}).isDisabled());
+  assert.equal(await page.getByText('App Fixture · 模拟数据 · 真实 Preflight NOTRUN',{exact:true}).count(),0);
+  await page.screenshot({path:join(output,'installed-v2-settings-readonly.png'),fullPage:true});
+  await page.getByRole('button',{name:/^总览/}).click();
   await page.screenshot({path:join(output,'desktop-overview.png'),fullPage:true});
   await page.getByRole('button',{name:/^任务/}).click();
   const table=page.locator('.desktop-table');await table.getByText('正在开发',{exact:true}).waitFor();
@@ -133,11 +141,14 @@ try {
   await page.getByRole('link',{name:'Dashboard V1'}).click();await page.getByRole('heading',{name:'最近运行',exact:true}).waitFor();
   assert.equal(new URL(page.url()).pathname,'/dashboard');assert.equal(await page.getByText('示例预览 · 模拟数据',{exact:true}).count(),0);
   await page.screenshot({path:join(output,'v1-fallback.png'),fullPage:true});
+  await page.getByRole('tab',{name:'设置',exact:true}).click();
+  await page.getByText('当前 Viewer 仅可查看。本机可信 Owner 启用管理功能后，才能检测和连接。',{exact:true}).waitFor();
+  assert(await page.getByRole('button',{name:'检测配置',exact:true}).isDisabled());
   await stopViewer();writer.close();writer=null;
   const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),before=sha(readFileSync(database));
   await startViewer();await page.goto(ready.v2_url);await page.getByText('已连接',{exact:true}).waitFor();await stopViewer();
   assert.equal(sha(readFileSync(database)),before,'Viewer must preserve scratch database bytes');
-  const evidence={platform:process.platform,browser:await browser.version(),host:'installed production Viewer + isolated scratch CP',fixture_host:false,authority_verified:false,viewer_sha256:pack.sha256,ui_sha256:ui.sha256,phases:[...phases],requests:requests.length,csp_violations:[],browser_errors:errors,database_bytes_unchanged:true,checks:['V2 direct bootstrap','same-origin GET Reader REST + real SSE','CP tasks/executor/machine/responsibility/detail + safe Issue/PR links','manual refresh','1440px + 390px','actual Viewer stop/restart degradation + recovery','HttpOnly/SameSite + empty browser storage + CSP','UI/Viewer byte equality + closed archives','V1 fallback'],mac:'NOTRUN',production_cutover:'NOTRUN'};
+  const evidence={platform:process.platform,browser:await browser.version(),host:'installed production Viewer + isolated scratch CP',fixture_host:false,authority_verified:false,viewer_sha256:pack.sha256,ui_sha256:ui.sha256,phases:[...phases],requests:requests.length,csp_violations:[],browser_errors:errors,database_bytes_unchanged:true,checks:['V2 direct bootstrap','installed V2 + V1 App settings readonly (no management policy; GET only)','same-origin GET Reader REST + real SSE','CP tasks/executor/machine/responsibility/detail + safe Issue/PR links','manual refresh','1440px + 390px','actual Viewer stop/restart degradation + recovery','HttpOnly/SameSite + empty browser storage + CSP','UI/Viewer byte equality + closed archives','V1 fallback'],native_owner_ui:'NOTRUN',real_app_connect:'NOTRUN',mac:'NOTRUN',production_cutover:'NOTRUN'};
   writeFileSync(join(output,'verification.json'),JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify(evidence));
 } finally {
   await browser?.close();await stopViewer();writer?.close();
