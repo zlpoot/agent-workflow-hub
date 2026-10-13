@@ -79,6 +79,15 @@ try {
     await context.request.get(new URL("/dashboard/v1/snapshot", url).href)
   ).json();
   assert(snapshot.tasks.every((t) => t.fixture));
+  // Review R1: every task must belong to exactly one Overview category.
+  const displayedMetricTotal = (
+    await page.locator(".metrics strong").allTextContents()
+  ).reduce((total, value) => total + Number(value), 0);
+  assert.equal(
+    displayedMetricTotal,
+    snapshot.tasks.length,
+    "Overview must account for all fixture tasks",
+  );
   await page
     .getByRole("combobox", { name: "GitHub 自动刷新", exact: true })
     .selectOption("0");
@@ -265,6 +274,38 @@ try {
   ).json();
   const event = { ...timeline.items[0], cursor: snapshot.cursor + 1 };
   const partial = await context.newPage();
+  let partialSnapshotReads = 0,
+    releasePartialSnapshot,
+    caughtUp = false;
+  const partialGate = new Promise((resolve) => {
+    releasePartialSnapshot = resolve;
+  });
+  await partial.route("**/dashboard/v1/snapshot*", async (route) => {
+    if (partialSnapshotReads++ === 0) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch(),
+      body = await response.json();
+    await partialGate;
+    await route.fulfill({
+      response,
+      body: JSON.stringify({ ...body, cursor: event.cursor }),
+    });
+  });
+  await partial.route("**/dashboard/v1/runs/*/timeline*", async (route) => {
+    const response = await route.fetch(),
+      body = await response.json();
+    if (caughtUp) {
+      body.snapshot_cursor = event.cursor;
+      if (
+        new URL(route.request().url()).pathname ===
+        "/dashboard/v1/runs/" + encodeURIComponent(event.run_id) + "/timeline"
+      )
+        body.items.push(event);
+    }
+    await route.fulfill({ response, body: JSON.stringify(body) });
+  });
   // Test-only EventSource double emits a real validated DTO; no source/UI phase override.
   await partial.addInitScript((event) => {
     window.EventSource = class {
@@ -297,6 +338,95 @@ try {
   }, event);
   await partial.goto(url);
   await partial.getByText("部分数据 · 同步中", { exact: true }).waitFor();
+  // The Reader queues a refresh after partial. Hold it until all stale-fact
+  // assertions finish, so refreshing cannot silently restore the old snapshot.
+  await partial.getByText("刷新中", { exact: true }).waitFor();
+  assert(
+    await partial.getByText("有新事件待同步", { exact: false }).isVisible(),
+  );
+  assert.deepEqual(await partial.locator(".metrics strong").allTextContents(), [
+    "—",
+    "—",
+    "—",
+    "—",
+  ]);
+  await partial.screenshot({
+    path: output + "/desktop-partial.png",
+    fullPage: true,
+  });
+  await partial.getByRole("button", { name: /^任务/ }).click();
+  const partialTable = partial.locator(".desktop-table");
+  assert.equal(
+    await partialTable.getByText("状态未知", { exact: true }).count(),
+    snapshot.tasks.length,
+  );
+  assert.equal(
+    await partialTable.getByText("正在开发", { exact: true }).count(),
+    0,
+  );
+  const staleRows = await partialTable
+    .locator("tbody tr")
+    .evaluateAll((rows) =>
+      rows.map((row) => ({
+        actor: row.children[2].textContent,
+        next: row.children[3].textContent,
+      })),
+    );
+  assert(
+    staleRows.every(
+      (row) =>
+        row.actor.includes("未知 / 已过期") &&
+        row.next.includes("重新核验") &&
+        row.next.includes("恢复读取并重新核验来源"),
+    ),
+  );
+  await partialTable.getByRole("button", { name: /^#1 模拟/ }).click();
+  await partial.getByRole("dialog").waitFor();
+  await partial.getByText("正在重新核验任务…").waitFor({ state: "hidden" });
+  const pendingDetail = partial.getByRole("dialog");
+  assert(
+    await pendingDetail.getByText("状态未知", { exact: true }).isVisible(),
+  );
+  assert(
+    await pendingDetail.getByText("未知 / 已过期", { exact: true }).isVisible(),
+  );
+  assert(
+    await pendingDetail.getByText("重新核验", { exact: true }).isVisible(),
+  );
+  assert(
+    await pendingDetail
+      .getByText("恢复读取并重新核验来源", { exact: true })
+      .isVisible(),
+  );
+  await partial.screenshot({ path: output + "/desktop-partial-detail.png" });
+  await partial.setViewportSize({ width: 390, height: 844 });
+  await partial.screenshot({ path: output + "/mobile-partial-detail.png" });
+  await partial.keyboard.press("Escape");
+  await partial.getByRole("dialog").waitFor({ state: "hidden" });
+  await partial.getByRole("button", { name: /^总览/ }).click();
+  await partial.screenshot({ path: output + "/mobile-partial.png" });
+  assert(
+    await partial.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  );
+  caughtUp = true;
+  releasePartialSnapshot();
+  await partial.getByText("已连接", { exact: true }).waitFor();
+  assert.equal(
+    await partial.getByText("有新事件待同步", { exact: false }).count(),
+    0,
+  );
+  assert.equal(
+    (await partial.locator(".metrics strong").allTextContents()).reduce(
+      (sum, value) => sum + Number(value),
+      0,
+    ),
+    snapshot.tasks.length,
+  );
+  await partial.getByRole("button", { name: /^任务/ }).click();
+  const recovered = partial.locator(".mobile-tasks");
+  assert((await recovered.getByText("正在开发", { exact: true }).count()) > 0);
   for (const checkPage of [denied, empty, loading, offline, partial])
     violations.push(...(await checkPage.evaluate(() => window.__csp)));
   assert.deepEqual(
@@ -347,7 +477,8 @@ try {
       "detail failure downgrades facts",
       "offline refresh / outdated / reconnect",
       "initial 401 + empty snapshot + delayed loading + failed SSE offline",
-      "partial validated DTO via test EventSource double",
+      "Overview categories partition all fixture tasks",
+      "partial / refreshing SSE-ahead snapshots downgrade metrics, stage, actor, waiting and action in list + Drawer; restore only after watermark catch-up",
       "HttpOnly cookie + no browser storage",
       "same-origin GET REST/SSE",
       "static CSS under unchanged Gateway CSP",

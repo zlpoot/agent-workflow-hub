@@ -2,6 +2,30 @@
 
 本 PoC 从 PR #85 已合并的固定 main 基线 `8470e51bec7c5a5a5c4301b6900c6a8c5cc05503` 创建，分支 `codex/dashboard-poc-shadcn`。Owner 于 2026-10-13 正式启动；后续明确豁免本任务 AGENTS.md 的发布授权要求。发布使用已有受保护 GitHub App，保持 Draft，停在 `AWAITING_INDEPENDENT_REVIEW`。最终精确 HEAD 和验证命令退出码记录在 Draft PR 与本地 `.handoff/final-verification.json`；不生成正式 Builder Evidence / Handoff / CP Run。
 
+## 原 PR 复审修复（R1）
+
+针对独立 Review 的 `9acdfe14a4d539f94c0edfca93b27861ffaa3524`，本轮仅修复两项 P2，继续使用 PR #88、原分支和固定基线；不启动第二轮 AI 修改实验。
+
+1. Overview 四卡按可展示阶段互斥、穷尽分类：`developing/verifying/merging` → 开发中，`awaiting_review` → 等待独立 Review，`completed` → 已完成，其余（包括 queued、ready、review_passed、awaiting_merge、changes_requested、blocked、unknown）→ 阻塞 / 待处理。页面明确说明口径。全部 TaskState 有独立预期断言；相同 15 任务 fixture 在 live 时显示 **4 + 1 + 9 + 1 = 15**。新增浏览器断言在旧产物上实际失败 `11 !== 15`，原始日志保留。
+2. SSE 领先快照时，将阶段、当前实际执行者、责任方、下一动作统一降级，并显示“有新事件待同步 / 历史快照”。判断同时保留 `state.events` 与 snapshot cursor 的差距：Reader 从 partial 自动进入 refreshing 时仍降级，只有快照追上事件水位才恢复。列表、筛选、Overview 和 Drawer 共用同一判断；Reader、REST/SSE 和业务契约不变。
+
+本轮精确 HEAD 的定向命令与退出码记录在 PR 正文和 gitignored `.handoff/r1/final-verification.json`；第一轮的 66 项 Dashboard / 21 项 App / V1 Smoke 结果保留为原 HEAD 的历史验证，未冒充本轮重跑。R1 执行：
+
+```powershell
+pnpm typecheck
+node scripts/dashboard-v2-build.mjs
+node --test tests/dashboard-v2.test.mjs tests/dashboard-ui.test.mjs
+node scripts/dashboard-v2-smoke.mjs
+git diff --check 9acdfe14a4d539f94c0edfca93b27861ffaa3524...HEAD
+```
+
+定向测试 **18/18 PASS**。浏览器 Smoke 使用全新内存 fixture 和真实 Edge：暂停快照刷新，验证 SSE 领先 / refreshing 期间四卡为未知、任务列表和详情事实均降级，再使 snapshot/timeline 追上水位，验证提示消失、真实展示阶段恢复。桌面和 390px 截图已更新；CSP 违规和非预期 browser error 为零。没有执行大型 CI、生产部署、Review 批准或合并。初次普通沙箱的依赖链接 / Edge 启动错误与自动权限审核超时留在原始开发记录，不算测试 PASS；必要权限下的最终结果单独记录。
+
+![R1 桌面待同步快照](dashboard-v2-shadcn/desktop-partial.png)
+![R1 桌面待同步任务详情](dashboard-v2-shadcn/desktop-partial-detail.png)
+![R1 390px 待同步快照](dashboard-v2-shadcn/mobile-partial.png)
+![R1 390px 待同步任务详情](dashboard-v2-shadcn/mobile-partial-detail.png)
+
 ## 可交互预览
 
 Node >=24、仓库固定的 pnpm 11.25.0，在本分支 Worktree 运行：
@@ -37,13 +61,13 @@ Overview 展示项目/执行者声明概况、开发中/等待独立 Review/阻�
 
 | 产物 | 原始 bytes | gzip bytes |
 | --- | ---: | ---: |
-| app.js | 566,594 | 131,133 |
-| app.css | 32,774 | 7,602 |
+| app.js | 567,477 | 131,397 |
+| app.css | 32,816 | 7,609 |
 | index.html | 373 | 254 |
 
 首次安装 pnpm 拒绝可选 `@parcel/watcher` 安装脚本；明确设置 `allowBuilds['@parcel/watcher']=false` 后冻结安装和单次 CLI 编译通过，不需要额外 native build。初版浏览器构建边界过于宽泛，将第三方包的 `src` 误判为业务源码；现改为拒绝仓库 `src/`、Node builtins 和 Builder 输入。未放宽实际服务器边界。
 
-## 验证与截图
+## 第一轮验证与截图（原复审 HEAD 的历史结果）
 
 ```powershell
 pnpm typecheck
@@ -56,7 +80,7 @@ pnpm dashboard:smoke
 git diff --check
 ```
 
-Dashboard 定向 **66/66 PASS**；V1/V2 真实 Edge **155.0.4283.45** Smoke PASS。相关 GitHub App 身份、完整 Selected 集合、最小 Token、私有 PR 权限与 Git 传输检查 **21/21 PASS**，命令如下；不声称完整 App 流程通过。
+原复审 HEAD `9acdfe14a4d539f94c0edfca93b27861ffaa3524`：Dashboard 定向 **66/66 PASS**；V1/V2 真实 Edge **155.0.4283.45** Smoke PASS。相关 GitHub App 身份、完整 Selected 集合、最小 Token、私有 PR 权限与 Git 传输检查 **21/21 PASS**，命令如下；不声称完整 App 流程通过。R1 当前 HEAD 验证见前面的专节。
 
 ```powershell
 node --test --test-force-exit --test-name-pattern='^(one-time connect|App connection and token boundaries|pinned installation|complete selected-set|operation-minimum|private repository Draft|transport refuses|askPass (local|worktree))' tests/github-app.test.mjs

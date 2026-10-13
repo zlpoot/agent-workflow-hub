@@ -14,6 +14,7 @@ export type Snapshot = {
 };
 export type DashboardState = {
   snapshot: Snapshot | null;
+  events: { cursor: number }[];
   phase: string;
   lastRefresh: number | null;
   error: string | null;
@@ -21,6 +22,7 @@ export type DashboardState = {
 export function useDashboard() {
   const [state, setState] = useState<DashboardState>({
     snapshot: null,
+    events: [],
     phase: "loading",
     lastRefresh: null,
     error: null,

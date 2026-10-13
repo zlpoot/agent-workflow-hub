@@ -7,13 +7,18 @@ import { Overview } from "./pages/overview";
 import { Tasks } from "./pages/tasks";
 import { useDashboard, useTaskDetail } from "./hooks/use-dashboard";
 import { GitHubObservation } from "./components/github-observation";
+import { taskSnapshotUnreliable } from "./lib/task-model.mjs";
 function App() {
   const [view, setView] = useState<View>("Overview"),
     [taskId, setTaskId] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const { state, now, reader, refresh } = useDashboard();
   const tasks = state.snapshot?.tasks ?? [],
-    disconnected = ["offline", "outdated", "error"].includes(state.phase);
+    disconnected = taskSnapshotUnreliable(
+      state.phase,
+      state.snapshot?.cursor,
+      state.events,
+    );
   const detail = useTaskDetail(
     taskId,
     tasks.find((t) => t.id === taskId) ?? null,

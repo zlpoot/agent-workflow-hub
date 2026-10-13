@@ -34,6 +34,25 @@ export const stamp = (value) =>
   value == null
     ? "未提供"
     : new Date(value).toLocaleString("zh-CN", { hour12: false });
+/** @param {string} phase @param {number|null} snapshotCursor @param {{cursor:number}[]} events */
+export function taskSnapshotPending(phase, snapshotCursor = null, events = []) {
+  return (
+    phase === "partial" ||
+    (snapshotCursor !== null &&
+      events.some((event) => event.cursor > snapshotCursor))
+  );
+}
+/** @param {string} phase @param {number|null} snapshotCursor @param {{cursor:number}[]} events */
+export function taskSnapshotUnreliable(
+  phase,
+  snapshotCursor = null,
+  events = [],
+) {
+  return (
+    taskSnapshotPending(phase, snapshotCursor, events) ||
+    ["offline", "outdated", "error"].includes(phase)
+  );
+}
 export function taskFacts(task, disconnected, now = Date.now()) {
   const unknown = disconnected || taskStale(task, now);
   const actorUnknown = disconnected || localStale(task, now);
@@ -45,6 +64,24 @@ export function taskFacts(task, disconnected, now = Date.now()) {
     waiting: unknown ? "重新核验" : (task.waiting_for?.name ?? "—"),
     action: unknown ? "恢复读取并重新核验来源" : task.next_action,
   };
+}
+export function overviewCounts(tasks, disconnected, now = Date.now()) {
+  const counts = {
+    developing: 0,
+    awaiting_review: 0,
+    pending: 0,
+    completed: 0,
+  };
+  for (const task of tasks) {
+    const state = taskFacts(task, disconnected, now).state;
+    if (["developing", "verifying", "merging"].includes(state))
+      counts.developing++;
+    else if (state === "awaiting_review") counts.awaiting_review++;
+    else if (state === "completed") counts.completed++;
+    // All other stages, including unknown/expired facts, still need handling.
+    else counts.pending++;
+  }
+  return counts;
 }
 export function filterTasks(tasks, filters, disconnected, now = Date.now()) {
   return tasks.filter(

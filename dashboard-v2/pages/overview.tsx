@@ -2,7 +2,7 @@ import { ArrowRight, Layers, Users, Activity } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { TaskList, type TaskListProps } from "../components/task-list";
-import { taskFacts } from "../lib/task-model.mjs";
+import { overviewCounts, taskFacts } from "../lib/task-model.mjs";
 import type { Snapshot } from "../hooks/use-dashboard";
 export function Overview({
   tasks,
@@ -12,34 +12,12 @@ export function Overview({
   snapshot,
   showTasks,
 }: TaskListProps & { snapshot: Snapshot; showTasks: () => void }) {
+  const summary = overviewCounts(tasks, disconnected, now);
   const counts = [
-    [
-      "开发中",
-      tasks.filter((t) =>
-        ["developing", "verifying", "merging"].includes(
-          taskFacts(t, disconnected, now).state,
-        ),
-      ).length,
-    ],
-    [
-      "等待独立 Review",
-      tasks.filter(
-        (t) => taskFacts(t, disconnected, now).state === "awaiting_review",
-      ).length,
-    ],
-    [
-      "阻塞 / 待处理",
-      tasks.filter((t) =>
-        ["blocked", "unknown", "changes_requested"].includes(
-          taskFacts(t, disconnected, now).state,
-        ),
-      ).length,
-    ],
-    [
-      "已完成",
-      tasks.filter((t) => taskFacts(t, disconnected, now).state === "completed")
-        .length,
-    ],
+    ["开发中", summary.developing],
+    ["等待独立 Review", summary.awaiting_review],
+    ["阻塞 / 待处理", summary.pending],
+    ["已完成", summary.completed],
   ] as const;
   const pending = tasks.filter(
     (t) =>
@@ -61,6 +39,9 @@ export function Overview({
           </Card>
         ))}
       </div>
+      <p className="muted mt-3">
+        四类覆盖全部任务；排队、准备开发、Review 通过和等待合并计入待处理。
+      </p>
       <div className="section-title">
         <div>
           <h2>下一步，从这里开始</h2>

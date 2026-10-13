@@ -8,7 +8,7 @@ import {
 import type { ReactNode } from "react";
 import { Button } from "./ui/button";
 import { Status } from "./status";
-import { stamp } from "../lib/task-model.mjs";
+import { stamp, taskSnapshotPending } from "../lib/task-model.mjs";
 import type { DashboardState } from "../hooks/use-dashboard";
 export type View = "Overview" | "Tasks";
 export function AppShell({
@@ -113,6 +113,16 @@ export function AppShell({
             </span>
             <span>注册信息与事件存储 · GitHub 授权未核验</span>
           </div>
+          {state.snapshot &&
+            taskSnapshotPending(
+              state.phase,
+              state.snapshot.cursor,
+              state.events,
+            ) && (
+              <div className="notice" role="status">
+                有新事件待同步；当前显示历史快照。任务阶段、执行者、责任方和下一动作已降级，等待快照同步完成。
+              </div>
+            )}
           {state.error && (
             <div className="notice" role="alert">
               读取或实时连接暂不可用。
