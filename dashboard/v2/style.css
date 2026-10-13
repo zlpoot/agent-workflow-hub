@@ -1,0 +1,11 @@
+/* Dashboard V2 PoC layout only; all component styling comes from the Ant Design token set. */
+html, body, #root { height: 100%; }
+body { margin: 0; background: #f2f5f7; }
+#root { min-height: 100%; }
+a { color: inherit; }
+.ant-table-cell { vertical-align: top; }
+.ant-descriptions-item-label { width: 130px; }
+@media (max-width: 575px) {
+  .ant-descriptions-item-label { width: 110px; }
+  .ant-card-body { padding: 12px; }
+}

@@ -1,0 +1,61 @@
+{
+  "view": "dashboard-v2-antd",
+  "baseline_issue": 86,
+  "baseline_sha": "8470e51bec7c5a5a5c4301b6900c6a8c5cc05503",
+  "bundle_sha256": "9b08f2b0a504feece3c98cc43ba039a609f4a6a095931e656193ad45eb69fd6c",
+  "browser": "156.0.8078.4",
+  "url_pattern": "http://127.0.0.1:<port>/dashboard/v2",
+  "dataset": "synthetic fixture only",
+  "authority_verified": false,
+  "screenshots": [
+    "overview-desktop",
+    "tasks-desktop",
+    "tasks-empty",
+    "task-detail",
+    "offline",
+    "overview-mobile",
+    "nav-mobile",
+    "tasks-mobile",
+    "task-detail-mobile"
+  ],
+  "checks": [
+    "Overview renders waiting-review/blocked/next-action sections",
+    "Tasks filters + search + empty state",
+    "Task detail drawer opens and closes with Escape",
+    "keyboard navigation between views",
+    "offline hides current facts and restores after refresh",
+    "native SSE with controlled partial -> refreshing -> lag -> catch-up",
+    "open drawer recovers with snapshot",
+    "detail 503 fallback is historical",
+    "390px no horizontal overflow",
+    "HttpOnly same-site viewer cookie",
+    "empty browser storage",
+    "same-origin GET reads only",
+    "no CP routes",
+    "no console or page errors"
+  ],
+  "request_count": 38,
+  "browser_errors": 0,
+  "expected_fault_console_errors": 2,
+  "csp": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+  "csp_violations": 0,
+  "viewport_desktop": 1440,
+  "viewport_mobile": 390,
+  "locale": "zh-CN",
+  "committed_screenshots": [
+    "overview-desktop",
+    "tasks-desktop",
+    "task-detail",
+    "overview-mobile",
+    "tasks-mobile",
+    "task-detail-mobile"
+  ],
+  "screenshot_sha256": {
+    "overview-desktop": "5fae24f7408fb5cea856d51a9f0cb109475671b6244eec955a18aa12ca9f9b1f",
+    "tasks-desktop": "eb4c5fca13c329ed915b765fc6f2884aec6f46a58ea2ec6b38ad128f73f8ed0d",
+    "task-detail": "4854ef238c29d8fb81b45cb6c80e666ba7152731eebfce21a9745c5a621df141",
+    "overview-mobile": "873b2fa9ea588aaf03e66d001bcd13709b494ee31b745e1c2a437eedbe2f948f",
+    "tasks-mobile": "baa6bfd4faca5f43f924e3c9e26b7932a37a5cddfadd6eb4a6a34c314c4656d5",
+    "task-detail-mobile": "b10f1c2ef9d9a9c3c0b0ad456abec1b47ce47958e0e09e564658d5f1a3d4a82b"
+  }
+}

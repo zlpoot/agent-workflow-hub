@@ -8,8 +8,11 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc -p dashboard/tsconfig.json",
-    "build": "node scripts/clean-build.mjs && tsc && node scripts/dashboard-build.mjs",
+    "typecheck": "tsc --noEmit && tsc -p dashboard/tsconfig.json && tsc -p dashboard/v2/tsconfig.json",
+    "build": "node scripts/clean-build.mjs && tsc && node scripts/dashboard-build.mjs && node scripts/dashboard-v2-build.mjs",
+    "dashboard:v2:build": "node scripts/dashboard-v2-build.mjs",
+    "dashboard:v2:preview": "node scripts/dashboard-v2-preview.mjs",
+    "dashboard:v2:smoke": "node scripts/dashboard-v2-smoke.mjs",
     "test": "node --test --test-concurrency=4 tests/*.test.mjs",
     "check": "pnpm typecheck && pnpm build && pnpm test",
     "handoff:check": "node dist/cli.js",
@@ -30,10 +33,12 @@
     "dashboard:load": "node scripts/dashboard-load.mjs"
   },
   "devDependencies": {
+    "@ant-design/icons": "6.3.4",
     "@radix-ui/themes": "3.3.0",
     "@types/node": "24.10.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "antd": "6.6.6",
     "esbuild": "0.28.2",
     "playwright": "1.62.1",
     "react": "19.3.0",
