@@ -6,7 +6,7 @@ import { createRequire, isBuiltin } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import ts from 'typescript';
 import { npmEntry, npmEnv } from './npm-tool.mjs';
-import { ids, specs, provenancePaths, sha256, tree, checkCandidate } from './release-lib.mjs';
+import { ids, specs, provenancePaths, viewerHelpers, sha256, tree, checkCandidate } from './release-lib.mjs';
 import { zipFiles, executableTar } from './release-archive.mjs';
 
 const root=dirname(dirname(fileURLToPath(import.meta.url))), args=process.argv.slice(2), target='universal';
@@ -53,7 +53,7 @@ try {
       if(component==='awh-viewer') {
         for(const name of ['index.html','app.js','app.css','validators.cjs']) { const path=join(pkgStage,'dist/dashboard-ui',name); mkdirSync(dirname(path),{recursive:true}); cpSync(join(root,'dist/dashboard-ui',name),path); }
         for(const name of ['index.html','app.js','app.css']) { const path=join(pkgStage,'dist/dashboard-v2',name); mkdirSync(dirname(path),{recursive:true}); cpSync(join(root,'dist/dashboard-v2',name),path); }
-        cpSync(join(root,'dist/dashboard/owner-confirm.ps1'),join(pkgStage,'dist/dashboard/owner-confirm.ps1'));
+        for(const helper of viewerHelpers)cpSync(join(root,'dist/dashboard',helper),join(pkgStage,'dist/dashboard',helper));
       }
       // Exact contract bytes accompany every package, independent of external configuration.
       mkdirSync(join(pkgStage,'contracts')); cpSync(join(root,'contracts/dashboard-v1.openapi.json'),join(pkgStage,'contracts/dashboard-v1.openapi.json'));

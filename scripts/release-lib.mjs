@@ -8,6 +8,7 @@ import { readTar, readZip, safeName } from './release-archive.mjs';
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 export const ids = ['awh-client','awh-control-plane','awh-viewer','awh-dashboard-ui','awh-builder'];
 export const targets = ['win32-x64','darwin-arm64'];
+export const viewerHelpers = ['owner-confirm.ps1','github-app-confirm.ps1'];
 export const specs = JSON.parse(readFileSync(new URL('../release/components.json',import.meta.url))).components;
 export const provenancePaths = ['pnpm-lock.yaml','release/components.json','src/profiles.ts','src/admin/registry.ts','src/validator.ts','src/protocol/schema.json','contracts/dashboard-v1.openapi.json','src/protocol/handoff.ts'];
 export function closed(o, fields) { assert(o && typeof o === 'object' && !Array.isArray(o)); assert.deepEqual(Object.keys(o).sort(),[...fields].sort(),'Unknown/missing fields'); }
@@ -44,6 +45,7 @@ export function checkArtifact(bytes, artifact, source) {
     assert.deepEqual([...(pkg.bundledDependencies??[])].sort(),Object.keys(pkg.dependencies??{}).sort());
     assert.equal(sha256(archive.get('contracts/dashboard-v1.openapi.json')?.body??Buffer.alloc(0)),build.provenance['contracts/dashboard-v1.openapi.json'],'Missing/exact contract bytes');
     for(const path of Object.values(pkg.bin)) { assert(archive.get(path).body.toString().startsWith('#!/usr/bin/env node\n')); assert(archive.get(path).mode & 0o111,'Executable bin required'); }
+    if(component==='awh-viewer')for(const helper of viewerHelpers)assert(archive.has('dist/dashboard/'+helper),'Missing Viewer Owner helper: '+helper);
     for(const [name,version] of Object.entries(build.runtime_dependencies)) assert.equal(JSON.parse(archive.get('node_modules/'+name+'/package.json')?.body.toString() ?? 'null')?.version,version,'Missing runtime dependency');
     for(const [path,entry] of archive) if(path.startsWith('dist/') && path.endsWith('.js')) {
       const ast=ts.createSourceFile(path,entry.body.toString(),ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
@@ -124,7 +126,7 @@ export function auditFiles(archive) {
     assert(!/(?:^|\/)(?:tests?|fixtures?|examples|credentials|\.git|\.handoff|session-host)(?:\/|$)/i.test(path),'Non-runtime directory: '+path);
     assert(!/(?:session-host|viewer-cli|wizard)/i.test(path),'Retired runtime: '+path);
     assert(!/(?:^|\/)\.env(?:\.|$)|\.(?:pem|key|token|jwt|sqlite(?:-wal|-shm)?|db)$/i.test(path),'Secret/data path: '+path);
-    assert(!path.endsWith('.ps1') || path==='dist/dashboard/owner-confirm.ps1','Undeclared platform helper');
+    assert(!path.endsWith('.ps1') || viewerHelpers.some(helper=>path==='dist/dashboard/'+helper),'Undeclared platform helper');
     const text=body.toString('utf8');
     assert(!/-----BEGIN [A-Z ]*PRIVATE KEY-----|-----BEGIN CERTIFICATE-----\r?\n[A-Za-z0-9+/=\r\n]{32,}-----END CERTIFICATE-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|awh_cp_[A-Za-z0-9_-]{40,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/.test(text),'Credential material in '+path);
   }
