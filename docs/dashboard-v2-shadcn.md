@@ -37,9 +37,9 @@ Overview 展示项目/执行者声明概况、开发中/等待独立 Review/阻�
 
 | 产物 | 原始 bytes | gzip bytes |
 | --- | ---: | ---: |
-| app.js | 566,567 | 131,124 |
+| app.js | 566,594 | 131,133 |
 | app.css | 32,774 | 7,602 |
-| index.html | 324 | 241 |
+| index.html | 373 | 254 |
 
 首次安装 pnpm 拒绝可选 `@parcel/watcher` 安装脚本；明确设置 `allowBuilds['@parcel/watcher']=false` 后冻结安装和单次 CLI 编译通过，不需要额外 native build。初版浏览器构建边界过于宽泛，将第三方包的 `src` 误判为业务源码；现改为拒绝仓库 `src/`、Node builtins 和 Builder 输入。未放宽实际服务器边界。
 
