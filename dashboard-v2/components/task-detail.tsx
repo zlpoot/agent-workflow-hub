@@ -179,7 +179,7 @@ export function TaskDetail({
                   </Fact>
                 </dl>
                 <p className="muted">
-                  这些记录仅供只读查看；此 PoC 不执行合并、授权或独立 Review。
+                  这些记录仅供只读查看；独立 Review 和授权由对应责任方完成。
                 </p>
               </Card>
               <Card className="detail-card">

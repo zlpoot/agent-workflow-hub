@@ -2,6 +2,8 @@
 
 The browser entry dashboard/app.tsx builds with React and Radix Themes. dashboard/semantics.json records this UI's local component choices. The browser bundle imports no server, filesystem, Builder or SQLite implementation. Static contract validators are generated locally at build time; no eval or third-party browser resources are needed.
 
+Dashboard V2 at `/dashboard/v2` uses the selected React 19 + shadcn/ui + Tailwind 4 UI. Overview and Tasks share the existing DashboardReader, validated `/dashboard/v1` REST/SSE and scoped Viewer session. `/dashboard` remains V1, including its existing Enrollment and settings. See [V2 Viewer integration](dashboard-v2-viewer.md) for startup, fallback and isolated Windows verification.
+
 Overview, Projects, Executors, Runs and Timeline present scoped observed data in Simplified Chinese. Loading, empty, error, partial, offline and outdated states remain distinct. Failed refresh retains the last successful snapshot and marks presence unknown. Connected appears only after SSE opens. Detail dialogs support visible close, Escape and keyboard navigation.
 
 The 添加项目 entry opens current machine Enrollment. It browses configured roots, previews the real Git identity, defaults to observation, and requires explicit confirmation. Development preparation selects an exact administrator-approved Work Item version. Submission and connection remain separate from administrator approval. The optional native owner helper is opt-in. Doctor and repair preserve current machine identity and local work. No four-step offline Wizard or historical installation sample is included.
@@ -10,4 +12,4 @@ The read adapter accesses fixed same-origin GET endpoints with cookies, redirect
 
 pnpm dashboard:fixture creates an in-memory synthetic store on an ephemeral loopback port and accepts no live inputs. pnpm dashboard:smoke tests views, search, details, keyboard, sessions, same-origin requests, offline/reconnect, unavailable Enrollment and mobile layout. pnpm windows:smoke independently installs actual Client and Viewer tarballs in temporary directories, creates a fresh scratch CP, verifies Resident stop/restart and cursor-constant heartbeat refresh, and checks retained state bytes. tests/enrollment.test.mjs verifies actual installed Enrollment and optional owner approval. These checks touch no production state and do not establish independent Review.
 
-pnpm ui:pack creates the closed UI ZIP. Client and Viewer packages ship their required runtime closure and current guides. UI ZIP includes only index.html, app.js, app.css and validators.cjs. Build metadata and test fixtures are excluded.
+pnpm build builds both UIs. pnpm ui:pack creates the closed UI ZIP with V1 index.html, app.js, app.css and validators.cjs at the root plus V2 index.html, app.js and app.css under v2/. The Viewer ships the same V1/V2 bytes. Build metadata and test fixtures are excluded.

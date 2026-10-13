@@ -10,6 +10,8 @@ GitHub App setup uses the same Dashboard at **设置 → GitHub App**. The separ
 
 Open its printed /dashboard URL through the local browser. Document navigation creates a one-hour HttpOnly SameSite=Strict Viewer cookie scoped to /dashboard. API/asset requests, cross-origin requests and CP credentials cannot bootstrap this session. “重新进入 Dashboard” performs explicit same-origin document navigation after expiry.
 
+The same process also prints `v2_url` for `/dashboard/v2`: the new read-only Overview/Tasks UI. Open it directly to establish the same scoped session. The visible Dashboard V1 link returns to `/dashboard` with that session; V1 remains the startup default and retains Enrollment/settings. Both versions read the same configured database and observation adapters. See [Dashboard V2 Viewer](dashboard-v2-viewer.md).
+
 Overview, Projects, Executors, Runs and Timeline display CP observations. “添加项目” uses the current Enrollment flow. Select an administrator-approved local directory, inspect the actual repository/branch, and confirm the request. An Observe grant permits registration and presence only. The optional “管理员批准并接入…” requires separately provisioned administrator configuration and native Human confirmation. It cannot grant GitHub delivery or start a business task.
 
 Resident sends the current dedicated Client heartbeat and preserves identity on stop/restart. Online presence and business workflow readiness are separate facts. Doctor diagnoses; explicit repair has its own confirmation and preserves conflicting state. Fixture previews always display “模拟数据”; the installed Viewer contains no seeded fixture records.
