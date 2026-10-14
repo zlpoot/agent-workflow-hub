@@ -26,10 +26,15 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
   const configs: LocalFastObservationConfig[] = [];
   const runs = new Map<string,{ controller: AbortController; done: Promise<unknown>; status: string; reason?: string }>();
   let busy = false, closed = false;
-  const selected = (value: unknown) => {
+  const allowed = (value: unknown) => {
     if (typeof value !== 'string' || value.length > 1024 || !isAbsolute(value) || value.split(/[\\/]/).some(p=>p==='..'||p==='.')) fail(400,'directory','Choose a trusted local directory');
-    const root = realpathSync(value);
-    if (root.toLowerCase() !== resolve(value).toLowerCase() || !c.project_roots.some(parent=>{const r=relative(parent,root);return r===''||!r.startsWith('..')&&!isAbsolute(r);})) fail(403,'directory','Directory is outside trusted project roots');
+    const root=resolve(value);
+    if (!c.project_roots.some(parent=>{const r=relative(parent,root);return r===''||!r.startsWith('..')&&!isAbsolute(r);})) fail(403,'directory','Directory is outside trusted project roots');
+    return root;
+  };
+  const selected = (value: unknown) => {
+    const requested=allowed(value),root=realpathSync(requested);
+    if(root.toLowerCase()!==requested.toLowerCase())fail(403,'directory','Redirected directories are unavailable');
     for (let p=root;;p=resolve(p,'..')) {if(lstatSync(p).isSymbolicLink())fail(403,'directory','Redirected directories are unavailable');if(resolve(p,'..')===p)break;}
     return root;
   };
@@ -52,13 +57,12 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
   };
   if(existsSync(file)) {
     const saved=JSON.parse(readExternalFile(file,65536).toString('utf8'));
-    if(!saved||Object.keys(saved).sort().join(',')!=='roots,schema_version'||saved.schema_version!=='1.0'||!Array.isArray(saved.roots)||saved.roots.length>32||new Set(saved.roots).size!==saved.roots.length)fail(500,'configuration','Invalid saved local associations');
+    if(!saved||!['roots,schema_version','repositories,roots,schema_version'].includes(Object.keys(saved).sort().join(','))||saved.schema_version!=='1.0'||!Array.isArray(saved.roots)||saved.roots.length>32||new Set(saved.roots).size!==saved.roots.length||saved.repositories!==undefined&&(!Array.isArray(saved.repositories)||saved.repositories.length!==saved.roots.length||!saved.repositories.every((r:unknown)=>typeof r==='string'&&/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(r)&&!r.includes('..'))))fail(500,'configuration','Invalid saved local associations');
     // Restore identity from Git and binding; an unavailable source remains explicitly configured.
-    for(const root of saved.roots) {
-      selected(root);
-      const {identity}=inspect(root);
-      const config:LocalFastObservationConfig={project_id:'lf-'+createHash('sha256').update(root).digest('hex').slice(0,24),repository:identity.repository,root,machine:{id:'machine-'+createHash('sha256').update(hostname()).digest('hex').slice(0,24),name:hostname(),platform:process.platform},executor_name:'Codex'};
-      try {Object.assign(config,association(root));} catch { /* Observer reports unavailable binding, never live execution. */ }
+    for(const [i,value] of saved.roots.entries()) {
+      const root=allowed(value),repository=saved.repositories?.[i]??inspect(root).identity.repository;
+      const config:LocalFastObservationConfig={project_id:'lf-'+createHash('sha256').update(root).digest('hex').slice(0,24),repository,root,machine:{id:'machine-'+createHash('sha256').update(hostname()).digest('hex').slice(0,24),name:hostname(),platform:process.platform},executor_name:'Codex'};
+      try {const live=association(root);if(live.repository===repository)Object.assign(config,live);} catch { /* Observer reports unavailable binding, never live execution. */ }
       configs.push(config);roots.push(root);
     }
   }
@@ -91,7 +95,7 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
           if(typeof data.issues!=='string'||!Array.isArray(data.checks)||data.checks.length>16||!data.checks.every(x=>typeof x==='string'&&x.length<=240)||!['personal-gh','github-app'].includes(String(data.provider)))fail(400,'local_fast_input','Select the exact finite queue and bounded checks');
           await fast.bind(identity.repository,data.issues,true,data.checks as string[],data.provider as 'personal-gh'|'github-app');
         }
-        const item=add(root);atomicJson(file,{schema_version:'1.0',roots});return {project_id:item.project_id,...preview(root)};
+        const item=add(root);atomicJson(file,{schema_version:'1.0',roots,repositories:configs.map(c=>c.repository)});return {project_id:item.project_id,...preview(root)};
       }
       if(!roots.includes(root))fail(403,'local_fast_project','Confirm this project first');
       if(action==='status')return watchStatus(root);

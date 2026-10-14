@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { harness, repository } from './helpers/local-fast-harness.mjs';
@@ -28,6 +28,8 @@ test('GUI binds exact queue, cancels without writes, rejects overrides/conflict,
   await assert.rejects(gui.handle('bind',{directory,issues:'1,2',checks:[],provider:'personal-gh',confirm:true}),code('local_fast_binding_conflict'));assert.equal(readFileSync(h.statePath,'utf8'),before);
   await assert.rejects(gui.handle('attach',{directory,confirm:true,watcher_directory:state}),code('local_fast_input'));
   const restored=createLocalFastProjects(config,overrides);assert.deepEqual(restored.configs,gui.configs);await restored.close();
+  const moved=directory+'-disconnected';renameSync(directory,moved);
+  try{const disconnected=createLocalFastProjects(config,overrides);assert.equal(disconnected.configs[0].repository,repository);assert.deepEqual(disconnected.projectIds(),gui.projectIds());await disconnected.close();}finally{renameSync(moved,directory);}
   assert(!h.calls.some(c=>c.command==='gh'&&c.args[0]!=='api'));
   assert(!existsSync(join(h.repo,'cp.sqlite')));
 });
