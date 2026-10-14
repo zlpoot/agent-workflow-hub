@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib';
 import { mkdtempSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, basename } from 'node:path';
-import { ids,specs,provenancePaths,sha256,checkArtifact,checkPortableClosure,auditFiles } from '../scripts/release-lib.mjs';
+import { ids,specs,provenancePaths,viewerHelpers,sha256,checkArtifact,checkPortableClosure,auditFiles } from '../scripts/release-lib.mjs';
 import { zipFiles,readZip,readTar,executableTar } from '../scripts/release-archive.mjs';
 import { checkManifest,checkSums,validateRelease } from '../scripts/release-validate.mjs';
 
@@ -25,6 +25,7 @@ function asset(component,modify=()=>{}) {
     for(const path of Object.values(spec.bin))files[path]=Buffer.from('#!/usr/bin/env node\n');
   }
   if(component==='awh-viewer')for(const path of ['index.html','app.js','app.css','validators.cjs'])files['dist/dashboard-ui/'+path]=Buffer.from(path);
+  if(component==='awh-viewer')for(const helper of viewerHelpers)files['dist/dashboard/'+helper]=Buffer.from('# synthetic fixed helper\n');
   if(component==='awh-viewer'||target==='static')for(const name of ['index.html','app.js','app.css'])files[(target==='static'?'v2/':'dist/dashboard-v2/')+name]=Buffer.from('v2/'+name);
   files[target==='static'?'dashboard-v1.openapi.json':'contracts/dashboard-v1.openapi.json']=Buffer.from('contracts/dashboard-v1.openapi.json');
   const build={schema_version:'1.0',kind:'awh_build',component,target,source_commit:source,source_clean:true,version:spec.version,node_major_min:24,build_environment:{os:'win32',cpu:'x64',node:'v24.21.0',npm:'11.0.0',pnpm:'not-used',typescript:'5.9.3',esbuild:'0.28.2'},provenance,runtime_dependencies:{},files:{}};
@@ -54,6 +55,14 @@ function releaseKit(t,modify) {
   return ()=>validateRelease(base,source);
 }
 test('V2 release accepts complete identical UI and Viewer assets',t=>{assert(releaseKit(t)().valid);});
+test('Viewer release requires both fixed Owner helpers even with recomputed archive hashes',()=>{
+  for(const helper of viewerHelpers){
+    const a=asset('awh-viewer',files=>delete files['dist/dashboard/'+helper]);
+    assert.throws(()=>checkArtifact(a.bytes,a.record,source),/Missing Viewer Owner helper/);
+  }
+  const a=asset('awh-viewer',files=>files['dist/dashboard/arbitrary.ps1']=Buffer.from('# synthetic extra helper'));
+  assert.throws(()=>checkArtifact(a.bytes,a.record,source),/Undeclared platform helper/);
+});
 test('V2 release rejects both sides missing all V2 assets even with valid hashes',t=>{
   const validate=releaseKit(t,(component,files)=>{if(component==='awh-viewer'||component==='awh-dashboard-ui')for(const name of ['index.html','app.js','app.css'])delete files[(component==='awh-viewer'?'dist/dashboard-v2/':'v2/')+name];});
   assert.throws(validate,/Missing V2 (UI|Viewer) bytes/);

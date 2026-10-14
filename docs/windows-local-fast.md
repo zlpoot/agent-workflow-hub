@@ -1,5 +1,7 @@
 # Windows Local Fast
 
+AWH repository collaboration defaults to [SELF_BOOTSTRAP](awh-self-bootstrap.md) for explicitly Owner-assigned ordinary Windows development: select the existing `github-app` provider and publish an ordinary Draft PR. This collaboration default does not change CLI defaults or authorize Strict delivery, product acceptance or merge.
+
 Local Fast is an explicit personal mode for one Windows machine, one repository and an Owner-confirmed ordered Issue queue. It uses existing Git and GitHub CLI authentication. It needs no administrator Policy, Work Item approval, SHA entry, digest, launcher, CP database or Enrollment. The default commands still use Strict authorization; a missing Strict approval never switches modes.
 
 For cross-session Review publication and the optional bounded Windows executor watcher, see [Windows Local Fast collaboration](windows-local-fast-collaboration.md). Existing bind/flow/Stage commands remain unchanged; the watcher requires a separate explicit interactive Owner scope and defaults to waiting for Human merge.

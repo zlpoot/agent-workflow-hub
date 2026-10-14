@@ -1,5 +1,7 @@
 # 本机管理员授权 CLI（M1-B0）
 
+本 CLI 用于 STRICT_DELIVERY 和 PRODUCT_ACCEPTANCE 的真实受信批准。Owner 派发 AWH 自身的普通 Windows 研发默认采用 [SELF_BOOTSTRAP](awh-self-bootstrap.md)，使用既有 GitHub App Local Fast 发布普通 Draft PR，不要求每个研发 PR 执行本页审批；这不改变管理员或 Builder 的实际安全校验。
+
 入口：node dist/admin-cli.js（或 pnpm admin）。完整参数见 --help。该入口不调用 GitHub、不读取 App PEM、不写 CP、不承担 Review。
 
 ## 两层授权
