@@ -1,0 +1,110 @@
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { hostname } from 'node:os';
+import { atomicJson, ClientError, inspectRepository } from '../client/local.js';
+import { localFastRun } from '../workflow/local-fast-github.js';
+import { externalPath, readExternalFile } from '../shared/external-files.js';
+import { fail } from '../shared/security.js';
+import { LocalFast, type LocalFastDependencies } from '../workflow/local-fast.js';
+import { LocalFastWatcher, type WatchDependencies } from '../workflow/local-fast-watcher.js';
+import type { LocalFastObservationConfig } from './local-fast-observation.js';
+
+export interface LocalFastProjectsConfig { project_roots: string[]; state_directory: string }
+export function validateLocalFastProjects(c: LocalFastProjectsConfig) {
+  if (!c || Object.keys(c).sort().join(',') !== 'project_roots,state_directory' || !Array.isArray(c.project_roots) || !c.project_roots.length || c.project_roots.length > 16) fail(500,'configuration','Invalid local project setup');
+  externalPath(c.state_directory);
+  for (const root of c.project_roots) {
+    if (!isAbsolute(root) || resolve(root).toLowerCase() !== realpathSync(root).toLowerCase() || !lstatSync(root).isDirectory()) fail(500,'configuration','Invalid trusted project root');
+  }
+}
+/** OS-user GUI association only. Binding and execution retain existing Local Fast gates. */
+export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: { fast?: Partial<LocalFastDependencies>; watch?: Partial<WatchDependencies> } = {}) {
+  validateLocalFastProjects(c);
+  const file = join(c.state_directory,'dashboard-local-fast.json');
+  const roots: string[] = [];
+  const configs: LocalFastObservationConfig[] = [];
+  const runs = new Map<string,{ controller: AbortController; done: Promise<unknown>; status: string; reason?: string }>();
+  let busy = false, closed = false;
+  const selected = (value: unknown) => {
+    if (typeof value !== 'string' || value.length > 1024 || !isAbsolute(value) || value.split(/[\\/]/).some(p=>p==='..'||p==='.')) fail(400,'directory','Choose a trusted local directory');
+    const root = realpathSync(value);
+    if (root.toLowerCase() !== resolve(value).toLowerCase() || !c.project_roots.some(parent=>{const r=relative(parent,root);return r===''||!r.startsWith('..')&&!isAbsolute(r);})) fail(403,'directory','Directory is outside trusted project roots');
+    for (let p=root;;p=resolve(p,'..')) {if(lstatSync(p).isSymbolicLink())fail(403,'directory','Redirected directories are unavailable');if(resolve(p,'..')===p)break;}
+    return root;
+  };
+  const inspect = (value: unknown) => {
+    const root=selected(value), identity=inspectRepository(root);
+    if(identity.root!==root)fail(400,'directory','Choose the Git root');
+    return {identity,fast:new LocalFast(root,overrides.fast)};
+  };
+  const association = (root: string): LocalFastObservationConfig => {
+    const {identity,fast}=inspect(root), scope=fast.scope();
+    if(scope.root!==root||scope.repository!==identity.repository)fail(409,'local_fast_binding','Select the original binding root');
+    return {project_id:'lf-'+createHash('sha256').update(root).digest('hex').slice(0,24),repository:scope.repository,root,
+      watcher_directory:join(overrides.watch?.localData??process.env.LOCALAPPDATA??'','AWH','local-fast',String(scope.repository_id)),
+      machine:{id:'machine-'+createHash('sha256').update(hostname()).digest('hex').slice(0,24),name:hostname(),platform:process.platform},executor_name:'Codex'};
+  };
+  const add = (root: string) => {
+    const config=association(root), existing=configs.find(x=>x.root===root);
+    if(!existing){if(configs.length>=32)fail(409,'local_fast_limit','Project capacity reached');configs.push(config);roots.push(root);}
+    return existing??config;
+  };
+  if(existsSync(file)) {
+    const saved=JSON.parse(readExternalFile(file,65536).toString('utf8'));
+    if(!saved||Object.keys(saved).sort().join(',')!=='roots,schema_version'||saved.schema_version!=='1.0'||!Array.isArray(saved.roots)||saved.roots.length>32||new Set(saved.roots).size!==saved.roots.length)fail(500,'configuration','Invalid saved local associations');
+    // Restore identity from Git and binding; an unavailable source remains explicitly configured.
+    for(const root of saved.roots) {
+      selected(root);
+      const {identity}=inspect(root);
+      const config:LocalFastObservationConfig={project_id:'lf-'+createHash('sha256').update(root).digest('hex').slice(0,24),repository:identity.repository,root,machine:{id:'machine-'+createHash('sha256').update(hostname()).digest('hex').slice(0,24),name:hostname(),platform:process.platform},executor_name:'Codex'};
+      try {Object.assign(config,association(root));} catch { /* Observer reports unavailable binding, never live execution. */ }
+      configs.push(config);roots.push(root);
+    }
+  }
+  const preview = (directory: unknown) => {
+    const {identity,fast}=inspect(directory);
+    const common=resolve(identity.root,(overrides.fast?.run??localFastRun)('git',['rev-parse','--git-common-dir'],identity.root));
+    // Absence must be distinguished from a corrupt/conflicting binding.
+    let scope;
+    if(existsSync(join(common,'awh-local-fast','state.json')))scope=fast.scope();
+    return {directory:identity.root,repository:identity.repository,head:identity.sha,branch:identity.ref,dirty:identity.dirty,bound:!!scope,issues:scope?.issues??[],checks:scope?.checks??[],provider:scope?.delivery?'github-app':'personal-gh'};
+  };
+  const watchStatus = (root: string) => {
+    inspect(root);
+    const run=runs.get(root);
+    try {const state=new LocalFastWatcher(root,{fast:overrides.fast,...overrides.watch}).status();return {...state,gui_status:run?.status??'IDLE',gui_reason:run?.reason??null,owner_confirmation:'GUI_OWNER_CONFIRMATION_NOT_INTEGRATED'};}
+    catch(error) {return {status:'BLOCKED',reason:error instanceof ClientError?error.code:'local_fast_watch_scope',gui_status:run?.status??'IDLE',owner_confirmation:'GUI_OWNER_CONFIRMATION_NOT_INTEGRATED'};}
+  };
+  return { configs, projectIds:()=>configs.map(c=>c.project_id), async handle(action:string,data:Record<string,unknown>) {
+    if(busy||closed)fail(409,'local_fast_busy','Wait for the current local operation');
+    busy=true;
+    try {
+      const fields:Record<string,string[]>={browse:['directory'],inspect:['directory'],attach:['directory','confirm'],bind:['directory','issues','checks','provider','confirm'],status:['directory'],start:['directory','confirm'],stop:['directory']};
+      if(!fields[action]||Object.keys(data).some(k=>!fields[action]!.includes(k)))fail(400,'local_fast_input','Closed local actions required');
+      if(action==='browse') {if(data.directory===undefined)return {roots:c.project_roots,current:null,directories:[]};const root=selected(data.directory);return {roots:c.project_roots,current:root,directories:readdirSync(root,{withFileTypes:true}).filter(e=>e.isDirectory()&&!e.isSymbolicLink()&&!e.name.startsWith('.')).slice(0,128).map(e=>join(root,e.name))};}
+      if(action==='inspect')return preview(data.directory);
+      const {identity,fast}=inspect(data.directory),root=identity.root;
+      if(action==='attach'||action==='bind') {
+        if(data.confirm!==true)fail(400,'local_fast_confirmation','Explicit project confirmation required');
+        if(action==='bind') {
+          if(typeof data.issues!=='string'||!Array.isArray(data.checks)||data.checks.length>16||!data.checks.every(x=>typeof x==='string'&&x.length<=240)||!['personal-gh','github-app'].includes(String(data.provider)))fail(400,'local_fast_input','Select the exact finite queue and bounded checks');
+          await fast.bind(identity.repository,data.issues,true,data.checks as string[],data.provider as 'personal-gh'|'github-app');
+        }
+        const item=add(root);atomicJson(file,{schema_version:'1.0',roots});return {project_id:item.project_id,...preview(root)};
+      }
+      if(!roots.includes(root))fail(403,'local_fast_project','Confirm this project first');
+      if(action==='status')return watchStatus(root);
+      if(action==='stop') {const run=runs.get(root);if(run){run.controller.abort();run.status='STOPPING';}return watchStatus(root);}
+      if(data.confirm!==true)fail(400,'local_fast_confirmation','Confirm starting the saved Owner scope');
+      const prior=runs.get(root);if(prior&&['RUNNING','STOPPING'].includes(prior.status))return watchStatus(root);
+      const watcher=new LocalFastWatcher(root,{fast:overrides.fast,...overrides.watch}),status=watcher.status();
+      if(status.watcher_running||status.stale_lock||status.status==='QUEUE_COMPLETED')fail(409,'local_fast_watch_unavailable','Completed queues and existing locks cannot be restarted');
+      const controller=new AbortController(),run={controller,done:Promise.resolve() as Promise<unknown>,status:'RUNNING',reason:undefined as string|undefined};
+      runs.set(root,run);
+      run.done=watcher.run(false,controller.signal).then(result=>{run.status=result.status;run.reason=result.reason;},error=>{run.status='BLOCKED';run.reason=error instanceof ClientError?error.code:'local_fast_watch_operation';});
+      return {status:'STARTING',owner_confirmation:'saved_windows_owner_scope'};
+    } catch(error) {if(error instanceof ClientError)fail(409,error.code,'Local Fast operation blocked; preserve history');throw error;}
+    finally {busy=false;}
+  },close:async()=>{closed=true;for(const run of runs.values())run.controller.abort();await Promise.allSettled([...runs.values()].map(r=>r.done));}};
+}

@@ -12,10 +12,11 @@ import type { createLocalOnboarding } from './onboarding.js';
 import { enrollmentBody, type createEnrollmentService } from './enrollment.js';
 import type { TaskAdapter } from './tasks.js';
 import { githubAppBody, type createGithubAppManagement } from './github-app-management.js';
+import type { createLocalFastProjects } from './local-fast-projects.js';
 
 export interface GatewayOptions { enabled?: boolean; store?: DashboardStore; authenticate?: AuthenticateViewer; assets?: string; assetsV2?: string; now?: () => number;
   localBrowserViewer?: Viewer; onboarding?: ReturnType<typeof createLocalOnboarding>; enrollment?: ReturnType<typeof createEnrollmentService>; tasks?: TaskAdapter;
-  githubApp?: ReturnType<typeof createGithubAppManagement> }
+  githubApp?: ReturnType<typeof createGithubAppManagement>; localFastProjects?: ReturnType<typeof createLocalFastProjects> }
 export const dashboardHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Cross-Origin-Resource-Policy': 'same-origin',
   'Cross-Origin-Opener-Policy': 'same-origin', 'Referrer-Policy': 'no-referrer',
@@ -59,6 +60,15 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
       if (!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.length > 2048 || request.url.includes('\\') || /%2e|%2f|%5c/i.test(request.url))
         fail(400, 'invalid_route', 'Invalid request target');
       const url = new URL(request.url, 'http://dashboard.invalid');
+      if(url.pathname.startsWith('/dashboard/local-fast/v1/')) {
+        if(!local||!options.localFastProjects)fail(404,'not_found','Local Fast GUI is not configured');
+        if(!authenticate(request))fail(401,'viewer_unauthorized','Local Viewer session required');
+        if(request.method!=='POST'||request.headers.origin!==`http://${host}`||request.headers['sec-fetch-site']!=='same-origin'||url.search)fail(403,'local_fast_origin','Explicit same-origin local interaction required');
+        const result=await options.localFastProjects.handle(url.pathname.slice('/dashboard/local-fast/v1/'.length),await enrollmentBody(request));
+        for(const id of options.localFastProjects.projectIds())if(!options.localBrowserViewer!.project_ids.includes(id))(options.localBrowserViewer!.project_ids as string[]).push(id);
+        if(!authenticate(request))fail(401,'viewer_unauthorized','Viewer session expired');
+        response.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});response.end(JSON.stringify({item:result,authority_verified:false}));return;
+      }
       if (url.pathname.startsWith('/dashboard/github-app/v1/')) {
         if (!local || !options.githubApp) fail(404, 'not_found', 'Local App settings are not configured');
         if (!authenticate(request)) fail(401, 'viewer_unauthorized', 'Local Viewer session required');
@@ -123,6 +133,7 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
   server.on('clientError', (_error, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'));
   return { server, close: async () => {
     options.githubApp?.close();
+    await options.localFastProjects?.close();
     await options.enrollment?.close();
     for (const stream of streams) stream.destroy();
     await new Promise<void>((resolve, reject) => { server.close(error => error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING' ? reject(error) : resolve()); server.closeAllConnections(); });

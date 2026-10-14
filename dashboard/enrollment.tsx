@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Badge, Button, Card, Dialog, Flex, Heading, Text, TextField } from '@radix-ui/themes';
+import { LocalFastProject } from './local-fast.js';
 
 type Preview = {repository:string;branch:string;head:string;dirty:boolean;worktree:string;project_id:string;machine:{id:string;platform:string};executor_id:string;status:string;request_file:string|null;mode:string};
 const policyKey = (policy:{id:string;version:string}) => JSON.stringify([policy.id,policy.version]);
 export function Enrollment({onConnected}:{onConnected:(project:string)=>void}) {
+  const [kind,setKind]=useState(window.location.hash==='#local-fast'?'local-fast':'cp');
+  return <div className="enrollment-stack"><label>项目接入方式 <select aria-label="项目接入方式" value={kind} onChange={e=>setKind(e.target.value)}><option value="cp">CP Enrollment</option><option value="local-fast">Local Fast</option></select></label>{kind==='local-fast'?<LocalFastProject onConnected={onConnected}/>:<CpEnrollment onConnected={onConnected}/>}</div>;
+}
+function CpEnrollment({onConnected}:{onConnected:(project:string)=>void}) {
   const [directory,setDirectory] = useState(''), [directories,setDirectories] = useState<string[]>([]), [roots,setRoots] = useState<string[]>([]);
   const [preview,setPreview] = useState<Preview|null>(null),[busy,setBusy] = useState(false),[running,setRunning] = useState(false),[error,setError] = useState(''),[available,setAvailable] = useState<boolean|null>(null);
   const [mode,setMode] = useState('observe'),[policies,setPolicies] = useState<any[]>([]),[selection,setSelection] = useState(''),[diagnosis,setDiagnosis] = useState<any>(null),[repair,setRepair] = useState<any>(null),[bindings,setBindings] = useState<any[]>([]);

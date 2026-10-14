@@ -84,6 +84,9 @@ export function AppShell({
               刷新
             </Button>
             <Button variant="ghost" asChild>
+              <a href="/dashboard#local-fast">添加项目</a>
+            </Button>
+            <Button variant="ghost" asChild>
               <a href="/dashboard">
                 Dashboard V1 <ArrowUpRight aria-hidden="true" />
               </a>
