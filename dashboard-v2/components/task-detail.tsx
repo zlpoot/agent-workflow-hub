@@ -9,7 +9,7 @@ import {
 import { Card } from "./ui/card";
 import { Status } from "./status";
 import { GitHubLink } from "./task-list";
-import { sourceLabels, stamp, taskFacts } from "../lib/task-model.mjs";
+import { sourceLabels, stamp, taskFacts, localFastReviewInstruction } from "../lib/task-model.mjs";
 import { localStale } from "../../dashboard/task-freshness.mjs";
 import { safeSourceUrl } from "../../dashboard/adapter.mjs";
 import type { ReactNode } from "react";
@@ -201,7 +201,7 @@ export function TaskDetail({
                 ))}
                 <p className="muted">注册 / 心跳不等于 GitHub 授权核验。</p>
               </Card>
-              {task.workflow==='local-fast'&&task.pr&&facts.state==='awaiting_review'&&<Card className="detail-card"><h3>ChatGPT 独立 Review</h3><p>打开 PR，复制下列指令交给 Reviewer；新的 HEAD 必须重新审查。</p><textarea aria-label="ChatGPT Review 指令" readOnly rows={6} value={`请独立审查 https://github.com/${task.repository}/pull/${task.pr.number} 的实际当前完整 HEAD、完整差异及 Issue。运行必要定向测试；通过已有原生 Review Bridge 发布 COMMENTED + AWH-LOCAL-FAST-REVIEW v1 的 PASS 或 REQUEST_CHANGES，native commit_id 与 decision head 必须等于实际当前 HEAD。不要执行 Merge 或关闭 Issue。观察的历史 HEAD：${task.github_head??task.source_head??'未核验'}；请重新读取 GitHub。`} onFocus={e=>e.currentTarget.select()}/></Card>}
+              {task.workflow==='local-fast'&&task.pr&&facts.state==='awaiting_review'&&<Card className="detail-card"><h3>ChatGPT 独立 Review</h3><p>打开 PR，复制下列指令交给 Reviewer；先核对真实 PR 作者与交付身份，新的 HEAD 必须重新审查。</p><textarea aria-label="ChatGPT Review 指令" readOnly rows={10} value={localFastReviewInstruction(task)} onFocus={e=>e.currentTarget.select()}/></Card>}
               <Card className="detail-card">
                 <h3>历史记录</h3>
                 {task.history.length ? (
