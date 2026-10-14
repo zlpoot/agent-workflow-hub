@@ -33,8 +33,8 @@
     "dashboard:v2:smoke": "node scripts/dashboard-v2-smoke.mjs",
     "dashboard:v2:viewer-smoke": "node scripts/dashboard-v2-viewer-smoke.mjs",
     "dashboard:v2:app-smoke": "node scripts/dashboard-v2-app-smoke.mjs",
-    "test:self-bootstrap:local-fast": "node --test --test-name-pattern=\"^(?!.*(?:one binding drives three|same-account COMMENTED Review drives three|merged candidate needs|native failing or pending checks|interrupted creation)).*$\" tests/local-fast.test.mjs",
-    "test:self-bootstrap:github-app": "node --test --test-name-pattern=\"^(?!.*(?:App Watcher|App Review Bridge)).*$\" tests/github-app.test.mjs"
+    "test:self-bootstrap:local-fast": "node --test --test-name-pattern=\"bind checks write permission|failed verification retains auto-Commit|verification cannot alter the committed candidate|lost PR create ACK reconciles|interrupted Push can resume|effective Push URL|Local Fast has a bounded Windows-only CLI\" tests/local-fast.test.mjs",
+    "test:self-bootstrap:github-app": "node --test --test-name-pattern=\"one-time connect discovers|App connection and token boundaries|pinned installation|complete selected-set pagination|operation-minimum single-repository|private repository Draft creation|transport refuses executable|askPass|trusted personal exact-head|actual App provider simulated Stage|lost create ACK readback|App push failure retains|credential paths cannot\" tests/github-app.test.mjs"
   },
   "devDependencies": {
     "@radix-ui/themes": "3.3.0",
