@@ -20,7 +20,7 @@ test('Windows Edge V2 project bind, duplicate start/stop, terminal guidance, Rev
   const database=join(external,'isolated.sqlite'),profile=JSON.parse(readFileSync('examples/protocol/project-alpha.json')).profile_policy;
   fixtureStore(database,[profile]).close();
   let launches=0,signal;
-  const watch={platform:'win32',interactive:true,localData:external,fast:h.deps,github:githubTransport(h.repo,h.deps.run),executor:{type:'codex-cli',run:async(_r,_started,s)=>{launches++;signal=s;await new Promise(r=>s.addEventListener('abort',r,{once:true}));return {exit_code:2};}}};
+  const watch={platform:'win32',interactive:true,localData:external,fast:h.deps,github:githubTransport(h.repo,h.deps.run),executor:{type:'codex-cli',run:async(_r,_started,s)=>{launches++;_started(process.pid);signal=s;await new Promise(r=>s.addEventListener('abort',r,{once:true}));return {exit_code:2};}}};
   const config={project_roots:[dirname(h.repo)],state_directory:state},overrides={fast:h.deps,watch};
   let gui,gateway,reader,origin;
   const start=async()=>{
