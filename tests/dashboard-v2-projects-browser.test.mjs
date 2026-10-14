@@ -32,7 +32,7 @@ test('Windows Edge V2 project bind, duplicate start/stop, terminal guidance, Rev
         const value=h.deps.run(c,a,cwd);
         if(c==='gh'&&/\/pulls\/\d+$/.test(a.at(-1))){const p=JSON.parse(value);p.head.repo.full_name=repository;p.base.repo.full_name=repository;return JSON.stringify(p);}
         return value;
-      },alive:()=>false})});
+      },alive:pid=>pid===process.pid})});
     await new Promise(r=>gateway.server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${gateway.server.address().port}`;
   };
   await start();
@@ -63,7 +63,10 @@ test('Windows Edge V2 project bind, duplicate start/stop, terminal guidance, Rev
   await page.getByRole('button',{name:'查询 Watcher',exact:true}).click();
   await page.getByRole('button',{name:'恢复现有候选的 Stage…',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();assert.equal(h.prs.length,0);
   await page.getByRole('button',{name:'恢复现有候选的 Stage…',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'确认',exact:true}).dblclick();await page.getByRole('dialog').waitFor({state:'hidden'});
-  await page.waitForFunction(()=>document.body.innerText.includes('等待独立 Review'));assert.equal(h.prs.length,1);assert.equal(launches,1);
+  const recoveredDeadline=Date.now()+60000;
+  while(Date.now()<recoveredDeadline){if(JSON.parse(readFileSync(h.statePath)).tasks[0].phase==='awaiting_review')break;const current=await gui.handle('status',{directory:h.repo});if(current.gui_status==='BLOCKED')assert.fail(current.gui_reason);await new Promise(r=>setTimeout(r,50));}
+  assert.equal(JSON.parse(readFileSync(h.statePath)).tasks[0].phase,'awaiting_review');assert.equal(h.prs.length,1);assert.equal(launches,1);
+  await page.getByRole('button',{name:'查询 Watcher',exact:true}).click();assert((await page.getByRole('status').allTextContents()).some(v=>v.includes('AWAITING_INDEPENDENT_REVIEW')));
   await page.screenshot({path:join(output,'synthetic-stage-recovered.png'),fullPage:true});
   await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('button',{name:/^任务.*Tasks/}).click();
   await page.getByRole('button',{name:'#1 Ordinary Issue 1',exact:true}).click();const detail=page.getByRole('dialog');
