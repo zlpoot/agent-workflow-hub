@@ -729,3 +729,15 @@ footer {
     transition-duration: 0.01ms !important;
   }
 }
+.project-stack { display: grid; gap: 16px; min-width: 0; }
+.project-stack textarea { width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font: inherit; resize: vertical; }
+.project-inventory { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.project-inventory button { height: auto; min-height: 84px; text-align: left; white-space: normal; justify-content: flex-start; }
+.project-inventory small { display: block; font-size: 11px; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.project-facts { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 8px 16px; font-size: 13px; }
+.project-facts dt { color: var(--muted-foreground); }
+.project-facts dd { margin: 0; overflow-wrap: anywhere; }
+.project-queue { display: flex; flex-wrap: wrap; gap: 12px 32px; padding-left: 24px; list-style: decimal; }
+.project-stack pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.project-paths button { max-width: 100%; height: auto; min-height: 36px; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .project-facts { grid-template-columns: 1fr; gap: 4px; } }

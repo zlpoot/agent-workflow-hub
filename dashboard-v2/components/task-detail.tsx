@@ -13,6 +13,7 @@ import { sourceLabels, stamp, taskFacts, localFastReviewInstruction } from "../l
 import { localStale } from "../../dashboard/task-freshness.mjs";
 import { safeSourceUrl } from "../../dashboard/adapter.mjs";
 import type { ReactNode } from "react";
+import { CopyText } from './copy-text';
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="detail-fact">
@@ -201,7 +202,7 @@ export function TaskDetail({
                 ))}
                 <p className="muted">注册 / 心跳不等于 GitHub 授权核验。</p>
               </Card>
-              {task.workflow==='local-fast'&&task.pr&&facts.state==='awaiting_review'&&<Card className="detail-card"><h3>ChatGPT 独立 Review</h3><p>打开 PR，复制下列指令交给 Reviewer；先核对真实 PR 作者与交付身份，新的 HEAD 必须重新审查。</p><textarea aria-label="ChatGPT Review 指令" readOnly rows={10} value={localFastReviewInstruction(task)} onFocus={e=>e.currentTarget.select()}/></Card>}
+              {task.workflow==='local-fast'&&task.pr&&<Card className="detail-card"><h3>ChatGPT 独立 Review</h3><p>打开 PR，复制下列指令交给独立 ChatGPT 会话；先核对真实 PR 作者与准确当前 HEAD。页面观察可能过期，发布决定前必须重新核验。</p><CopyText label="ChatGPT Review 指令" text={localFastReviewInstruction(task)}/></Card>}
               <Card className="detail-card">
                 <h3>历史记录</h3>
                 {task.history.length ? (

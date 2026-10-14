@@ -115,11 +115,18 @@ test('V2 assets use the same scoped session, closed CSP routes and GET-only boun
   for (const path of ['/dashboard/v2/validators.cjs','/dashboard/v2/build-report.json','/dashboard/v2?token=invalid','/dashboard/v2/unknown'])
     assert.equal((await h.get(path)).status, 404);
   assert.equal((await h.get('/dashboard')).status, 200);
+  assert((await (await h.get('/dashboard')).text()).includes('/dashboard/v2/app.js'));
+  assert((await (await h.get('/dashboard/')).text()).includes('/dashboard/v2/app.js'));
+  for(const path of ['/dashboard/v1','/dashboard/v1/']) {
+    const response=await h.get(path);assert.equal(response.status,200);assert((await response.text()).includes('/dashboard/app.js'));
+    assert.equal((await h.get(path,{},'POST')).status,405);
+    assert.equal((await h.get(path,{Cookie:''})).status,401);
+  }
   assert.equal((await h.get('/dashboard/app.js')).status, 200);
   const snapshot = await (await h.get('/dashboard/v1/snapshot')).json();
   assert.deepEqual(snapshot.projects.map(p => p.id), h.viewer.project_ids);
   assert(snapshot.tasks.every(task => !task.fixture)); assert.equal(snapshot.authority_verified, false);
-  const v1 = await service(t); assert.equal((await v1.get('/dashboard/v2')).status, 404);
+  const v1 = await service(t); assert.equal((await v1.get('/dashboard/v2')).status, 404);assert((await (await v1.get('/dashboard')).text()).includes('/dashboard/app.js'));
 });
 
 test('V2 document navigation bootstraps and renews one scoped HttpOnly session; APIs and assets cannot bootstrap', async t => {
@@ -136,6 +143,8 @@ test('V2 document navigation bootstraps and renews one scoped HttpOnly session; 
   assert.equal((await fetch(origin+'/dashboard/v1/snapshot',{headers})).status,200);
   clock+=3600001; assert.equal((await fetch(origin+'/dashboard/v1/snapshot',{headers})).status,401);
   const renewed = await navigate('/dashboard/v2/'); assert.equal(renewed.status,200); assert.notEqual(first.cookie,renewed.cookie);
+  clock+=3600001;
+  const fallback=await navigate('/dashboard/v1/');assert.equal(fallback.status,200);assert(fallback.cookie.includes('HttpOnly; SameSite=Strict; Path=/dashboard'));assert.notEqual(fallback.cookie,renewed.cookie);
 });
 test('protected same-origin UI/assets/REST have CSP and closed routes without Client or provider writes', async t => {
   const h = await service(t);

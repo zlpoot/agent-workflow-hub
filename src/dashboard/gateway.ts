@@ -33,6 +33,8 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
   const files = options.enabled ? new Map([
     ['/dashboard', { type: 'text/html; charset=utf-8', body: readFileSync(resolve(options.assets!, 'index.html')) }],
     ['/dashboard/', { type: 'text/html; charset=utf-8', body: readFileSync(resolve(options.assets!, 'index.html')) }],
+    ['/dashboard/v1', { type: 'text/html; charset=utf-8', body: readFileSync(resolve(options.assets!, 'index.html')) }],
+    ['/dashboard/v1/', { type: 'text/html; charset=utf-8', body: readFileSync(resolve(options.assets!, 'index.html')) }],
     ['/dashboard/app.js', { type: 'text/javascript; charset=utf-8', body: readFileSync(resolve(options.assets!, 'app.js')) }],
     ['/dashboard/app.css', { type: 'text/css; charset=utf-8', body: readFileSync(resolve(options.assets!, 'app.css')) }]
   ]) : new Map();
@@ -44,6 +46,8 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
       ['/dashboard/v2/app.js', 'app.js', 'text/javascript; charset=utf-8'],
       ['/dashboard/v2/app.css', 'app.css', 'text/css; charset=utf-8']
     ] as const) files.set(route, { type, body: readFileSync(resolve(options.assetsV2, name)) });
+    files.set('/dashboard',files.get('/dashboard/v2')!);
+    files.set('/dashboard/',files.get('/dashboard/v2')!);
   }
   const streams = new Set<ServerResponse>();
   const server = createServer({ maxHeaderSize: 16384, requestTimeout: 15000, headersTimeout: 10000 }, async (request, response) => {
@@ -114,7 +118,7 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
         if (!authenticate(request)) fail(401, 'viewer_unauthorized', 'Viewer session expired');
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify({ ...value, authority_verified: false })); return;
       }
-      if (url.pathname.startsWith('/dashboard/v1/')) {
+      if (url.pathname.startsWith('/dashboard/v1/') && !files.has(url.pathname)) {
         await dashboardRoute(request, response, url, { store: options.store!, authenticate, streams, interval: 250, now: options.now, tasks: options.tasks }); return;
       }
       if (!authenticate(request) && !local?.bootstrap(request, response)) fail(401, 'viewer_unauthorized', 'A separate viewer session is required');

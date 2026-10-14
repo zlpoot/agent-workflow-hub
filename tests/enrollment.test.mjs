@@ -109,7 +109,7 @@ test('installed Viewer selects the exact approved Work Item version, connects an
  const entry=join(viewerInstall,'node_modules','@zlpoot','awh-viewer','dist','dashboard-cli.js');const child=spawn(process.execPath,[entry,'--config',viewerConfig],{windowsHide:true,stdio:['ignore','pipe','pipe']});const exit=once(child,'exit');resources.get(t).children.push({child,exit});let errors='',timer;child.stderr.on('data',x=>errors+=x);
  try{await Promise.race([new Promise(r=>child.stdout.on('data',x=>{if(x.toString().includes('explicit_local_os_user'))r();})),exit.then(()=>{throw new Error(errors);}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Viewer startup timeout')),10000);})]);}finally{clearTimeout(timer);}
  const browser=await chromium.launch({channel:'msedge',headless:true});resources.get(t).stops.push(()=>browser.close());const page=await browser.newPage({viewport:{width:1280,height:1000}});const failures=[];page.on('pageerror',e=>failures.push(e.message));
- await page.goto('http://127.0.0.1:'+viewerPort+'/dashboard');await page.getByRole('button',{name:'添加项目',exact:true}).click();
+ await page.goto('http://127.0.0.1:'+viewerPort+'/dashboard/v1');await page.getByRole('button',{name:'添加项目',exact:true}).click();
  assert.equal(await page.getByText('历史离线样本',{exact:true}).count(),0);
  assert.equal(await page.getByRole('navigation',{name:'接入步骤'}).count(),0);
  await page.getByRole('button',{name:h.base,exact:true}).click();await page.getByRole('button',{name:'browser-project',exact:true}).click();await page.getByRole('button',{name:'接入项目',exact:true}).click();

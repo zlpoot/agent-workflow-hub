@@ -10,7 +10,7 @@ pnpm build
 pnpm viewer --config <绝对路径的外置-viewer.json>
 ```
 
-Viewer 使用原配置、只读数据库与现有任务观察适配器，打印 `url`（V1）和 `v2_url`（V2）。直接打开 `http://127.0.0.1:<port>/dashboard/v2` 或末尾带 `/` 的路径，通过正常本机文档导航建立一小时 HttpOnly / SameSite=Strict 会话。V2 的 Dashboard V1 链接返回 `/dashboard`，两者共用 `/dashboard` Cookie、项目范围及只读 DTO。V1 继续作为默认启动 URL，并保留项目接入和设置。
+Viewer 使用原配置、只读数据库与现有任务观察适配器，打印默认 `url`（`/dashboard`，有 V2 资源时进入 V2）和 `v2_url`（`/dashboard/v2`）。这些入口或末尾带 `/` 的路径通过正常本机文档导航建立一小时 HttpOnly / SameSite=Strict 会话。V2 的 Dashboard V1 链接返回 `/dashboard/v1`，两者共用 `/dashboard` Cookie、项目范围及只读 DTO。V1 保留 CP 项目接入和设置；未提供 V2 资源的旧 sidecar 仍默认 V1。Local Fast 主路径见 [V2 操作台](dashboard-v2-local-fast.md)。
 
 V2 的独立静态资源为 `/dashboard/v2/app.js`、`/dashboard/v2/app.css`。Overview/Tasks 使用现有 DashboardReader、`/dashboard/v1` REST/SSE 和 OpenAPI 静态校验器，只有同源 GET 请求。设置 → GitHub App 读取原 status；只有已显式启用本机 Owner 管理时才使用既有有界 detect/connect/preflight POST，见 [App 设置边界](dashboard-github-app.md)。CSP、Host/Origin/Fetch Metadata、会话有效期和权限模型保持原有规则。当前实际执行者、责任方和任务阶段在断线或 SSE 领先快照时降级，历史 Review / HEAD 与来源继续分开标注；CP 声明不能替代 GitHub 原生核验或管理员授权。
 

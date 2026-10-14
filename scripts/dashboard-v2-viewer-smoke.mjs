@@ -139,7 +139,7 @@ try {
   assert(requests.every(r=>r.origin===origin&&r.method==='GET'&&!r.authorization));
   assert.deepEqual(await page.evaluate(()=>window.__csp),[]);assert.deepEqual(errors,[]);
   await page.getByRole('link',{name:'Dashboard V1'}).click();await page.getByRole('heading',{name:'最近运行',exact:true}).waitFor();
-  assert.equal(new URL(page.url()).pathname,'/dashboard');assert.equal(await page.getByText('示例预览 · 模拟数据',{exact:true}).count(),0);
+  assert.equal(new URL(page.url()).pathname,'/dashboard/v1');assert.equal(await page.getByText('示例预览 · 模拟数据',{exact:true}).count(),0);
   await page.screenshot({path:join(output,'v1-fallback.png'),fullPage:true});
   await page.getByRole('tab',{name:'设置',exact:true}).click();
   await page.getByText('当前 Viewer 仅可查看。本机可信 Owner 启用管理功能后，才能检测和连接。',{exact:true}).waitFor();
