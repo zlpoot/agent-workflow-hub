@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { harness, repository } from './helpers/local-fast-harness.mjs';
 import { createLocalFastProjects } from '../dist/dashboard/local-fast-projects.js';
 import { LocalFastWatcher } from '../dist/workflow/local-fast-watcher.js';
@@ -12,7 +12,7 @@ function setup(t) {
   const h=harness(t),external=mkdtempSync(join(tmpdir(),'awh-gui-test-')),state=join(external,'state');mkdirSync(state);
   const executable=join(external,'codex.exe');writeFileSync(executable,'synthetic executor');
   const watch={platform:'win32',interactive:true,localData:external,fast:h.deps,github:githubTransport(h.repo,h.deps.run)};
-  const config={project_roots:[h.repo],state_directory:state},overrides={fast:h.deps,watch};
+  const config={project_roots:[dirname(h.repo)],state_directory:state},overrides={fast:h.deps,watch};
   const gui=createLocalFastProjects(config,overrides);t.after(()=>gui.close());
   return {h,gui,config,overrides,watch,executable,state};
 }
