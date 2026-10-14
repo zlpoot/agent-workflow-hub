@@ -5,12 +5,17 @@ export function validQueue(value) {
 const quote=value=>"'"+value.replaceAll("'","''")+"'";
 export function ownerCommand(preview,expires,executable,allowMerge) {
   if(!preview?.bound||!validQueue(preview.issues.join(','))||!Number.isFinite(Date.parse(expires))||!expires.endsWith('Z')||!/^([A-Za-z]:[\\/]|\\\\).+\.exe$/i.test(executable)||/[\r\n\0]/.test(executable))return null;
-  return `Set-Location -LiteralPath ${quote(preview.directory)}\nawh local-fast watch authorize --repo ${quote(preview.repository)} --issues ${quote(preview.issues.join(','))} --expires ${quote(expires)} --executor ${quote(executable)} --confirm${allowMerge?' --allow-merge':''}`;
+  const cli=preview.owner_cli;
+  if(cli&&(![cli.node,cli.entry].every(v=>typeof v==='string'&&!/[\r\n\0]/.test(v))))return null;
+  const launcher=cli?`& ${quote(cli.node)} ${quote(cli.entry)}`:'awh';
+  return `Set-Location -LiteralPath ${quote(preview.directory)}\n${launcher} local-fast watch authorize --repo ${quote(preview.repository)} --issues ${quote(preview.issues.join(','))} --expires ${quote(expires)} --executor ${quote(executable)} --confirm${allowMerge?' --allow-merge':''}`;
 }
 export function canStart(status,now=Date.now()) {
   return !!status && now-status.observedAt<15000 && now>=status.observedAt && Date.parse(status.expires_at)>now && !['BLOCKED','QUEUE_COMPLETED'].includes(status.status) && !status.watcher_running && !status.stale_lock && !['RUNNING','STOPPING'].includes(status.gui_status);
 }
 export function recovery(code) {
+  if(/queue_active/.test(code))return '当前队列正在开发或等待 Review。候选队列可以保存；执行队列需完成后再确认下一轮。';
+  if(/queue_history/.test(code))return '该 Issue 已有执行历史，或历史记录冲突。保留记录并选择新的 OPEN Issue。';
   if(/expired/.test(code))return 'Owner 授权已到期。由 Owner 按现有 CLI 处理续期；刷新后再启动。';
   if(/scope|owner/.test(code))return '缺少有效的 Windows Owner scope 或与当前绑定不符。核对下方授权步骤，不覆盖旧授权。';
   if(/busy|lock|unavailable/.test(code))return '等待当前操作完成，刷新检查已有 Watcher、锁和完成状态；不要启动第二个 Watcher。';

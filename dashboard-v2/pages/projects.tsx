@@ -10,15 +10,17 @@ import { TaskList } from '../components/task-list';
 import { stamp } from '../lib/task-model.mjs';
 import { canStart, ownerCommand, recovery, validQueue } from '../lib/local-fast-model.mjs';
 import { CopyText } from '../components/copy-text';
+import {IssueQueue,type IssuePage} from '../components/issue-queue';
 
-type Preview={directory:string;repository:string;head:string;branch:string;dirty:boolean;bound:boolean;issues:number[];checks:string[];provider:string;project_id?:string};
+type Preview={directory:string;repository:string;head:string;branch:string;dirty:boolean;bound:boolean;issues:number[];checks:string[];provider:string;project_id?:string;queue_revision?:string;queue_editable?:boolean;queue_started?:boolean;draft_issues?:number[];owner_cli?:{node:string;entry:string}};
 type Project=Partial<Preview>&{project_id:string;directory:string;repository:string;available:boolean;reason?:string};
 type Watch={status:string;reason?:string;gui_status:string;gui_reason?:string;expires_at?:string;allow_merge?:boolean;watcher_running?:boolean;stale_lock?:boolean;repository?:string;issues?:number[];observedAt:number};
 export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];open:(id:string)=>void;disconnected:boolean;now:number;refresh:()=>void}) {
   const [projects,setProjects]=useState<Project[]>([]),[roots,setRoots]=useState<string[]>([]),[directories,setDirectories]=useState<string[]>([]);
   const [directory,setDirectory]=useState(''),[preview,setPreview]=useState<Preview|null>(null),[status,setStatus]=useState<Watch|null>(null);
   const [issues,setIssues]=useState(''),[checks,setChecks]=useState(''),[provider,setProvider]=useState('github-app');
-  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[available,setAvailable]=useState(true),[confirmation,setConfirmation]=useState<'attach'|'bind'|'start'|null>(null);
+  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[available,setAvailable]=useState(true),[confirmation,setConfirmation]=useState<'attach'|'bind'|'start'|'queue-save'|null>(null);
+  const [issuePage,setIssuePage]=useState<IssuePage|null>(null),[draftSaved,setDraftSaved]=useState(false);
   const [expires,setExpires]=useState(()=>new Date(Date.now()+86400000).toISOString()),[executable,setExecutable]=useState(''),[allowMerge,setAllowMerge]=useState(false);
   const pending=useRef(false),abort=useRef<AbortController|null>(null),mounted=useRef(true);
   const request=async(action:string,data:Record<string,unknown>={})=>localFastRequest(action,data,abort.current!.signal);
@@ -34,9 +36,10 @@ export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];ope
     setRoots(value.roots);setDirectories(value.directories);if(value.current){setDirectory(value.current);setPreview(null);setStatus(null);}
   };
   const inspect=async(path:string,projectId?:string)=>{
-    setPreview(null);setStatus(null);const value:Preview=await request('inspect',{directory:path});if(!mounted.current)return;
-    setDirectory(value.directory);setPreview({...value,project_id:projectId});setIssues(value.issues.join(','));setChecks(value.checks.join('\n'));setProvider(value.bound?value.provider:'github-app');
+    setPreview(null);setStatus(null);setIssuePage(null);setDraftSaved(false);const value:Preview=await request('inspect',{directory:path});if(!mounted.current)return;
+    setDirectory(value.directory);setPreview({...value,project_id:projectId});setIssues((value.draft_issues??[]).join(','));setChecks(value.checks.join('\n'));setProvider(value.bound?value.provider:'github-app');
     if(projectId)await watch(value.directory);
+    const page=await request('issues',{directory:value.directory,page:1});if(mounted.current)setIssuePage(page);
   };
   useEffect(()=>{mounted.current=true;void operation(async()=>{await browse();await list();});return()=>{mounted.current=false;abort.current?.abort();};},[]);
   useEffect(()=>{
@@ -48,7 +51,7 @@ export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];ope
     if(!preview||!confirmation)return;
     const action=confirmation;
     if(action==='start'&&!canStart(status))throw new Error('local_fast_watch_scope');
-    const result=await request(action,{directory:preview.directory,confirm:true,...(action!=='start'?{repository:preview.repository,head:preview.head}:{}),...(action==='bind'?{issues,checks:checks.split(/\r?\n/).map(v=>v.trim()).filter(Boolean),provider}:{})});
+    const result=await request(action,{directory:preview.directory,confirm:true,...(action!=='start'?{repository:preview.repository,head:preview.head}:{}),...(action==='bind'?{issues,checks:checks.split(/\r?\n/).map(v=>v.trim()).filter(Boolean),provider}:action==='queue-save'?{issues,queue_revision:preview.queue_revision}:{})});
     if(!mounted.current)return;
     setConfirmation(null);
     if(action!=='start'){setPreview(result);await list();refresh();}
@@ -78,6 +81,11 @@ export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];ope
           <Button disabled={busy||!validQueue(issues)} onClick={()=>setConfirmation('bind')}>预览绑定队列…</Button></>}
       </>}
     </Card>
+    {preview&&<IssueQueue repository={preview.repository} value={issues} setValue={value=>{setIssues(value);setDraftSaved(false);}} page={issuePage} busy={busy}
+      query={page=>void operation(async()=>{const value=await request('issues',{directory:preview.directory,page});if(mounted.current)setIssuePage(value);})}
+      saveDraft={()=>void operation(async()=>{await request('queue-draft',{directory:preview.directory,repository:preview.repository,issues});if(mounted.current)setDraftSaved(true);})}
+      saveQueue={()=>setConfirmation('queue-save')} bound={preview.bound} editable={preview.queue_editable===true} unstarted={!preview.queue_started} current={preview.issues} associated={!!preview.project_id}/>}
+    {draftSaved&&<p role="status">候选队列已保存，Viewer 重启后可继续编辑。</p>}
     {preview?.project_id&&<Card className="detail-card project-stack"><div className="section-title"><h2>Watcher 与 Windows Owner 授权</h2><Button variant="outline" disabled={busy} onClick={()=>void operation(()=>watch(preview.directory))}>查询 Watcher</Button></div>
       <p className="muted">最近本机查询：{stamp(status?.observedAt)}{stale?' · 当前状态未核验':''}</p>
       {status&&<><p role="status">Watcher：{status.status} · GUI：{status.gui_status}{stale?'（历史）':''}</p><dl className="project-facts"><dt>有效 Owner 仓库 / 队列</dt><dd>{stale?'当前未知':`${status.repository??'未核验'} · ${status.issues?.join(' → ')??'未核验'}`}</dd><dt>到期时间</dt><dd>{stamp(status.expires_at)}{status.expires_at&&Date.parse(status.expires_at)<=now?' · 已到期':''}</dd><dt>自动 Merge</dt><dd>{stale?'当前未知':status.allow_merge===true?'Owner 已允许':'未允许'}</dd><dt>Watcher / 锁</dt><dd>{stale?'当前未知':status.stale_lock?'失效锁 · 保留现场':status.watcher_running?'正在运行':'未运行'}</dd></dl>{(status.reason||status.gui_reason)&&<p className="notice">{status.reason??status.gui_reason} · {recovery(status.reason??status.gui_reason??'')}</p>}</>}
@@ -91,9 +99,10 @@ export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];ope
         <p className="muted">取消、到期或 scope 冲突请由 Owner 按已有 CLI 处理；GUI 不覆盖授权。仅停止此 GUI 启动的 Watcher，Viewer 退出会停止其拥有的进程。</p>
       </div></details>
     </Card>}
-    {preview?.project_id&&<Card className="detail-card"><h2>项目任务 · 队列顺序</h2><p className="muted">Local Fast 本机记录与真实 GitHub 观察；完成状态以 Merge / Issue CLOSED 回读为准。</p><TaskList tasks={[...projectTasks].sort((a,b)=>preview.issues.indexOf(a.issue.number)-preview.issues.indexOf(b.issue.number))} open={open} disconnected={disconnected} now={now}/></Card>}
+    {preview?.project_id&&<Card className="detail-card"><h2>项目任务 · 队列顺序</h2><p className="muted">当前执行队列 · Local Fast 本机记录与真实 GitHub 观察；完成状态以 Merge / Issue CLOSED 回读为准。</p><TaskList tasks={projectTasks.filter(t=>preview.issues.includes(t.issue.number)).sort((a,b)=>preview.issues.indexOf(a.issue.number)-preview.issues.indexOf(b.issue.number))} open={open} disconnected={disconnected} now={now}/></Card>}
+    {preview?.project_id&&projectTasks.some(t=>!preview.issues.includes(t.issue.number))&&<Card className="detail-card"><h2>历史任务 · 已保留的队列</h2><p className="muted">历史 Watcher 与 Owner 记录用于回看，新的执行队列需要本轮授权。</p><TaskList tasks={projectTasks.filter(t=>!preview.issues.includes(t.issue.number))} open={open} disconnected={disconnected} now={now}/></Card>}
     {busy&&<p role="status">正在处理本机操作…</p>}
     {error&&<div role="alert" className="notice">{error} · {recovery(error)} <a href="/dashboard/v2">重新进入 V2</a></div>}
-    <Sheet open={confirmation!==null} onOpenChange={value=>{if(!value&&!busy)setConfirmation(null);}}><SheetContent className="task-sheet" showCloseButton={false} onEscapeKeyDown={e=>{if(busy)e.preventDefault();}} onPointerDownOutside={e=>{if(busy)e.preventDefault();}}><SheetHeader><SheetTitle>{confirmation==='start'?'确认启动 Watcher':confirmation==='bind'?'确认新 Local Fast 队列':'确认关联已有队列'}</SheetTitle><SheetDescription>核对本机项目与有限任务范围。</SheetDescription></SheetHeader><div className="sheet-body project-stack"><p>{preview?.repository}</p><p>{preview?.directory}</p><code>{preview?.head}</code><p>Issue 队列：{confirmation==='bind'?issues:preview?.issues.join(' → ')}</p><p>交付身份：{provider}</p><pre>{confirmation==='bind'?checks:preview?.checks.join('\n')}</pre><p>{confirmation==='start'?`使用已保存 scope；到期 ${status?.expires_at}；自动 Merge：${status?.allow_merge?'已允许':'未允许'}。服务端再次核验实际授权。`:confirmation==='bind'?'确认绑定不会启动开发；已有队列冲突将拒绝，不覆盖历史。':'保存关联，保留已有队列与历史。'}</p>{error&&<p role="alert">{error} · {recovery(error)}</p>}<div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={()=>setConfirmation(null)}>取消</Button><Button disabled={busy||confirmation==='bind'&&!validQueue(issues)||confirmation==='start'&&!canStart(status,now)} onClick={()=>void confirm()}>{busy?'正在处理…':'确认'}</Button></div></div></SheetContent></Sheet>
+    <Sheet open={confirmation!==null} onOpenChange={value=>{if(!value&&!busy)setConfirmation(null);}}><SheetContent className="task-sheet" showCloseButton={false} onEscapeKeyDown={e=>{if(busy)e.preventDefault();}} onPointerDownOutside={e=>{if(busy)e.preventDefault();}}><SheetHeader><SheetTitle>{confirmation==='start'?'确认启动 Watcher':confirmation==='queue-save'?'确认下一轮执行队列':confirmation==='bind'?'确认新 Local Fast 队列':'确认关联已有队列'}</SheetTitle><SheetDescription>核对本机项目与有限任务范围。</SheetDescription></SheetHeader><div className="sheet-body project-stack"><p>{preview?.repository}</p><p>{preview?.directory}</p><code>{preview?.head}</code><p>Issue 队列：{['bind','queue-save'].includes(confirmation??'')?issues:preview?.issues.join(' → ')}</p><p>交付身份：{provider}</p><pre>{confirmation==='bind'?checks:preview?.checks.join('\n')}</pre><p>{confirmation==='start'?`使用已保存 scope；到期 ${status?.expires_at}；自动 Merge：${status?.allow_merge?'已允许':'未允许'}。服务端再次核验实际授权。`:confirmation==='queue-save'?'保留当前队列与历史，保存新的有限执行顺序。旧授权不会用于新队列；启动前需本轮 Windows Owner 确认。':confirmation==='bind'?'确认绑定不会启动开发；已有队列冲突将拒绝，不覆盖历史。':'保存关联，保留已有队列与历史。'}</p>{error&&<p role="alert">{error} · {recovery(error)}</p>}<div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={()=>setConfirmation(null)}>取消</Button><Button disabled={busy||['bind','queue-save'].includes(confirmation??'')&&!validQueue(issues)||confirmation==='start'&&!canStart(status,now)} onClick={()=>void confirm()}>{busy?'正在处理…':'确认'}</Button></div></div></SheetContent></Sheet>
   </div>;
 }

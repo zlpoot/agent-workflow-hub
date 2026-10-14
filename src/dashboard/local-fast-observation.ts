@@ -11,6 +11,7 @@ export interface LocalFastObservationConfig {
 }
 export type GitHubObservationConfig = Pick<LocalFastObservationConfig,'project_id'|'repository'|'root'>;
 import { sharedGitHubCache, githubReadFailure } from './github-observation-cache.js';
+import { validQueueId } from '../workflow/local-fast.js';
 
 type Native = Record<string, any>;
 export interface ObservationDependencies {
@@ -118,7 +119,7 @@ export class LocalFastObservationAdapter implements TaskAdapter {
     }
   }
   private async read(c:LocalFastObservationConfig):Promise<Task[]> {
-    const now=this.deps.now();let state:Native;let operationPid:number|null=null;
+    const now=this.deps.now();let state:Native;let states:Native[]=[];let operationPid:number|null=null;
     try {
       const origin=await this.deps.command('git',['remote','get-url','origin'],c.root);
       if(![`git@github.com:${c.repository}.git`,`git@github.com:${c.repository}`,`https://github.com/${c.repository}.git`,`https://github.com/${c.repository}`].includes(origin))throw new Error('repository_mismatch');
@@ -127,6 +128,13 @@ export class LocalFastObservationAdapter implements TaskAdapter {
       if(state.schema_version!=='1.0'||state.mode!=='local-fast'||state.repository!==c.repository||!positive(state.repository_id)||resolve(state.root)!==resolve(c.root)||!Array.isArray(state.issues)||!state.issues.length||state.issues.length>128||!state.issues.every(positive)||new Set(state.issues).size!==state.issues.length||!Array.isArray(state.tasks)||state.tasks.length>state.issues.length)throw new Error('invalid_binding');
       this.repositoryIds.set(c.project_id,state.repository_id);
       for(const [i,t] of state.tasks.entries()) if(t.issue!==state.issues[i]||!['preparing','developing','publishing','awaiting_review','completed'].includes(t.phase)||t.head!==undefined&&!sha(t.head)||t.pr!==undefined&&!positive(t.pr))throw new Error('invalid_task');
+      if(state.queue_id!==undefined&&(!validQueueId(state.queue_id)||state.queue_id==='legacy')||state.previous_queues!==undefined&&(!Array.isArray(state.previous_queues)||state.previous_queues.length>32||!state.previous_queues.every(validQueueId)||new Set(state.previous_queues).size!==state.previous_queues.length||state.previous_queues.includes(state.queue_id)))throw new Error('invalid_binding');
+      states=[state,...(state.previous_queues??[]).map((id:string)=>{
+        const old=file(join(common,'awh-local-fast','queues',id,'state.json'));
+        if(old.schema_version!=='1.0'||old.mode!=='local-fast'||old.repository!==state.repository||old.repository_id!==state.repository_id||old.root!==state.root||old.owner?.id!==state.owner?.id||(old.queue_id??'legacy')!==id||!Array.isArray(old.issues)||!old.issues.length||old.issues.length>128||!old.issues.every(positive)||new Set(old.issues).size!==old.issues.length||!Array.isArray(old.tasks)||old.tasks.length>old.issues.length)throw new Error('invalid_binding');
+        for(const [i,t] of old.tasks.entries())if(t.issue!==old.issues[i]||!['preparing','developing','publishing','awaiting_review','completed'].includes(t.phase)||t.head!==undefined&&!sha(t.head)||t.pr!==undefined&&!positive(t.pr))throw new Error('invalid_task');
+        return old;
+      })];
       const operation=join(common,'awh-local-fast','operation.lock');
       if(existsSync(operation))try {const pid=file(operation);if(positive(pid))operationPid=pid;}catch{/* A stale or malformed lock cannot prove Stage execution. */}
     } catch(error) {
@@ -134,25 +142,31 @@ export class LocalFastObservationAdapter implements TaskAdapter {
       const task=taskBase(`lf:${c.project_id}:unavailable`,c.project_id,c.repository,0);task.workflow='local-fast';task.state='unknown';task.waiting_for=actor('owner','Owner');task.machine=c.machine;
       task.next_action='Owner 检查已配置的 Local Fast 只读来源';task.blockers=['Local Fast 来源无法读取或身份不匹配'];task.observations=[{...observation('local_fast',now,'unknown'),error_code:error instanceof Error&&['repository_mismatch','invalid_binding','invalid_task','redirected_file','invalid_file'].includes(error.message)?error.message:'read_failed'}];return [task];
     }
+    return states.flatMap((s,index)=>this.readState(c,s,now,index===0?operationPid:null,index!==0));
+  }
+  private readState(c:LocalFastObservationConfig,state:Native,now:number,operationPid:number|null,archived:boolean):Task[] {
     let scope:Native|undefined,watch:Native|undefined,lock:Native|undefined,watchRead=false;
     try {
       if(c.watcher_directory) {
-        scope=file(join(c.watcher_directory,'scope.json'));
-        if(scope.repository!==state.repository||scope.repository_id!==state.repository_id||scope.root!==state.root||JSON.stringify(scope.issues)!==JSON.stringify(state.issues)||scope.source!=='windows-owner-confirmation'||typeof scope.allow_merge!=='boolean'||!Number.isFinite(Date.parse(scope.expires_at)))throw new Error('scope_mismatch');
-        watch=file(join(c.watcher_directory,'watcher.json'));
-        if(watch.scope_version!==scope.scope_version||!Array.isArray(watch.attempts)||watch.attempts.length>1000)throw new Error('watcher_mismatch');
-        if(existsSync(join(c.watcher_directory,'watcher.lock'))) {lock=file(join(c.watcher_directory,'watcher.lock'));if(lock.scope_version!==scope.scope_version||!positive(lock.pid))throw new Error('lock_mismatch');}
-        watchRead=true;
+        const directory=state.queue_id?join(c.watcher_directory,'queues',state.queue_id):c.watcher_directory;
+        scope=file(join(directory,'scope.json'));
+        if(scope.repository!==state.repository||scope.repository_id!==state.repository_id||scope.root!==state.root||scope.queue_id!==state.queue_id||JSON.stringify(scope.issues)!==JSON.stringify(state.issues)||scope.source!=='windows-owner-confirmation'||typeof scope.allow_merge!=='boolean'||!Number.isFinite(Date.parse(scope.expires_at)))throw new Error('scope_mismatch');
+        if(existsSync(join(directory,'watcher.json'))){watch=file(join(directory,'watcher.json'));if(watch.scope_version!==scope.scope_version||!Array.isArray(watch.attempts)||watch.attempts.length>1000)throw new Error('watcher_mismatch');}
+        if(!archived&&existsSync(join(c.watcher_directory,'watcher.lock'))) {lock=file(join(c.watcher_directory,'watcher.lock'));if(lock.scope_version!==scope.scope_version||!positive(lock.pid))throw new Error('lock_mismatch');}
+        watchRead=!!watch;
       }
     } catch {scope=watch=lock=undefined;}
     const tasks:Task[]=[];
     for(const [i,issue] of state.issues.entries()) {
       const t=state.tasks[i];const task=taskBase(`lf:${c.project_id}:${issue}`,c.project_id,c.repository,issue);task.workflow='local-fast';task.machine=c.machine;task.executor=c.executor_name??'Coding Executor';task.updated_at=new Date(now).toISOString();
+      if(archived&&!t)continue;
+      task.queue_id=state.queue_id??'legacy';task.queue_archived=archived;
       task.observations=[observation('local_fast',now),observation('watcher',now,watchRead?'verified':'not_checked'),observation('owner_scope',now,scope?'verified':'not_checked')];
       if(scope)task.owner_scope={status:Date.parse(scope.expires_at)>now?'valid':'expired',expires_at:scope.expires_at,allow_merge:scope.allow_merge};
+      if(archived){task.owner_scope.status='not_checked';for(const o of task.observations)if(['watcher','owner_scope'].includes(o.source))o.freshness='stale';}
       const attempt=watch?.attempts.filter((a:Native)=>a.issue===issue).at(-1);
-      const running=watchRead?(lock?this.deps.alive(lock.pid):false):null;
-      const executorRunning=watchRead?!!attempt&&attempt.status==='running'&&positive(attempt.executor_pid)&&this.deps.alive(attempt.executor_pid):null;
+      const running=archived?false:watchRead?(lock?this.deps.alive(lock.pid):false):null;
+      const executorRunning=archived?false:watchRead?!!attempt&&attempt.status==='running'&&positive(attempt.executor_pid)&&this.deps.alive(attempt.executor_pid):null;
       task.watcher={status:watch?safeLabel(watch.status):'not_checked',running,executor_running:executorRunning,stale_lock:watchRead&&running!==null?!!lock&&!running:null};
       if(t) {
         task.source_head=t.head??(sha(t.pending_head)?t.pending_head:null);
@@ -173,6 +187,7 @@ export class LocalFastObservationAdapter implements TaskAdapter {
         } catch {/* Missing evidence is not PASS. */}
       }
 
+      if(!archived&&!t){task.waiting_for=actor('owner','Owner');if(!scope||task.owner_scope.status!=='valid'){task.state='blocked';task.blockers.push('本轮队列尚无有效 Windows Owner 授权');task.next_action='完成本轮 Windows Owner 授权，再在 V2 启动 Watcher';}else task.next_action='在 V2 启动已获授权的 Watcher';}
       if(attempt?.status==='blocked')task.history.push({source:'watcher',type:'attempt_blocked',occurred_at:null,observed_at:new Date(now).toISOString(),head:task.source_head,run_id:null});
       if(attempt&&['reserved','running','published'].includes(attempt.status))task.history.push({source:'watcher',type:'attempt_'+attempt.status,occurred_at:null,observed_at:new Date(now).toISOString(),head:sha(attempt.head)?attempt.head:task.source_head,run_id:null});
       if(watch)task.history.push({source:'watcher',type:task.watcher.status,occurred_at:null,observed_at:new Date(now).toISOString(),head:task.source_head,run_id:null});

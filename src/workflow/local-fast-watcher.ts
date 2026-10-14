@@ -69,17 +69,36 @@ export class LocalFastWatcher {
   readonly scope_file: string;
   private readonly state_file: string;
   private readonly lock_file: string;
+  private readonly boundFast: LocalFast;
   constructor(private readonly cwd = process.cwd(), overrides: Partial<WatchDependencies> = {}) {
     this.deps = { platform: process.platform, localData: process.env.LOCALAPPDATA ?? '', interactive: !!process.stdin.isTTY,
       now: Date.now, fast: {}, github: githubTransport(cwd), executor: codexExecutor, alive: defaultAlive, ...overrides };
     if (this.deps.platform !== 'win32') clientFail('local_fast_platform', 'The executor watcher supports Windows only.');
-    const scope = this.fast().scope();
+    this.boundFast=this.fast();const scope = this.boundFast.scope();
     if (!isAbsolute(this.deps.localData)) clientFail('local_fast_watch_scope', 'The Windows user LocalAppData directory is required.');
     externalPath(this.deps.localData);
-    this.directory = join(this.deps.localData, 'AWH', 'local-fast', String(scope.repository_id));
-    this.scope_file = join(this.directory, 'scope.json'); this.state_file = join(this.directory, 'watcher.json'); this.lock_file = join(this.directory, 'watcher.lock');
+    const repositoryDirectory = join(this.deps.localData, 'AWH', 'local-fast', String(scope.repository_id));
+    this.directory = scope.queue_id ? join(repositoryDirectory,'queues',scope.queue_id) : repositoryDirectory;
+    this.scope_file = join(this.directory, 'scope.json'); this.state_file = join(this.directory, 'watcher.json'); this.lock_file = join(repositoryDirectory, 'watcher.lock');
   }
   private fast(cwd = this.cwd) { return new LocalFast(cwd, this.deps.fast); }
+  assertIdle() {
+    if(existsSync(this.lock_file))clientFail('local_fast_watch_locked','An existing repository lock must be inspected before changing the queue');
+    this.assertNoExecutor();
+  }
+  private assertNoExecutor() {
+    if(existsSync(this.state_file)){
+      const state=readJson(this.state_file) as Native;
+      if(!Array.isArray(state.attempts)||state.attempts.length>1000)clientFail('local_fast_watch_scope','Preserve invalid Watcher records');
+      if(state.attempts.some((a:Native)=>a.status!=='published'&&a.executor_pid!==undefined&&(!Number.isSafeInteger(a.executor_pid)||this.deps.alive(a.executor_pid)!==false)))clientFail('local_fast_watch_locked','An existing executor may still be running');
+    }
+  }
+  async changeQueue<T>(operation:(idle:()=>void)=>Promise<T>):Promise<T> {
+    this.assertIdle();mkdirSync(join(this.lock_file,'..'),{recursive:true});externalPath(join(this.lock_file,'..'));
+    let fd:number;try{fd=openSync(this.lock_file,'wx');}catch{return clientFail('local_fast_watch_locked','The repository lock is occupied');}
+    try{writeFileSync(fd,JSON.stringify({pid:process.pid,scope_version:randomUUID(),queue_change:true}));return await operation(()=>this.assertNoExecutor());}
+    finally{closeSync(fd);unlinkSync(this.lock_file);}
+  }
   private executable(path: string) {
     if (!isAbsolute(path) || !/\.exe$/i.test(path)) clientFail('local_fast_watch_executor', 'Select the installed absolute Codex .exe path.');
     externalPath(path);
@@ -105,10 +124,10 @@ export class LocalFastWatcher {
   private load(): WatchScope {
     externalPath(this.scope_file);
     const grant = readJson(this.scope_file) as WatchScope, scope = this.fast().scope();
-    const allowed = ['repository','repository_id','owner','root','issues','checks','delivery','schema_version','mode','source','scope_version','expires_at','executor','allow_merge'];
+    const allowed = ['repository','repository_id','owner','root','issues','checks','delivery','queue_id','schema_version','mode','source','scope_version','expires_at','executor','allow_merge'];
     if (!grant || Object.keys(grant).some(k => !allowed.includes(k)) || grant.schema_version !== '1.0' || grant.mode !== 'local-fast' || grant.source !== 'windows-owner-confirmation' ||
         typeof grant.scope_version !== 'string' || !/^[a-f0-9-]{36}$/.test(grant.scope_version) || typeof grant.allow_merge !== 'boolean' || grant.executor?.type !== this.deps.executor.type ||
-        !same({ repository: grant.repository, repository_id: grant.repository_id, owner: grant.owner, root: grant.root, issues: grant.issues, checks: grant.checks, ...(grant.delivery ? { delivery: grant.delivery } : {}) }, scope))
+        !same({ repository: grant.repository, repository_id: grant.repository_id, owner: grant.owner, root: grant.root, issues: grant.issues, checks: grant.checks, ...(grant.delivery ? { delivery: grant.delivery } : {}), ...(grant.queue_id!==undefined ? {queue_id:grant.queue_id} : {}) }, scope))
       clientFail('local_fast_watch_scope', 'Saved Owner scope does not match the actual login, binding, checks, queue or executor.');
     if (!Number.isFinite(Date.parse(grant.expires_at)) || Date.parse(grant.expires_at) <= this.deps.now()) clientFail('local_fast_watch_expired', 'The saved Owner scope has expired; no continuation or merge is allowed.');
     this.executable(grant.executor.executable);
@@ -133,6 +152,8 @@ export class LocalFastWatcher {
     externalPath(this.scope_file);
     if (Date.parse(grant.expires_at) <= this.deps.now()) clientFail('local_fast_watch_expired', 'Owner scope expired during execution; preserve the candidate.');
     if (!same(readJson(this.scope_file), grant)) clientFail('local_fast_watch_scope_changed', 'Owner scope changed during execution; stop and preserve the candidate.');
+    const {schema_version:_schema,mode:_mode,source:_source,scope_version:_version,expires_at:_expires,executor:_executor,allow_merge:_merge,...scope}=grant;
+    this.boundFast.assertScope(scope);
   }
   private async merge(grant: WatchScope, facts: Native, state: WatchState) {
     if (!grant.allow_merge || facts.review?.decision !== 'PASS' || facts.review.head !== facts.head || !facts.github_checks_passed) return false;

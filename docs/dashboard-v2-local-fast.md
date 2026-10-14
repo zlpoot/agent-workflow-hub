@@ -6,6 +6,9 @@
 
 1. 打开默认 `/dashboard`（已有 `/dashboard/v2` 也可用），点击「项目」或「添加项目」。在已批准根目录中浏览并选择已有 Git 根目录，点击「检查 Local Fast 项目」。页面显示 origin 仓库、分支、完整 HEAD 和工作区是否有本机改动。
 2. 已有 binding：确认「关联已有队列」，保留交付身份、原队列与全部历史。未绑定：填写有限有序 Issue 编号（如 `12,15,18`）、每行一条定向检查命令，选择已连接 `github-app` 或已登录 `personal-gh`，预览后确认。服务端核对真实身份、仓库写权限、OPEN Issue 与冲突；绑定不启动开发。
+   项目详情的「GitHub Issues 与候选队列」会查询本仓库已有 OPEN Issue（排除 PR，每页最多 50 条，最多 20 页）。按编号/标题筛选本页，点击「加入」，再通过上移、下移、移除调整顺序；也可直接输入编号。点击「保存候选队列」保存选择，Viewer 重启后恢复。这是候选顺序，不会启动任务。
+   当前执行队列未开始或全部完成时，已关联项目可以「预览保存执行队列」并确认新顺序。服务端再次检查 Git HEAD、绑定版本、真实 OPEN Issue、已执行 Issue 冲突以及仓库锁。进行中的队列保留原顺序，仍可保存候选；任务完成后再确认下一轮。新轮次沿用已有交付身份和定向检查，原绑定原文保存在 common Git 的 `awh-local-fast/queues/<轮次>/state.json`，旧工作区和检查记录保留，最多保留 32 轮引用。归档的未执行候选不制造任务记录。
+   每轮通过已有 Watcher 保存自己的有限 Windows Owner scope；新的 scope/Watcher 状态位于 Git 外原仓库目录下的 `queues/<轮次>`，旧授权文件原样保留。所有轮次共用原仓库 `watcher.lock`，切换队列也占用这个锁。旧授权不能启动新轮次；CLI 原有 TTY、仓库、顺序、有效期、Codex.exe 和 allow-merge 语义不变。GUI 生成的终端命令调用当前候选 Viewer 附带的准确 Client CLI，避免系统旧 CLI 不识别新轮次。观察 API 可选 `queue_id` / `queue_archived` 只表示本机记录来源，历史 Owner/Watcher 不代表当前授权，也不产生 CP Run/Event。
 3. 项目关联保存到已配置的外置状态目录，Viewer 启动自动恢复。新增项目不需要手写 `project_ids`、`local_fast_observations` 或 Watcher 路径。目录丢失或 binding/登录异常会保留关联并明确报错。
 4. 「查询 Watcher」显示实际 Owner 仓库/队列、到期时间、自动 Merge 上限、本机锁和 GUI 状态。查询超过 15 秒后摘要标为历史，启动前需重新查询；每 30 秒自动查询，确认框打开时暂停。每次启动仍由现有 Watcher 重新验证授权。
 5. 缺少有效 scope 时，在「Windows Owner 确认引导」填写未来 30 天内的 UTC 到期时间与 Codex.exe 绝对路径，明确选择是否允许自动 Merge。复制生成的精确 PowerShell 命令，由 Owner 在真实交互式 Windows 终端运行，回到 V2 查询状态后启动。

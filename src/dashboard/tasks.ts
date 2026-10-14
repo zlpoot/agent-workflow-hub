@@ -15,6 +15,7 @@ export interface Observation {
 export interface GitHubRefresh { status:'not_checked'|'querying'|'success'|'failed'|'rate_limited'; last_success_at:string|null; retry_at:string|null; interval_seconds:0|60|300 }
 export interface ObservationOptions { github_interval_seconds?:0|60|300; refresh_github?:boolean }
 export interface Task {
+  queue_id?: string; queue_archived?: boolean;
   id: string; project_id: string; repository: string; workflow: 'standard' | 'local-fast'; fixture: boolean;
   issue: { number: number; title: string | null; state: 'open' | 'closed' | null };
   pr: { number: number; state: 'open' | 'closed' | null; draft: boolean | null; merged_at: string | null; merge_sha: string | null } | null;

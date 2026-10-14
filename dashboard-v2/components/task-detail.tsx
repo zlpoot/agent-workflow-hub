@@ -78,6 +78,7 @@ export function TaskDetail({
           )}
           {task && facts && (
             <>
+              {task.queue_archived&&<p className="notice">历史队列已归档。此处的 Watcher 与 Owner 记录用于回看，当前队列需要自己的授权。</p>}
               {task.fixture && (
                 <div className="fixture-note">示例预览 · 模拟数据</div>
               )}

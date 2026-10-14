@@ -9,6 +9,7 @@ import { fail } from '../shared/security.js';
 import { LocalFast, type LocalFastDependencies } from '../workflow/local-fast.js';
 import { LocalFastWatcher, type WatchDependencies } from '../workflow/local-fast-watcher.js';
 import type { LocalFastObservationConfig } from './local-fast-observation.js';
+import { fileURLToPath } from 'node:url';
 
 export interface LocalFastProjectsConfig { project_roots: string[]; state_directory: string }
 export function validateLocalFastProjects(c: LocalFastProjectsConfig) {
@@ -22,6 +23,8 @@ export function validateLocalFastProjects(c: LocalFastProjectsConfig) {
 export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: { fast?: Partial<LocalFastDependencies>; watch?: Partial<WatchDependencies> } = {}) {
   validateLocalFastProjects(c);
   const file = join(c.state_directory,'dashboard-local-fast.json');
+  const draftFile = join(c.state_directory,'dashboard-local-fast-queues.json');
+  const drafts = new Map<string,number[]>();
   const roots: string[] = [];
   const configs: LocalFastObservationConfig[] = [];
   const runs = new Map<string,{ controller: AbortController; done: Promise<unknown>; status: string; reason?: string }>();
@@ -38,6 +41,17 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
     for (let p=root;;p=resolve(p,'..')) {if(lstatSync(p).isSymbolicLink())fail(403,'directory','Redirected directories are unavailable');if(resolve(p,'..')===p)break;}
     return root;
   };
+  const numbers = (value:unknown,empty=false) => {
+    if(typeof value!=='string'||!((empty&&value==='')||/^[1-9]\d*(?:,[1-9]\d*)*$/.test(value)))fail(400,'local_fast_input','Use ordered distinct positive Issue numbers');
+    const rows=value===''?[]:value.split(',').map(Number);
+    if(rows.length>128||rows.some(n=>!Number.isSafeInteger(n))||new Set(rows).size!==rows.length)fail(400,'local_fast_input','Invalid finite queue');
+    return rows;
+  };
+  if(existsSync(draftFile)){
+    const saved=JSON.parse(readExternalFile(draftFile,65536).toString('utf8'));
+    if(!saved||Object.keys(saved).sort().join(',')!=='items,schema_version'||saved.schema_version!=='1.0'||!Array.isArray(saved.items)||saved.items.length>32)fail(500,'configuration','Invalid saved candidate queues');
+    for(const item of saved.items){if(!item||Object.keys(item).sort().join(',')!=='directory,issues'||!Array.isArray(item.issues))fail(500,'configuration','Invalid candidate queue');const root=allowed(item.directory);if(drafts.has(root))fail(500,'configuration','Duplicate candidate queue');drafts.set(root,numbers(item.issues.join(','),true));}
+  }
   const inspect = (value: unknown) => {
     const root=selected(value), identity=inspectRepository(root);
     if(identity.root!==root)fail(400,'directory','Choose the Git root');
@@ -72,7 +86,8 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
     // Absence must be distinguished from a corrupt/conflicting binding.
     let scope;
     if(existsSync(join(common,'awh-local-fast','state.json')))scope=fast.scope();
-    return {directory:identity.root,repository:identity.repository,head:identity.sha,branch:identity.ref,dirty:identity.dirty,bound:!!scope,issues:scope?.issues??[],checks:scope?.checks??[],provider:scope?.delivery?'github-app':'personal-gh'};
+    return {directory:identity.root,repository:identity.repository,head:identity.sha,branch:identity.ref,dirty:identity.dirty,bound:!!scope,issues:scope?.issues??[],checks:scope?.checks??[],provider:scope?.delivery?'github-app':'personal-gh',
+      ...(scope?fast.queueInfo():{}),draft_issues:drafts.get(identity.root)??[],owner_cli:{node:process.execPath,entry:fileURLToPath(new URL('../client/cli.js',import.meta.url))}};
   };
   const watchStatus = (root: string) => {
     inspect(root);
@@ -84,7 +99,7 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
     if(busy||closed)fail(409,'local_fast_busy','Wait for the current local operation');
     busy=true;
     try {
-      const fields:Record<string,string[]>={list:[],browse:['directory'],inspect:['directory'],attach:['directory','repository','head','confirm'],bind:['directory','repository','head','issues','checks','provider','confirm'],status:['directory'],start:['directory','confirm'],stop:['directory']};
+      const fields:Record<string,string[]>={list:[],browse:['directory'],inspect:['directory'],issues:['directory','page'],'queue-draft':['directory','repository','issues'],'queue-save':['directory','repository','head','issues','queue_revision','confirm'],attach:['directory','repository','head','confirm'],bind:['directory','repository','head','issues','checks','provider','confirm'],status:['directory'],start:['directory','confirm'],stop:['directory']};
       if(!fields[action]||Object.keys(data).some(k=>!fields[action]!.includes(k)))fail(400,'local_fast_input','Closed local actions required');
       if(action==='list')return {items:configs.map(config=>{
         try {const item=preview(config.root);if(!item.bound||item.repository!==config.repository)throw new Error('binding_mismatch');return {project_id:config.project_id,...item,available:true};}
@@ -93,6 +108,25 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
       if(action==='browse') {if(data.directory===undefined)return {roots:c.project_roots,current:null,directories:[]};const root=selected(data.directory);return {roots:c.project_roots,current:root,directories:readdirSync(root,{withFileTypes:true}).filter(e=>e.isDirectory()&&!e.isSymbolicLink()&&!e.name.startsWith('.')).slice(0,128).map(e=>join(root,e.name))};}
       if(action==='inspect')return preview(data.directory);
       const {identity,fast}=inspect(data.directory),root=identity.root;
+      if(action==='issues'){if(data.page!==undefined&&typeof data.page!=='number')fail(400,'local_fast_input','Use a numeric Issue page');return fast.openIssues(data.page===undefined?1:data.page as number);}
+      if(action==='queue-draft'){
+        if(data.repository!==identity.repository)fail(409,'local_fast_preview_changed','Repository changed');
+        const rows=numbers(data.issues,true);
+        if(!drafts.has(root)&&drafts.size>=32)fail(409,'local_fast_limit','Candidate queue capacity reached');
+        const items=[...drafts.entries()].filter(([directory])=>directory!==root).map(([directory,issues])=>({directory,issues}));items.push({directory:root,issues:rows});
+        atomicJson(draftFile,{schema_version:'1.0',items});drafts.set(root,rows);return {draft_issues:rows};
+      }
+      if(action==='queue-save'){
+        if(!roots.includes(root))fail(403,'local_fast_project','Associate the project before changing its queue');
+        if(data.confirm!==true||data.repository!==identity.repository||data.head!==identity.sha||typeof data.queue_revision!=='string')fail(409,'local_fast_preview_changed','Confirm the exact current preview');
+        numbers(data.issues);
+        const prior=runs.get(root);if(prior&&['RUNNING','STOPPING'].includes(prior.status))fail(409,'local_fast_watch_locked','Wait for this GUI Watcher to stop');
+        const watcher=new LocalFastWatcher(root,{fast:overrides.fast,...overrides.watch});
+        const previous=fast.queueInfo().queue_id;
+        await watcher.changeQueue(idle=>fast.setQueue(data.issues as string,data.queue_revision as string,true,idle));
+        if(fast.queueInfo().queue_id!==previous)runs.delete(root);
+        return {...preview(root),project_id:configs.find(x=>x.root===root)!.project_id};
+      }
       if(action==='attach'||action==='bind') {
         if(data.confirm!==true)fail(400,'local_fast_confirmation','Explicit project confirmation required');
         if(data.repository!==identity.repository||data.head!==identity.sha)fail(409,'local_fast_preview_changed','Git identity changed since preview; inspect and confirm again');
