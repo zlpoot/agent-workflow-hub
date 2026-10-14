@@ -54,7 +54,7 @@ export interface WatchDependencies {
   fast: Partial<LocalFastDependencies>; github: ReviewTransport; executor: ExecutorAdapter;
   alive: (pid: number) => boolean;
 }
-interface Attempt { key: string; issue: number; head?: string; status: 'reserved' | 'running' | 'published' | 'blocked'; executor_pid?: number }
+interface Attempt { key: string; issue: number; head?: string; status: 'reserved' | 'running' | 'published' | 'blocked'; executor_pid?: number; stage_resumptions?: number; stage_recovery_reason?: string }
 interface WatchState { scope_version: string; attempts: Attempt[]; executor_launches: number; merge_count: number; human_interventions: number; status: string; last_error?: string }
 const defaultAlive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code !== 'ESRCH'; } };
 const wait = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
@@ -72,7 +72,7 @@ export class LocalFastWatcher {
   private readonly boundFast: LocalFast;
   constructor(private readonly cwd = process.cwd(), overrides: Partial<WatchDependencies> = {}) {
     this.deps = { platform: process.platform, localData: process.env.LOCALAPPDATA ?? '', interactive: !!process.stdin.isTTY,
-      now: Date.now, fast: {}, github: githubTransport(cwd), executor: codexExecutor, alive: defaultAlive, ...overrides };
+      now: Date.now, github: githubTransport(cwd), executor: codexExecutor, alive: defaultAlive, ...overrides, fast: overrides.fast ?? {} };
     if (this.deps.platform !== 'win32') clientFail('local_fast_platform', 'The executor watcher supports Windows only.');
     this.boundFast=this.fast();const scope = this.boundFast.scope();
     if (!isAbsolute(this.deps.localData)) clientFail('local_fast_watch_scope', 'The Windows user LocalAppData directory is required.');
@@ -166,7 +166,8 @@ export class LocalFastWatcher {
     const grant = this.load(), state = this.state(grant);
     const lock = existsSync(this.lock_file) ? readJson(this.lock_file) as Native : null;
     const running = !!lock && Number.isSafeInteger(lock.pid) && this.deps.alive(lock.pid);
-    return { mode: 'local-fast', ...state, repository: grant.repository, issues: grant.issues, expires_at: grant.expires_at, allow_merge: grant.allow_merge, watcher_running: running, stale_lock: !!lock && !running };
+    return { mode: 'local-fast', ...state, repository: grant.repository, issues: grant.issues, expires_at: grant.expires_at, allow_merge: grant.allow_merge, watcher_running: running, stale_lock: !!lock && !running,
+      stage_resume_available:state.status==='BLOCKED'&&!lock&&state.executor_launches>0&&state.attempts.some(a=>['running','blocked'].includes(a.status)&&a.executor_pid===undefined&&a.key===`${a.issue}:develop`) };
   }
   private exact(grant: WatchScope) {
     externalPath(this.scope_file);
@@ -247,27 +248,46 @@ export class LocalFastWatcher {
     delete attempt.executor_pid; this.exact(grant);
     if (!same(this.load(), grant)) clientFail('local_fast_watch_scope_changed', 'Binding changed during coding.');
     if (signal.aborted || result.exit_code !== 0) { attempt.status = 'blocked'; this.save(state); clientFail('local_fast_watch_executor_failed', 'Executor failed or stopped; preserve the candidate and logs for Owner retry.'); }
+    return this.deliver(grant,state,facts,issue,attempt,signal);
+  }
+  private async deliver(grant:WatchScope,state:WatchState,facts:Native,issue:Native,attempt:Attempt,signal:AbortSignal) {
+    const check=()=>{if(signal.aborted)clientFail('local_fast_watch_stopped','Watcher stopped; preserve the retained candidate');this.exact(grant);};
+    check();
     const title = `Implement Issue #${facts.issue}: ${String(issue.title).slice(0, 180)}`;
     const guardedStage = new LocalFast(facts.worktree, { ...this.deps.fast,
       run: (command, args, cwd) => {
-        if (command === 'git' && ['add','commit','push'].includes(args[0]!) || command === 'gh' && args[0] === 'pr' && ['create','edit','ready'].includes(args[1]!)) this.exact(grant);
+        if (command === 'git' && ['add','commit','push'].includes(args[0]!) || command === 'gh' && args[0] === 'pr' && ['create','edit','ready'].includes(args[1]!)) check();
         return (this.deps.fast.run ?? localFastRun)(command, args, cwd);
       },
-      verify: async (command, root) => { this.exact(grant); const log = await (this.deps.fast.verify ?? deliveryDependencies.verify)(command, root); this.exact(grant); return log; }
+      verify: async (command, root) => { check(); const log = await (this.deps.fast.verify ?? deliveryDependencies.verify)(command, root); check(); return log; }
     });
     const delivered = await guardedStage.execute({ title, message: `Implement Issue #${facts.issue}`, body: `Implements Issue #${facts.issue} in the Owner-confirmed Windows Local Fast queue.\n\nThe separate Coding Executor completed its scoped implementation. Local Fast Stage verifies the committed exact HEAD using the binding's focused checks. Independent Review must be published to GitHub before the Review Gate opens.` });
-    attempt.status = 'published'; state.status = 'AWAITING_INDEPENDENT_REVIEW'; this.save(state);
+    attempt.status = 'published'; state.status = 'AWAITING_INDEPENDENT_REVIEW'; delete state.last_error; this.save(state);
     return { ...delivered, ...this.metrics(state) };
+  }
+  /** Resume the retained candidate under the existing grant; never launch Coding or clear attempts. */
+  async resumeStage(confirm:boolean,signal=new AbortController().signal) {
+    if(!confirm)clientFail('local_fast_confirmation','Confirm Stage-only recovery of the retained candidate');
+    if(signal.aborted)clientFail('local_fast_watch_recovery','Stage recovery was cancelled');
+    const before=this.load();if(this.state(before).status!=='BLOCKED')clientFail('local_fast_watch_recovery','Only a blocked retained candidate can resume Stage');
+    this.assertIdle();
+    return this.withWatchLock(async(grant,state,stop)=>{
+      this.assertNoExecutor();this.exact(grant);
+      const facts=await this.fast().flow();
+      const attempt=state.attempts.find(a=>a.key===`${facts.issue}:develop`);
+      if(stop.aborted||state.status!=='BLOCKED'||facts.status!=='READY'||!facts.worktree||!grant.issues.includes(facts.issue)||!attempt||
+          !['running','blocked'].includes(attempt.status)||attempt.executor_pid!==undefined||state.executor_launches<1)
+        clientFail('local_fast_watch_recovery','Preserve the current candidate; Stage-only recovery cannot select or develop another task');
+      const prepared=this.fast(facts.worktree).prepare();
+      if(prepared.issue!==facts.issue||prepared.worktree!==facts.worktree)clientFail('local_fast_watch_head','Retained candidate changed before Stage');
+      this.exact(grant);state.human_interventions++;attempt.stage_resumptions=(attempt.stage_resumptions??0)+1;attempt.stage_recovery_reason=state.last_error;this.save(state);
+      const delivered=await this.deliver(grant,state,facts,prepared.issue_details,attempt,stop);
+      return {...delivered,status:'AWAITING_INDEPENDENT_REVIEW'};
+    },signal);
   }
   private metrics(state: WatchState) { return { executor_launches: state.executor_launches, merge_count: state.merge_count, human_interventions: state.human_interventions, human_intervention_scope: 'local_owner_authorization_and_retry_only' }; }
   async run(once = false, signal = new AbortController().signal, changed: (facts: Native) => void = () => {}) {
-    const grant = this.load(); let fd: number;
-    try { fd = openSync(this.lock_file, 'wx'); } catch { return { mode: 'local-fast', status: 'BLOCKED', reason: 'local_fast_watch_locked', next_action: 'INSPECT_EXISTING_WATCHER' }; }
-    writeFileSync(fd, JSON.stringify({ pid: process.pid, scope_version: grant.scope_version }));
-    let state: WatchState | undefined;
-    try {
-      state = this.state(grant);
-      const stop = AbortSignal.any([signal, AbortSignal.timeout(Math.min(2147483647, Date.parse(grant.expires_at) - this.deps.now()))]);
+    return this.withWatchLock(async(grant,state,stop)=>{
       let last = '';
       while (!stop.aborted) {
         const facts = await this.tick(grant, state, stop), signature = JSON.stringify(facts);
@@ -276,6 +296,17 @@ export class LocalFastWatcher {
         if (facts.status !== 'MERGE_CONFIRMED') await wait(30000, stop);
       }
       state.status = 'STOPPED'; this.save(state); return { mode: 'local-fast', status: 'STOPPED', ...this.metrics(state) };
+    },signal);
+  }
+  private async withWatchLock(operation:(grant:WatchScope,state:WatchState,stop:AbortSignal)=>Promise<Native>,signal:AbortSignal) {
+    const grant = this.load(); let fd: number;
+    try { fd = openSync(this.lock_file, 'wx'); } catch { return { mode: 'local-fast', status: 'BLOCKED', reason: 'local_fast_watch_locked', next_action: 'INSPECT_EXISTING_WATCHER' }; }
+    writeFileSync(fd, JSON.stringify({ pid: process.pid, scope_version: grant.scope_version }));
+    let state: WatchState | undefined;
+    try {
+      state = this.state(grant);
+      const stop = AbortSignal.any([signal, AbortSignal.timeout(Math.min(2147483647, Date.parse(grant.expires_at) - this.deps.now()))]);
+      return await operation(grant,state,stop);
     } catch (error) {
       const reason = error instanceof ClientError ? error.code : 'local_fast_watch_operation';
       if (state) { state.status = 'BLOCKED'; state.last_error = reason; this.save(state); }

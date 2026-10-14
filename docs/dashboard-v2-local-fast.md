@@ -13,6 +13,7 @@
 4. 「查询 Watcher」显示实际 Owner 仓库/队列、到期时间、自动 Merge 上限、本机锁和 GUI 状态。查询超过 15 秒后摘要标为历史，启动前需重新查询；每 30 秒自动查询，确认框打开时暂停。每次启动仍由现有 Watcher 重新验证授权。
 5. 「Windows Owner 确认引导」自动从本机 Codex Desktop 安装目录与有限 PATH 项检测外置、非重定向的 Codex.exe 并预填；没有找到时保留手动选择。填写未来 30 天内的 UTC 到期时间，明确选择是否允许自动 Merge。已配置 Windows Owner 确认的 Viewer 可点击「打开 Windows Owner 授权窗口」，在本机原生窗口核对仓库、Issue 顺序、本轮队列、定向检查、交付身份、有效期、可执行文件和自动 Merge。确认后页面自动刷新实际 scope，再点击启动；无需复制终端命令。终端方式保留为兼容备用。
 6. V2 只启动现有 Watcher；重复点击不会新增执行器。「停止本 GUI Watcher」和 Viewer 退出只停止该 GUI 拥有的运行。其他启动来源、失效锁、完成队列与旧授权均保留，按既有 CLI 恢复规则处理。
+   若 Coding 已结束但父进程 Stage 失败，且保存的 scope 仍有效、仓库没有锁或可能仍活跃的执行器，可确认「恢复现有候选的 Stage」。它只对当前已保留的任务工作区进行 Commit、定向验证和同一 PR 的交付，复用既有 Stage 和仓库锁，不清除原 attempt，也不再次启动 Coding；保留恢复次数和原错误。成功后同一 GUI Watcher 继续等待独立 Review。缺少已执行 attempt、阶段不符、授权过期/变更、锁或存活执行器均拒绝。它不授予新 scope 或 Merge 权限；已有 CLI retry 仍保留自己的真实交互要求。
 7. 项目详情按绑定顺序展示任务；也可进入「任务」。详情显示执行者/机器、Issue/PR、HEAD、Stage 检查、实际 GitHub Review/Merge、来源时效、Watcher 历史、阻塞原因和下一责任方。SSE 断开或过期快照显示未知，历史 Review 不代表当前 Gate。
 8. 打开任务详情中的 PR，将「ChatGPT Review 指令」复制到独立 ChatGPT 会话。Reviewer 重新核对真实 PR 作者和准确 HEAD：App Bot PR 使用受信个人的原生 APPROVED/CHANGES_REQUESTED；同账号 personal-gh 按已有结构化 COMMENTED 协议。V2 不发布 Review。已有有效 Owner scope 允许 Merge 时，Watcher 在真实 Gate PASS 后按现有逻辑合并、回读 CLOSED、推进下一 Issue，直到 `QUEUE_COMPLETED`。
 

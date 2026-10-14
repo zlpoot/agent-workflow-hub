@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validQueue, canStart, ownerCommand, recovery } from '../dashboard-v2/lib/local-fast-model.mjs';
+import { validQueue, canStart, canResumeStage, ownerCommand, recovery } from '../dashboard-v2/lib/local-fast-model.mjs';
 test('V2 finite ordered queue rejects duplicate, malformed, unsafe and excessive Issue numbers',()=>{
   assert(validQueue('12,15,18'));
   for(const queue of ['', '0','01','-1','1,1','1, 2','1,','1.2','9007199254740992',Array.from({length:129},(_,i)=>i+1).join(',')])assert.equal(validQueue(queue),false,queue);
@@ -20,4 +20,9 @@ test('Owner terminal command preserves exact repository and order, quotes PowerS
   assert.equal(ownerCommand(preview,expires,'C:\\codex.exe\nwhoami',true),null);
   assert.equal(ownerCommand(preview,expires,'codex.exe',true),null);
   for(const code of ['directory_missing','local_fast_binding_conflict','local_fast_watch_expired','local_fast_permission','local_fast_busy','network'])assert(recovery(code).length>10);
+});
+test('Stage-only recovery UI requires retained blocked attempt, live valid scope and idle repository',()=>{
+  const now=Date.now(),status={stage_resume_available:true,status:'BLOCKED',observedAt:now,expires_at:new Date(now+60000).toISOString(),gui_status:'IDLE'};
+  assert(canResumeStage(status,now));
+  for(const delta of [{stage_resume_available:false},{observedAt:now-15000},{expires_at:new Date(now).toISOString()},{watcher_running:true},{stale_lock:true},{gui_status:'RUNNING'}])assert.equal(canResumeStage({...status,...delta},now),false);
 });

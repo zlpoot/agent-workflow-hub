@@ -13,6 +13,9 @@ export function ownerCommand(preview,expires,executable,allowMerge) {
 export function canStart(status,now=Date.now()) {
   return !!status && now-status.observedAt<15000 && now>=status.observedAt && Date.parse(status.expires_at)>now && !['BLOCKED','QUEUE_COMPLETED'].includes(status.status) && !status.watcher_running && !status.stale_lock && !['RUNNING','STOPPING'].includes(status.gui_status);
 }
+export function canResumeStage(status,now=Date.now()) {
+  return !!status&&status.stage_resume_available===true&&now-status.observedAt<15000&&now>=status.observedAt&&Date.parse(status.expires_at)>now&&!status.watcher_running&&!status.stale_lock&&!['RUNNING','STOPPING'].includes(status.gui_status);
+}
 export function recovery(code) {
   if(/queue_active/.test(code))return '当前队列正在开发或等待 Review。候选队列可以保存；执行队列需完成后再确认下一轮。';
   if(/queue_history/.test(code))return '该 Issue 已有执行历史，或历史记录冲突。保留记录并选择新的 OPEN Issue。';

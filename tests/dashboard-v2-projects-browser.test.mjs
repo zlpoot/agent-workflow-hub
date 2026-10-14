@@ -59,7 +59,12 @@ test('Windows Edge V2 project bind, duplicate start/stop, terminal guidance, Rev
   await page.screenshot({path:join(output,'synthetic-watcher-running.png'),fullPage:true});
   await page.getByRole('button',{name:'停止本 GUI Watcher',exact:true}).click();await page.waitForFunction(()=>document.body.innerText.includes('GUI：BLOCKED'));assert(signal.aborted);assert.equal(launches,1);
   const worktree=JSON.parse(readFileSync(h.statePath)).tasks[0].worktree;
-  writeFileSync(join(worktree,'code.txt'),'synthetic candidate\n');const delivered=await h.client(worktree).execute({title:'Synthetic GUI Review handoff',body:'Isolated only',message:'Synthetic candidate'});assert.equal(delivered.status,'awaiting_review');
+  writeFileSync(join(worktree,'code.txt'),'synthetic candidate\n');
+  await page.getByRole('button',{name:'查询 Watcher',exact:true}).click();
+  await page.getByRole('button',{name:'恢复现有候选的 Stage…',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();assert.equal(h.prs.length,0);
+  await page.getByRole('button',{name:'恢复现有候选的 Stage…',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'确认',exact:true}).dblclick();await page.getByRole('dialog').waitFor({state:'hidden'});
+  await page.waitForFunction(()=>document.body.innerText.includes('等待独立 Review'));assert.equal(h.prs.length,1);assert.equal(launches,1);
+  await page.screenshot({path:join(output,'synthetic-stage-recovered.png'),fullPage:true});
   await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('button',{name:/^任务.*Tasks/}).click();
   await page.getByRole('button',{name:'#1 Ordinary Issue 1',exact:true}).click();const detail=page.getByRole('dialog');
   await detail.getByRole('button',{name:'复制ChatGPT Review 指令'}).click();assert((await page.evaluate(()=>navigator.clipboard.readText())).includes('personal-gh（Reviewer 与个人 PR 作者同账号）'));
