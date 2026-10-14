@@ -62,12 +62,30 @@ try {
   await mode('success');await fill();await detect();await page.getByRole('checkbox',{name:'确认实际身份和完整安装仓库范围'}).check();
   await page.getByRole('button',{name:'连接并保存',exact:true}).click();await page.getByText('模拟检查通过 · PREFLIGHT_PASS',{exact:true}).waitFor();assert.equal(await page.getByRole('textbox',{name:'PEM 本机路径',exact:true}).count(),0);
   assert.equal(await page.getByRole('button',{name:'连接并保存',exact:true}).count(),0);await shot('desktop-connected');
-  for(const [fault,message] of [['permissions','安装缺少所需仓库权限。'],['identity','App、Installation、Bot 或 Reviewer 与已确认身份不一致。'],['scope','Selected Repository 集合不完整或与保存的范围发生变化。'],['network','无法完成 GitHub 网络请求或请求已超时。']]){
+  for(const [fault,message] of [['permissions','安装缺少所需仓库权限。'],['identity','App、Installation、Bot 或 Reviewer 与已确认身份不一致。'],['scope','GitHub 仓库范围发生变化，或完整范围暂未核验通过。'],['network','无法完成 GitHub 网络请求或请求已超时。']]){
     await mode(fault);await page.getByRole('button',{name:'重新检查',exact:true}).click();await page.getByText(message,{exact:true}).waitFor();assert(await page.getByRole('button',{name:'重新检查',exact:true}).isVisible());assert.equal(await page.getByRole('button',{name:'连接并保存',exact:true}).count(),0);
   }
   await mode('success');await page.getByRole('button',{name:'重新检查',exact:true}).click();await page.getByText('模拟检查通过 · PREFLIGHT_PASS',{exact:true}).waitFor();
-  await page.reload();await settings();await page.getByText('已保存本机连接 · 待检查 · CONNECTED_LOCAL',{exact:true}).waitFor();
-  await mode('restart');await page.getByRole('button',{name:'刷新连接状态',exact:true}).click();await page.getByText('已保存本机连接 · 待检查 · CONNECTED_LOCAL',{exact:true}).waitFor();
+  await page.reload();await settings();await page.getByText('GitHub 仓库范围已核验 · SCOPE_CURRENT',{exact:true}).waitFor();
+  await mode('restart');await page.getByRole('button',{name:'刷新连接状态',exact:true}).click();await page.getByText('GitHub 仓库范围已核验 · SCOPE_CURRENT',{exact:true}).waitFor();
+  // Returning from GitHub automatically reads the actual scope, but never silently saves it.
+  await mode('scope-add');await page.waitForTimeout(1100);await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+  await page.getByRole('heading',{name:'GitHub 仓库范围已更新',exact:true}).waitFor();
+  assert(await page.getByRole('button',{name:'确认同步仓库范围…',exact:true}).isDisabled());await shot('desktop-scope-change');
+  await mode('cancel');await page.getByRole('checkbox',{name:'确认更新后的完整仓库范围'}).check();await page.getByRole('button',{name:'确认同步仓库范围…',exact:true}).click();await page.getByText('本机 Owner 已取消连接。',{exact:true}).waitFor();
+  assert.equal(await page.locator('[aria-label="已有 App 连接"] > .app-scope li').count(),2);
+  await mode('success');await page.getByRole('button',{name:'同步 GitHub 仓库范围',exact:true}).click();await page.getByRole('heading',{name:'GitHub 仓库范围已更新',exact:true}).waitFor();
+  await mode('pending');await page.getByRole('checkbox',{name:'确认更新后的完整仓库范围'}).check();
+  const syncBefore=requests.filter(r=>r.path.endsWith('/sync-scope')).length;
+  await page.getByRole('button',{name:'确认同步仓库范围…',exact:true}).evaluate(button=>{button.click();button.click();});
+  await page.getByText('等待 Windows Owner 确认…',{exact:false}).waitFor();assert(await page.getByRole('button',{name:'同步 GitHub 仓库范围',exact:true}).isDisabled());
+  await mode('release-confirm');await page.getByText('新仓库范围已保存 · 待检查 · SCOPE_SYNCED',{exact:true}).waitFor();
+  assert.equal(requests.filter(r=>r.path.endsWith('/sync-scope')).length-syncBefore,1);assert.equal(await page.locator('.app-repositories li').count(),3);
+  await page.getByRole('combobox',{name:'检查仓库',exact:true}).selectOption('synthetic-org/new-project');await page.getByRole('button',{name:'重新检查',exact:true}).click();await page.getByText('模拟检查通过 · PREFLIGHT_PASS',{exact:true}).waitFor();await shot('desktop-scope-synced');
+  await mode('scope-remove');await page.getByRole('button',{name:'同步 GitHub 仓库范围',exact:true}).click();await page.getByRole('heading',{name:'GitHub 仓库范围已更新',exact:true}).waitFor();
+  await page.getByRole('checkbox',{name:'确认更新后的完整仓库范围'}).check();await page.getByRole('button',{name:'确认同步仓库范围…',exact:true}).click();await page.getByText('新仓库范围已保存 · 待检查 · SCOPE_SYNCED',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('combobox',{name:'检查仓库',exact:true}).locator('option[value="synthetic-org/repository-1"]').count(),0);
+  await mode('restart');await page.reload();await settings();await page.getByText('GitHub 仓库范围已核验 · SCOPE_CURRENT',{exact:true}).waitFor();assert.equal(await page.locator('.app-repositories li').count(),2);
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await shot('mobile-connected');
   const button=page.getByRole('button',{name:'重新检查',exact:true});await button.focus();await page.keyboard.press('Enter');await page.getByText('模拟检查通过 · PREFLIGHT_PASS',{exact:true}).waitFor();
   // Capability is re-read before every POST, even if the displayed flag was stale.
@@ -79,9 +97,9 @@ try {
   assert(requests.every(r=>r.origin===origin&&!r.authorization));
   for(const r of requests.filter(r=>r.method!=='GET')){
     assert.equal(r.method,'POST');assert(r.csrf);const action=r.path.split('/').at(-1);assert(r.path.startsWith('/dashboard/github-app/v1/'));
-    assert.deepEqual(r.fields,{detect:['app_id','app_slug','private_key_path','reviewer'],connect:['detection_id','installation_id','repository'],preflight:['repository']}[action]);
+    assert.deepEqual(r.fields,{detect:['app_id','app_slug','private_key_path','reviewer'],connect:['detection_id','installation_id','repository'],preflight:['repository'],'refresh-scope':[],'sync-scope':['proposal_id']}[action]);
   }
   await page.getByRole('link',{name:'Dashboard V1'}).click();await page.getByRole('tab',{name:'设置',exact:true}).click();await page.getByRole('heading',{name:'GitHub App',exact:true}).waitFor();await page.getByText(readonly,{exact:true}).waitFor();assert(await page.getByRole('button',{name:'重新检查',exact:true}).isDisabled());
-  const result={status:'PASS',fixture:true,real_detect_connect_preflight:'NOTRUN',native_owner_ui:'NOTRUN',browser:await browser.version(),scenarios:['readonly unconnected','input validation','all repositories','permissions','not installed','duplicate click','full selected set','ack invalidation','pending Owner + concurrency','cancel fixture','unmount abort/remount','connect + auto-preflight fixture','no overwrite','identity/scope/network drift','refresh/service restart','390px + keyboard Enter','fresh capability check blocks POST','CSP + no browser storage','closed same-origin GET/POST routes','V1 shared-hook fallback'],page_errors:errors.length,csp_violations:state.csp,requests:requests.length,screenshots:'synthetic only; PEM path masked; no credentials or personal paths'};
+  const result={status:'PASS',fixture:true,real_detect_connect_preflight:'NOTRUN',native_owner_ui:'NOTRUN',browser:await browser.version(),scenarios:['readonly unconnected','input validation','all repositories','permissions','not installed','duplicate click','full selected set','ack invalidation','pending Owner + concurrency','cancel fixture','unmount abort/remount','connect + auto-preflight fixture','no overwrite','identity/scope/network drift','refresh/service restart','return focus reads scope additions','scope cancellation preserves saved set','scope duplicate click + pending Owner','native confirmed metadata sync + new repo preflight fixture','scope removal + restart','390px + keyboard Enter','fresh capability check blocks POST','CSP + no browser storage','closed same-origin GET/POST routes','V1 shared-hook fallback'],page_errors:errors.length,csp_violations:state.csp,requests:requests.length,screenshots:'synthetic only; PEM path masked; no credentials or personal paths'};
   writeFileSync(output+'/verification.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
 }finally{await browser?.close();if(child.connected)child.disconnect();await new Promise(resolve=>child.exitCode===null?child.once('exit',resolve):resolve());}

@@ -20,7 +20,7 @@ export function dashboardAppFixture(directory, count = 2) {
     let value;
     if (path === '/app') value = { id: mode === 'identity' ? 6 : 5, slug: 'synthetic-builder' };
     else if (path === '/app/installations') value = mode === 'not-installed' ? [] : Number(u.searchParams.get('page')) === 1 ? mode === 'mixed' ? [{...installation(),id:8,account:{id:21,login:'synthetic-other',type:'Organization'},repository_selection:'all'},installation()] : [installation()] : [];
-    else if (path.endsWith('/installation')) value = installation();
+    else if (path.endsWith('/installation') || path === '/app/installations/9') value = installation();
     else if (path.endsWith('/access_tokens')) value = { token: 'ghs_NEVER_EXPOSE_FIXTURE', expires_at: new Date(Date.now() + 3600000).toISOString(), permissions: { metadata: 'read', ...body.permissions },
       ...(body.repository_ids ? { repositories: repositories.filter(r => body.repository_ids.includes(r.id)) } : {}) };
     else if (path === '/installation/repositories') { const page = Number(u.searchParams.get('page')); value = { total_count: repositories.length, repositories: mode === 'scope' ? [{id:99,full_name:'synthetic-org/drift'}] : repositories.slice((page-1)*100,page*100) }; }

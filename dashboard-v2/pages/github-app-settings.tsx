@@ -58,11 +58,19 @@ export function GithubAppSettings() {
     {connected&&<Card className="app-settings-card app-stack" aria-label="已有 App 连接"><div className="app-card-heading"><ShieldCheck aria-hidden="true"/><div><h3>本机连接</h3><p className="muted">{state?.app_slug} · App ID {state?.app_id} · Installation {state?.installation_id}</p></div></div>
       {state?.inspection&&<dl className="app-identity"><Fact label="核验账号">{state.inspection.account.login}<small>ID {state.inspection.account.id} · {state.inspection.account.type}</small></Fact><Fact label="实际权限">Contents: {state.inspection.permissions.contents} · Pull requests: {state.inspection.permissions.pull_requests} · Metadata: {state.inspection.permissions.metadata}</Fact></dl>}
       {state?.delivery_actor&&state.reviewer&&<Identity facts={{delivery_actor:state.delivery_actor,reviewer:state.reviewer}}/>}{state?.repositories&&<Repositories items={state.repositories}/>}
-      <p className="muted">CONNECTED_LOCAL 仅表示本机配置可读。{state?.fixture?'本页结果来自模拟服务，未执行真实 GitHub Preflight。':'PREFLIGHT_PASS 表示本次实际 GitHub 检查通过。'}已保存的连接不能在此覆盖。</p>
+      <p className="muted">CONNECTED_LOCAL 仅表示本机配置可读。{state?.fixture?'本页结果来自模拟服务，未执行真实 GitHub Preflight。':'PREFLIGHT_PASS 表示本次实际 GitHub 检查通过。'}返回此页会回读 GitHub 范围；身份、队列与 Merge 授权保持原样。</p>
+      {state?.scope_change&&<section className="app-stack" aria-label="GitHub 仓库范围变化"><h3>GitHub 仓库范围已更新</h3>
+        <p>新增：{state.scope_change.added.map(r=>r.full_name).join('、')||'无'}；移除：{state.scope_change.removed.map(r=>r.full_name).join('、')||'无'}。</p>
+        <Repositories items={state.scope_change.repositories}/>
+        <p className="muted">上方本机连接保留旧范围。确认后仅同步仓库清单，保留旧连接备份；移除的仓库将无法通过交付检查。</p>
+        <label className="app-ack"><input type="checkbox" aria-label="确认更新后的完整仓库范围" checked={ack} disabled={disabled} onChange={e=>setAck(e.target.checked)}/>我已核对 GitHub 当前完整仓库范围。</label>
+        <Button disabled={disabled||!ack} onClick={()=>void operation('sync-scope',{proposal_id:state.scope_change!.proposal_id},'等待 Windows Owner 确认')}>确认同步仓库范围…</Button>
+      </section>}
+      {state?.scope_saved&&<p role="status">仓库范围已同步。请选择仓库并重新检查，然后为新项目单独绑定 Issue 队列与 Owner scope。</p>}
       {state?.checked_at&&<p className="muted">最近检查：{new Date(state.checked_at).toLocaleString('zh-CN')}</p>}
       <div className="app-recheck"><Select label="检查仓库" value={repository} disabled={disabled} onChange={e=>setRepository(e.target.value)}>{state?.repositories?.map(r=><option key={r.id} value={r.full_name}>{r.full_name}</option>)}</Select><Button disabled={disabled||!repository} onClick={()=>void operation('preflight',{repository},'重新检查')}><RefreshCw aria-hidden="true"/>重新检查</Button></div>
     </Card>}
-    <div className="app-actions"><Button variant="outline" disabled={!!busy} onClick={()=>void refresh()}>刷新连接状态</Button><Link href="https://github.com/settings/installations">查看 GitHub 安装与仓库范围</Link></div>
+    <div className="app-actions"><Button variant="outline" disabled={!!busy} onClick={()=>void refresh()}>刷新连接状态</Button>{connected&&<Button variant="outline" disabled={!!busy||!enabled} onClick={()=>void refresh()}>同步 GitHub 仓库范围</Button>}<Link href="https://github.com/settings/installations">查看 GitHub 安装与仓库范围</Link></div>
     <p className="muted app-settings-boundary">仅本机 Owner 管理模式允许检测、连接及检查。App 连接不授予任务执行、独立 Review、Merge 或生产部署权限。</p>
   </div>;
 }

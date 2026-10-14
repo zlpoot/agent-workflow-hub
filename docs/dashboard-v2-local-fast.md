@@ -15,6 +15,8 @@
 
 ## Owner 确认的明确缺口
 
+GitHub App 仓库范围在 GitHub 安装页面更新后，返回 V2 设置（窗口获得焦点、重新进入设置或点击“同步 GitHub 仓库范围”）会使用已有 App 身份与 metadata-only token 重新读取完整 Selected Repository 集合。页面显示新增/移除与当前完整范围；勾选核对后，通过已有 Windows App Owner 原生窗口确认保存。确认前后都核对相同 App、Installation、Bot、Reviewer 与准确范围；过期、取消、范围再次变化、部分分页或权限异常均保留旧连接。保存仅替换仓库清单并在 Git 外受保护目录保留旧连接备份，不重绑历史队列，不扩大 Watcher/Merge scope。移除的仓库无法再交付；保存后需重新 Preflight。
+
 `GUI_OWNER_CONFIRMATION_NOT_INTEGRATED`：仍需一次真实 Windows Owner 终端交互。现有原生 CP Enrollment 确认器只批准专用登记/心跳请求，绑定受保护的安装条目与 Owner SID，无法直接授予 Watcher scope。本轮不扩建权限平台，也不以浏览器 `confirm:true` 冒充 Owner。取消、scope 到期、绑定不一致、旧 scope 已存在或锁占用不自动覆盖；查看返回的错误码与恢复建议。
 
 ## 验证边界

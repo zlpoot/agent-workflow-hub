@@ -24,10 +24,13 @@ const gateway=createDashboardGateway({enabled:true,store,assets:directory,assets
 await new Promise(resolve=>gateway.server.listen(0,'127.0.0.1',resolve));
 console.log(JSON.stringify({url:`http://127.0.0.1:${gateway.server.address().port}/dashboard`,v2_url:`http://127.0.0.1:${gateway.server.address().port}/dashboard/v2`,input:app.input,fixture:true,live_preflight:'NOTRUN'}));
 process.on('message',message=>{
-  if(message?.kind==='mode'&&['success','cancel','permissions','identity','scope','network','not-installed','all','readonly','restart','pending','release-cancel'].includes(message.value)){
+  if(message?.kind==='mode'&&['success','cancel','permissions','identity','scope','network','not-installed','all','readonly','restart','pending','release-cancel','release-confirm','scope-add','scope-remove'].includes(message.value)){
     if(message.value==='restart'||message.value==='readonly'){service.close();enabled=message.value!=='readonly';service=makeService();}
     else if(message.value==='pending'){pendingOwner=true;app.setMode('success');}
     else if(message.value==='release-cancel'){pendingOwner=false;releaseOwner?.(false);}
+    else if(message.value==='release-confirm'){pendingOwner=false;releaseOwner?.(true);}
+    else if(message.value==='scope-add'){app.repositories.push({id:90,full_name:'synthetic-org/new-project'});app.setMode('success');}
+    else if(message.value==='scope-remove'){app.repositories.splice(0,1);app.setMode('success');}
     else {pendingOwner=false;cancelled=message.value==='cancel';app.setMode(cancelled?'success':message.value);}
     process.send?.({kind:'ack',id:message.id,confirmations,calls:app.calls.length});
   }
