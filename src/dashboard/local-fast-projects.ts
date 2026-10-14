@@ -7,7 +7,8 @@ import { localFastRun } from '../workflow/local-fast-github.js';
 import { externalPath, readExternalFile } from '../shared/external-files.js';
 import { fail } from '../shared/security.js';
 import { LocalFast, type LocalFastDependencies } from '../workflow/local-fast.js';
-import { LocalFastWatcher, type WatchDependencies } from '../workflow/local-fast-watcher.js';
+import { LocalFastWatcher, type WatchDependencies, type WatchScope } from '../workflow/local-fast-watcher.js';
+import { detectCodexExecutable } from './codex-executable.js';
 import type { LocalFastObservationConfig } from './local-fast-observation.js';
 import { fileURLToPath } from 'node:url';
 
@@ -20,7 +21,8 @@ export function validateLocalFastProjects(c: LocalFastProjectsConfig) {
   }
 }
 /** OS-user GUI association only. Binding and execution retain existing Local Fast gates. */
-export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: { fast?: Partial<LocalFastDependencies>; watch?: Partial<WatchDependencies> } = {}) {
+export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: { fast?: Partial<LocalFastDependencies>; watch?: Partial<WatchDependencies>;
+  confirmOwner?:(scope:WatchScope,signal:AbortSignal)=>Promise<boolean>; detectExecutor?:()=>string|null } = {}) {
   validateLocalFastProjects(c);
   const file = join(c.state_directory,'dashboard-local-fast.json');
   const draftFile = join(c.state_directory,'dashboard-local-fast-queues.json');
@@ -29,6 +31,7 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
   const configs: LocalFastObservationConfig[] = [];
   const runs = new Map<string,{ controller: AbortController; done: Promise<unknown>; status: string; reason?: string }>();
   let busy = false, closed = false;
+  const shutdown=new AbortController();
   const allowed = (value: unknown) => {
     if (typeof value !== 'string' || value.length > 1024 || !isAbsolute(value) || value.split(/[\\/]/).some(p=>p==='..'||p==='.')) fail(400,'directory','Choose a trusted local directory');
     const root=resolve(value);
@@ -87,19 +90,20 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
     let scope;
     if(existsSync(join(common,'awh-local-fast','state.json')))scope=fast.scope();
     return {directory:identity.root,repository:identity.repository,head:identity.sha,branch:identity.ref,dirty:identity.dirty,bound:!!scope,issues:scope?.issues??[],checks:scope?.checks??[],provider:scope?.delivery?'github-app':'personal-gh',
-      ...(scope?fast.queueInfo():{}),draft_issues:drafts.get(identity.root)??[],owner_cli:{node:process.execPath,entry:fileURLToPath(new URL('../client/cli.js',import.meta.url))}};
+      ...(scope?fast.queueInfo():{}),draft_issues:drafts.get(identity.root)??[],owner_native:!!overrides.confirmOwner,codex_executable:(overrides.detectExecutor??detectCodexExecutable)(),owner_cli:{node:process.execPath,entry:fileURLToPath(new URL('../client/cli.js',import.meta.url))}};
   };
   const watchStatus = (root: string) => {
     inspect(root);
     const run=runs.get(root);
-    try {const state=new LocalFastWatcher(root,{fast:overrides.fast,...overrides.watch}).status();return {...state,gui_status:run?.status??'IDLE',gui_reason:run?.reason??null,owner_confirmation:'GUI_OWNER_CONFIRMATION_NOT_INTEGRATED'};}
-    catch(error) {return {status:'BLOCKED',reason:error instanceof ClientError?error.code:'local_fast_watch_scope',gui_status:run?.status??'IDLE',owner_confirmation:'GUI_OWNER_CONFIRMATION_NOT_INTEGRATED'};}
+    const owner_confirmation=overrides.confirmOwner?'native_windows_owner':'GUI_OWNER_CONFIRMATION_NOT_INTEGRATED';
+    try {const state=new LocalFastWatcher(root,{fast:overrides.fast,...overrides.watch}).status();return {...state,gui_status:run?.status??'IDLE',gui_reason:run?.reason??null,owner_confirmation};}
+    catch(error) {return {status:'BLOCKED',reason:error instanceof ClientError?error.code:'local_fast_watch_scope',gui_status:run?.status??'IDLE',owner_confirmation};}
   };
-  return { configs, projectIds:()=>configs.map(c=>c.project_id), async handle(action:string,data:Record<string,unknown>) {
+  return { configs, projectIds:()=>configs.map(c=>c.project_id), async handle(action:string,data:Record<string,unknown>,signal:AbortSignal=new AbortController().signal,authorized:()=>boolean=()=>true) {
     if(busy||closed)fail(409,'local_fast_busy','Wait for the current local operation');
     busy=true;
     try {
-      const fields:Record<string,string[]>={list:[],browse:['directory'],inspect:['directory'],issues:['directory','page'],'queue-draft':['directory','repository','issues'],'queue-save':['directory','repository','head','issues','queue_revision','confirm'],attach:['directory','repository','head','confirm'],bind:['directory','repository','head','issues','checks','provider','confirm'],status:['directory'],start:['directory','confirm'],stop:['directory']};
+      const fields:Record<string,string[]>={list:[],browse:['directory'],inspect:['directory'],issues:['directory','page'],'queue-draft':['directory','repository','issues'],'queue-save':['directory','repository','head','issues','queue_revision','confirm'],attach:['directory','repository','head','confirm'],bind:['directory','repository','head','issues','checks','provider','confirm'],status:['directory'],start:['directory','confirm'],stop:['directory'],'owner-authorize':['directory','repository','head','issues','queue_revision','expires','executable','allow_merge']};
       if(!fields[action]||Object.keys(data).some(k=>!fields[action]!.includes(k)))fail(400,'local_fast_input','Closed local actions required');
       if(action==='list')return {items:configs.map(config=>{
         try {const item=preview(config.root);if(!item.bound||item.repository!==config.repository)throw new Error('binding_mismatch');return {project_id:config.project_id,...item,available:true};}
@@ -137,6 +141,16 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
         const item=add(root);atomicJson(file,{schema_version:'1.0',roots,repositories:configs.map(c=>c.repository)});return {project_id:item.project_id,...preview(root)};
       }
       if(!roots.includes(root))fail(403,'local_fast_project','Confirm this project first');
+      if(action==='owner-authorize'){
+        if(!overrides.confirmOwner)fail(409,'GUI_OWNER_CONFIRMATION_NOT_INTEGRATED','Native Windows Owner is unavailable');
+        if(data.repository!==identity.repository||data.head!==identity.sha||data.queue_revision!==fast.queueInfo().queue_revision)fail(409,'local_fast_preview_changed','Confirm the exact current queue');
+        if(typeof data.expires!=='string'||typeof data.executable!=='string'||typeof data.allow_merge!=='boolean')fail(400,'local_fast_input','Explicit native scope fields required');
+        numbers(data.issues);
+        const watcher=new LocalFastWatcher(root,{fast:overrides.fast,...overrides.watch});
+        const result=await watcher.authorizeNative(data.repository as string,data.issues as string,data.expires,data.executable,data.allow_merge,overrides.confirmOwner,
+          AbortSignal.any([signal,shutdown.signal,AbortSignal.timeout(210000)]),()=>!closed&&authorized());
+        return {...watchStatus(root),owner_result:result.status};
+      }
       if(action==='status')return watchStatus(root);
       if(action==='stop') {const run=runs.get(root);if(run){run.controller.abort();run.status='STOPPING';}return watchStatus(root);}
       if(data.confirm!==true)fail(400,'local_fast_confirmation','Confirm starting the saved Owner scope');
@@ -149,5 +163,5 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
       return {status:'STARTING',owner_confirmation:'saved_windows_owner_scope'};
     } catch(error) {if(error instanceof ClientError)fail(409,error.code,'Local Fast operation blocked; preserve history');throw error;}
     finally {busy=false;}
-  },close:async()=>{closed=true;for(const run of runs.values())run.controller.abort();await Promise.allSettled([...runs.values()].map(r=>r.done));}};
+  },close:async()=>{closed=true;shutdown.abort();for(const run of runs.values())run.controller.abort();await Promise.allSettled([...runs.values()].map(r=>r.done));}};
 }

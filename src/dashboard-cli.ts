@@ -9,7 +9,7 @@ import { createDashboardGateway } from './dashboard/gateway.js';
 import { createLocalOnboarding, type LocalBinding } from './dashboard/onboarding.js';
 import { createEnrollmentService } from './dashboard/enrollment.js';
 import { createOwnerApproval } from './dashboard/owner-approval.js';
-import { createGithubAppOwnerConfirmation } from './dashboard/github-app-owner.js';
+import { createGithubAppOwnerConfirmation, createLocalFastOwnerConfirmation } from './dashboard/github-app-owner.js';
 import { createGithubAppManagement } from './dashboard/github-app-management.js';
 import { readMachineConfig } from './client/enrollment.js';
 import { createLocalFastProjects, validateLocalFastProjects, type LocalFastProjectsConfig } from './dashboard/local-fast-projects.js';
@@ -47,7 +47,9 @@ export async function main(args: string[]) {
     ? createGithubAppManagement({ confirm: policies.has('--github-app-owner-config') ? createGithubAppOwnerConfirmation(policies.get('--github-app-owner-config')!) : undefined })
     : undefined;
   const enrollment = c.machine_config_file ? createEnrollmentService(c.machine_config_file,ownerApprove) : undefined;
-  const localFastProjects=c.local_fast_projects ? createLocalFastProjects(c.local_fast_projects) : undefined;
+  const localFastProjects=c.local_fast_projects ? createLocalFastProjects(c.local_fast_projects,{
+    confirmOwner:policies.has('--github-app-owner-config')?createLocalFastOwnerConfirmation(policies.get('--github-app-owner-config')!):undefined
+  }) : undefined;
   for(const id of localFastProjects?.projectIds()??[])if(!c.viewer.project_ids.includes(id))c.viewer.project_ids.push(id);
   for (const b of enrollment?.bindings() ?? []) if (!c.viewer.project_ids.includes(b.project_id)) c.viewer.project_ids.push(b.project_id);
   const store = new DashboardReadStore(c.database, () => enrollment?.bindings() ?? []);

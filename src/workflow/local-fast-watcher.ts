@@ -106,20 +106,40 @@ export class LocalFastWatcher {
   }
   authorize(repository: string, issues: string, expires: string, executable: string, allowMerge: boolean, confirm: boolean) {
     if (!confirm || !this.deps.interactive) clientFail('local_fast_watch_owner', 'Watcher scope can only be saved by an explicit interactive Windows Owner command; Coding children cannot authorize it.');
+    return this.saveAuthorization(this.prepareAuthorization(repository,issues,expires,executable,allowMerge));
+  }
+  private prepareAuthorization(repository:string,issues:string,expires:string,executable:string,allowMerge:boolean):WatchScope {
     const scope = this.fast().scope(), until = Date.parse(expires);
     if (repository !== scope.repository || issues !== scope.issues.join(',') || !Number.isFinite(until) || !expires.endsWith('Z') || until <= this.deps.now() || until - this.deps.now() > 30 * 86400000)
       clientFail('local_fast_watch_scope', 'Confirm the existing single repository, ordered finite queue and a future UTC expiry within 30 days.');
     this.executable(executable);
-    mkdirSync(this.directory, { recursive: true }); externalPath(this.directory);
-    const grant: WatchScope = { ...scope, schema_version: '1.0', mode: 'local-fast', source: 'windows-owner-confirmation', scope_version: randomUUID(),
+    if(typeof allowMerge!=='boolean')clientFail('local_fast_watch_scope','Explicit Merge choice required');
+    return { ...scope, schema_version: '1.0', mode: 'local-fast', source: 'windows-owner-confirmation', scope_version: randomUUID(),
       expires_at: new Date(until).toISOString(), executor: { type: this.deps.executor.type, executable }, allow_merge: allowMerge };
+  }
+  /** Trusted host callback only; browser confirmation booleans never reach this gate. */
+  async authorizeNative(repository:string,issues:string,expires:string,executable:string,allowMerge:boolean,
+      confirmation:(grant:WatchScope,signal:AbortSignal)=>Promise<boolean>,signal:AbortSignal,authorized:()=>boolean) {
+    const grant=this.prepareAuthorization(repository,issues,expires,executable,allowMerge);
+    return this.changeQueue(async()=>{
+      if(signal.aborted||!authorized())clientFail('local_fast_watch_owner','Owner interaction ended');
+      if(existsSync(this.scope_file))return this.saveAuthorization(grant);
+      if(!await confirmation(structuredClone(grant),signal))return {status:'OWNER_CANCELLED'};
+      if(signal.aborted||!authorized())clientFail('local_fast_watch_owner','Owner interaction ended');
+      const current=this.prepareAuthorization(repository,issues,expires,executable,allowMerge);
+      if(!same({...current,scope_version:''},{...grant,scope_version:''}))clientFail('local_fast_watch_scope_changed','Binding changed during native confirmation');
+      return this.saveAuthorization(grant);
+    });
+  }
+  private saveAuthorization(grant:WatchScope) {
+    mkdirSync(this.directory, { recursive: true }); externalPath(this.directory);
     if (existsSync(this.scope_file)) {
       const existing = this.load();
       if (!same({ ...existing, scope_version: '' }, { ...grant, scope_version: '' })) clientFail('local_fast_watch_scope_exists', 'An existing saved scope cannot be overwritten. Preserve it; renewal requires an explicit Owner decision.');
       return { mode: 'local-fast', status: 'OWNER_SCOPE_SAVED', scope_file: this.scope_file, scope_version: existing.scope_version };
     }
     writeFileSync(this.scope_file, JSON.stringify(grant, null, 2), { flag: 'wx', mode: 0o600 });
-    return { mode: 'local-fast', status: 'OWNER_SCOPE_SAVED', scope_file: this.scope_file, scope_version: grant.scope_version, allow_merge: allowMerge };
+    return { mode: 'local-fast', status: 'OWNER_SCOPE_SAVED', scope_file: this.scope_file, scope_version: grant.scope_version, allow_merge: grant.allow_merge };
   }
   private load(): WatchScope {
     externalPath(this.scope_file);

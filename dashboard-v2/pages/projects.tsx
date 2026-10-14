@@ -12,7 +12,7 @@ import { canStart, ownerCommand, recovery, validQueue } from '../lib/local-fast-
 import { CopyText } from '../components/copy-text';
 import {IssueQueue,type IssuePage} from '../components/issue-queue';
 
-type Preview={directory:string;repository:string;head:string;branch:string;dirty:boolean;bound:boolean;issues:number[];checks:string[];provider:string;project_id?:string;queue_revision?:string;queue_editable?:boolean;queue_started?:boolean;draft_issues?:number[];owner_cli?:{node:string;entry:string}};
+type Preview={directory:string;repository:string;head:string;branch:string;dirty:boolean;bound:boolean;issues:number[];checks:string[];provider:string;project_id?:string;queue_revision?:string;queue_editable?:boolean;queue_started?:boolean;draft_issues?:number[];owner_native?:boolean;codex_executable?:string|null;owner_cli?:{node:string;entry:string}};
 type Project=Partial<Preview>&{project_id:string;directory:string;repository:string;available:boolean;reason?:string};
 type Watch={status:string;reason?:string;gui_status:string;gui_reason?:string;expires_at?:string;allow_merge?:boolean;watcher_running?:boolean;stale_lock?:boolean;repository?:string;issues?:number[];observedAt:number};
 export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];open:(id:string)=>void;disconnected:boolean;now:number;refresh:()=>void}) {
@@ -22,6 +22,7 @@ export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];ope
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[available,setAvailable]=useState(true),[confirmation,setConfirmation]=useState<'attach'|'bind'|'start'|'queue-save'|null>(null);
   const [issuePage,setIssuePage]=useState<IssuePage|null>(null),[draftSaved,setDraftSaved]=useState(false);
   const [expires,setExpires]=useState(()=>new Date(Date.now()+86400000).toISOString()),[executable,setExecutable]=useState(''),[allowMerge,setAllowMerge]=useState(false);
+  const [ownerResult,setOwnerResult]=useState('');
   const pending=useRef(false),abort=useRef<AbortController|null>(null),mounted=useRef(true);
   const request=async(action:string,data:Record<string,unknown>={})=>localFastRequest(action,data,abort.current!.signal);
   const operation=async(work:()=>Promise<void>)=>{
@@ -38,6 +39,7 @@ export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];ope
   const inspect=async(path:string,projectId?:string)=>{
     setPreview(null);setStatus(null);setIssuePage(null);setDraftSaved(false);const value:Preview=await request('inspect',{directory:path});if(!mounted.current)return;
     setDirectory(value.directory);setPreview({...value,project_id:projectId});setIssues((value.draft_issues??[]).join(','));setChecks(value.checks.join('\n'));setProvider(value.bound?value.provider:'github-app');
+    setExecutable(value.codex_executable??'');setOwnerResult('');
     if(projectId)await watch(value.directory);
     const page=await request('issues',{directory:value.directory,page:1});if(mounted.current)setIssuePage(page);
   };
@@ -90,12 +92,19 @@ export function Projects({tasks,open,disconnected,now,refresh}:{tasks:Task[];ope
       <p className="muted">最近本机查询：{stamp(status?.observedAt)}{stale?' · 当前状态未核验':''}</p>
       {status&&<><p role="status">Watcher：{status.status} · GUI：{status.gui_status}{stale?'（历史）':''}</p><dl className="project-facts"><dt>有效 Owner 仓库 / 队列</dt><dd>{stale?'当前未知':`${status.repository??'未核验'} · ${status.issues?.join(' → ')??'未核验'}`}</dd><dt>到期时间</dt><dd>{stamp(status.expires_at)}{status.expires_at&&Date.parse(status.expires_at)<=now?' · 已到期':''}</dd><dt>自动 Merge</dt><dd>{stale?'当前未知':status.allow_merge===true?'Owner 已允许':'未允许'}</dd><dt>Watcher / 锁</dt><dd>{stale?'当前未知':status.stale_lock?'失效锁 · 保留现场':status.watcher_running?'正在运行':'未运行'}</dd></dl>{(status.reason||status.gui_reason)&&<p className="notice">{status.reason??status.gui_reason} · {recovery(status.reason??status.gui_reason??'')}</p>}</>}
       <div className="flex flex-wrap gap-2"><Button disabled={busy||!canStart(status,now)} onClick={()=>setConfirmation('start')}>启动已有 Owner scope…</Button><Button variant="outline" disabled={busy||!status||!['RUNNING','STOPPING'].includes(status.gui_status)||status.gui_status==='STOPPING'} onClick={()=>void operation(async()=>{await request('stop',{directory:preview.directory});await watch(preview.directory);refresh();})}>停止本 GUI Watcher</Button></div>
-      <details open={!status?.expires_at}><summary>Windows Owner 确认引导</summary><div className="project-stack"><p className="notice">GUI_OWNER_CONFIRMATION_NOT_INTEGRATED：仍需一次真实 Windows 交互。Owner 在项目目录的交互式终端运行下方命令，核对仓库、队列、UTC 到期、Codex.exe 与自动 Merge。完成后点击“查询 Watcher”。</p>
+      <details open={!status?.expires_at||!!ownerResult}><summary>Windows Owner 确认引导</summary><div className="project-stack"><p className="notice">{preview.owner_native?'页面将打开 Windows Owner 原生确认窗口。核对仓库、队列、UTC 到期、Codex.exe 与自动 Merge 后确认；保存后自动刷新状态，再启动 Watcher。':'GUI_OWNER_CONFIRMATION_NOT_INTEGRATED：本机未启用 Windows 原生确认，Owner 需在交互式终端运行下方命令，完成后点击“查询 Watcher”。'}</p>
         <label className="app-field">UTC 到期时间<Input aria-label="Owner UTC 到期时间" value={expires} disabled={busy} onChange={e=>setExpires(e.target.value)}/></label>
         <label className="app-field">Codex 可执行文件<Input aria-label="Codex 可执行文件" placeholder="C:\path\codex.exe" value={executable} disabled={busy} onChange={e=>setExecutable(e.target.value)}/></label>
+        <p className="muted">{preview.codex_executable?'已自动识别本机 Codex 安装，可核对或手动调整。':'未找到有效 Codex.exe，请选择已安装的可执行文件。'}</p>
         <label className="flex items-center gap-2"><input type="checkbox" checked={allowMerge} disabled={busy} onChange={e=>setAllowMerge(e.target.checked)}/>允许 Watcher 在独立 Review PASS 后自动 Merge 并推进</label>
         {!ownerValid&&<p role="alert">到期时间必须是未来 30 天内的 UTC 时间，以 Z 结尾。</p>}
-        {command&&ownerValid?<CopyText label="Owner 授权命令" text={command}/>:<p className="muted">填写有效 UTC 到期时间与 Codex.exe 绝对路径后生成精确命令。</p>}
+        {preview.owner_native&&<Button disabled={busy||!command||!ownerValid} onClick={()=>void operation(async()=>{
+          setOwnerResult('');
+          const result=await request('owner-authorize',{directory:preview.directory,repository:preview.repository,head:preview.head,queue_revision:preview.queue_revision,issues:preview.issues.join(','),expires,executable,allow_merge:allowMerge});
+          if(mounted.current){setOwnerResult(result.owner_result);setStatus({...result,observedAt:Date.now()});refresh();}
+        })}>{busy?'等待本机操作完成…':'打开 Windows Owner 授权窗口'}</Button>}
+        {ownerResult&&<p role="status">{ownerResult==='OWNER_CANCELLED'?'已取消，未保存本轮授权。':'本轮 Owner 授权已保存，Watcher 状态已刷新。'}</p>}
+        {command&&ownerValid?<details open={!preview.owner_native}><summary>终端授权备用方式</summary><CopyText label="Owner 授权命令" text={command}/></details>:<p className="muted">填写有效 UTC 到期时间与 Codex.exe 绝对路径后可授权。</p>}
         <p className="muted">取消、到期或 scope 冲突请由 Owner 按已有 CLI 处理；GUI 不覆盖授权。仅停止此 GUI 启动的 Watcher，Viewer 退出会停止其拥有的进程。</p>
       </div></details>
     </Card>}

@@ -68,7 +68,11 @@ export function createDashboardGateway(options: GatewayOptions = {}) {
         if(!local||!options.localFastProjects)fail(404,'not_found','Local Fast GUI is not configured');
         if(!authenticate(request))fail(401,'viewer_unauthorized','Local Viewer session required');
         if(request.method!=='POST'||request.headers.origin!==`http://${host}`||request.headers['sec-fetch-site']!=='same-origin'||url.search)fail(403,'local_fast_origin','Explicit same-origin local interaction required');
-        const result=await options.localFastProjects.handle(url.pathname.slice('/dashboard/local-fast/v1/'.length),await enrollmentBody(request));
+        const controller=new AbortController(),abort=()=>{if(!response.writableEnded)controller.abort();};
+        request.once('aborted',abort);response.once('close',abort);
+        let result:unknown;
+        try {result=await options.localFastProjects.handle(url.pathname.slice('/dashboard/local-fast/v1/'.length),await enrollmentBody(request),controller.signal,()=>!!authenticate(request));}
+        finally {request.off('aborted',abort);response.off('close',abort);}
         for(const id of options.localFastProjects.projectIds())if(!options.localBrowserViewer!.project_ids.includes(id))(options.localBrowserViewer!.project_ids as string[]).push(id);
         if(!authenticate(request))fail(401,'viewer_unauthorized','Viewer session expired');
         response.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});response.end(JSON.stringify({item:result,authority_verified:false}));return;

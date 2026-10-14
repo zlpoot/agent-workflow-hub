@@ -11,16 +11,18 @@
    每轮通过已有 Watcher 保存自己的有限 Windows Owner scope；新的 scope/Watcher 状态位于 Git 外原仓库目录下的 `queues/<轮次>`，旧授权文件原样保留。所有轮次共用原仓库 `watcher.lock`，切换队列也占用这个锁。旧授权不能启动新轮次；CLI 原有 TTY、仓库、顺序、有效期、Codex.exe 和 allow-merge 语义不变。GUI 生成的终端命令调用当前候选 Viewer 附带的准确 Client CLI，避免系统旧 CLI 不识别新轮次。观察 API 可选 `queue_id` / `queue_archived` 只表示本机记录来源，历史 Owner/Watcher 不代表当前授权，也不产生 CP Run/Event。
 3. 项目关联保存到已配置的外置状态目录，Viewer 启动自动恢复。新增项目不需要手写 `project_ids`、`local_fast_observations` 或 Watcher 路径。目录丢失或 binding/登录异常会保留关联并明确报错。
 4. 「查询 Watcher」显示实际 Owner 仓库/队列、到期时间、自动 Merge 上限、本机锁和 GUI 状态。查询超过 15 秒后摘要标为历史，启动前需重新查询；每 30 秒自动查询，确认框打开时暂停。每次启动仍由现有 Watcher 重新验证授权。
-5. 缺少有效 scope 时，在「Windows Owner 确认引导」填写未来 30 天内的 UTC 到期时间与 Codex.exe 绝对路径，明确选择是否允许自动 Merge。复制生成的精确 PowerShell 命令，由 Owner 在真实交互式 Windows 终端运行，回到 V2 查询状态后启动。
+5. 「Windows Owner 确认引导」自动从本机 Codex Desktop 安装目录与有限 PATH 项检测外置、非重定向的 Codex.exe 并预填；没有找到时保留手动选择。填写未来 30 天内的 UTC 到期时间，明确选择是否允许自动 Merge。已配置 Windows Owner 确认的 Viewer 可点击「打开 Windows Owner 授权窗口」，在本机原生窗口核对仓库、Issue 顺序、本轮队列、定向检查、交付身份、有效期、可执行文件和自动 Merge。确认后页面自动刷新实际 scope，再点击启动；无需复制终端命令。终端方式保留为兼容备用。
 6. V2 只启动现有 Watcher；重复点击不会新增执行器。「停止本 GUI Watcher」和 Viewer 退出只停止该 GUI 拥有的运行。其他启动来源、失效锁、完成队列与旧授权均保留，按既有 CLI 恢复规则处理。
 7. 项目详情按绑定顺序展示任务；也可进入「任务」。详情显示执行者/机器、Issue/PR、HEAD、Stage 检查、实际 GitHub Review/Merge、来源时效、Watcher 历史、阻塞原因和下一责任方。SSE 断开或过期快照显示未知，历史 Review 不代表当前 Gate。
 8. 打开任务详情中的 PR，将「ChatGPT Review 指令」复制到独立 ChatGPT 会话。Reviewer 重新核对真实 PR 作者和准确 HEAD：App Bot PR 使用受信个人的原生 APPROVED/CHANGES_REQUESTED；同账号 personal-gh 按已有结构化 COMMENTED 协议。V2 不发布 Review。已有有效 Owner scope 允许 Merge 时，Watcher 在真实 Gate PASS 后按现有逻辑合并、回读 CLOSED、推进下一 Issue，直到 `QUEUE_COMPLETED`。
 
-## Owner 确认的明确缺口
+## Windows Owner 确认边界
 
 GitHub App 仓库范围在 GitHub 安装页面更新后，返回 V2 设置（窗口获得焦点、重新进入设置或点击“同步 GitHub 仓库范围”）会使用已有 App 身份与 metadata-only token 重新读取完整 Selected Repository 集合。页面显示新增/移除与当前完整范围；勾选核对后，通过已有 Windows App Owner 原生窗口确认保存。确认前后都核对相同 App、Installation、Bot、Reviewer 与准确范围；过期、取消、范围再次变化、部分分页或权限异常均保留旧连接。保存仅替换仓库清单并在 Git 外受保护目录保留旧连接备份，不重绑历史队列，不扩大 Watcher/Merge scope。移除的仓库无法再交付；保存后需重新 Preflight。
 
-`GUI_OWNER_CONFIRMATION_NOT_INTEGRATED`：仍需一次真实 Windows Owner 终端交互。现有原生 CP Enrollment 确认器只批准专用登记/心跳请求，绑定受保护的安装条目与 Owner SID，无法直接授予 Watcher scope。本轮不扩建权限平台，也不以浏览器 `confirm:true` 冒充 Owner。取消、scope 到期、绑定不一致、旧 scope 已存在或锁占用不自动覆盖；查看返回的错误码与恢复建议。
+复用现有 `--github-app-owner-config` 的受保护 Owner SID、ACL、策略摘要和原 App helper pin，以及同一个 Windows 原生确认启动器。Local Fast 使用固定的专用 helper，安装包代码内固定其 BOM 文件摘要；原 App helper 与外置策略保持原样。此配置只用于识别本机 Owner，新 Watcher 权限仍必须由 Owner 在每次原生窗口中明确授予。不会扩展 App 安装范围、登记授权或 Reviewer 身份。
+
+浏览器只能提交有限 scope 参数，不能提交 `confirm:true`、SID、helper 路径或授权结果。保存前后校验真实身份、绑定/队列、有效期、可执行文件及 Viewer 会话，等待确认期间占用现有仓库锁。取消、断线、退出、超时、篡改、旧 scope 冲突或锁占用均不保存新授权，也不启动执行器。CLI 原有真实 TTY 授权保持兼容。未配置原生确认时仍明确显示 `GUI_OWNER_CONFIRMATION_NOT_INTEGRATED` 并提供准确的已安装 CLI 命令。
 
 ## 验证边界
 
