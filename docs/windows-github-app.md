@@ -1,5 +1,7 @@
 # Windows Local Fast GitHub App delivery
 
+For Owner-assigned ordinary development of AWH itself, use the existing App Local Fast path described in [SELF_BOOTSTRAP](awh-self-bootstrap.md). Reuse the connected identity; no per-PR Strict administrator grant is required. Formal trusted delivery and product security acceptance retain their separate gates.
+
 `personal-gh` remains the default Local Fast provider. `github-app` is an explicit delivery option for an Owner-confirmed single repository and finite Issue queue. Coding Executor, App Delivery Actor, trusted personal Reviewer and Owner Merge Actor are separate. This connection cannot grant Strict Builder authority, change a completed queue, create a repository, change an installation or authorize merge.
 
 ## Owner connects once
