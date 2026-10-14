@@ -17,15 +17,16 @@ function setup(t) {
   return {h,gui,config,overrides,watch,executable,state};
 }
 test('GUI binds exact queue, cancels without writes, rejects overrides/conflict, attaches idempotently and restores without CP',async t=>{
-  const {h,gui,config,overrides,state}=setup(t),directory=h.repo;
+  const {h,gui,config,overrides,state}=setup(t),directory=h.repo,confirmed={directory,repository,head:h.initialMain,confirm:true};
   assert.equal((await gui.handle('inspect',{directory})).bound,false);
   await assert.rejects(gui.handle('bind',{directory,issues:'1,2,3',checks:[],provider:'personal-gh',confirm:false}),code('local_fast_confirmation'));
   assert(!existsSync(h.statePath));
-  await assert.rejects(gui.handle('bind',{directory,issues:'1,2',checks:['gh api repos/x/y'],provider:'personal-gh',confirm:true}),code('local_fast_check'));
-  const result=await gui.handle('bind',{directory,issues:'1,2,3',checks:[],provider:'personal-gh',confirm:true});assert(result.bound);assert.deepEqual(result.issues,[1,2,3]);
+  await assert.rejects(gui.handle('bind',{...confirmed,head:'f'.repeat(40),issues:'1,2,3',checks:[],provider:'personal-gh'}),code('local_fast_preview_changed'));assert(!existsSync(h.statePath));
+  await assert.rejects(gui.handle('bind',{...confirmed,issues:'1,2',checks:['gh api repos/x/y'],provider:'personal-gh'}),code('local_fast_check'));
+  const result=await gui.handle('bind',{...confirmed,issues:'1,2,3',checks:[],provider:'personal-gh'});assert(result.bound);assert.deepEqual(result.issues,[1,2,3]);
   const before=readFileSync(h.statePath,'utf8');
-  const same=await gui.handle('attach',{directory,confirm:true});assert.equal(same.project_id,result.project_id);assert.equal(gui.configs.length,1);assert.equal(readFileSync(h.statePath,'utf8'),before);
-  await assert.rejects(gui.handle('bind',{directory,issues:'1,2',checks:[],provider:'personal-gh',confirm:true}),code('local_fast_binding_conflict'));assert.equal(readFileSync(h.statePath,'utf8'),before);
+  const same=await gui.handle('attach',confirmed);assert.equal(same.project_id,result.project_id);assert.equal(gui.configs.length,1);assert.equal(readFileSync(h.statePath,'utf8'),before);
+  await assert.rejects(gui.handle('bind',{...confirmed,issues:'1,2',checks:[],provider:'personal-gh'}),code('local_fast_binding_conflict'));assert.equal(readFileSync(h.statePath,'utf8'),before);
   await assert.rejects(gui.handle('attach',{directory,confirm:true,watcher_directory:state}),code('local_fast_input'));
   const restored=createLocalFastProjects(config,overrides);assert.deepEqual(restored.configs,gui.configs);await restored.close();
   const moved=directory+'-disconnected';renameSync(directory,moved);
@@ -34,7 +35,7 @@ test('GUI binds exact queue, cancels without writes, rejects overrides/conflict,
   assert(!existsSync(join(h.repo,'cp.sqlite')));
 });
 test('GUI never creates Owner authorization: missing, cancelled, expired, lock and completed states block start',async t=>{
-  const {h,gui,watch,executable}=setup(t),directory=h.repo;await h.bind();await gui.handle('attach',{directory,confirm:true});
+  const {h,gui,watch,executable}=setup(t),directory=h.repo;await h.bind();await gui.handle('attach',{directory,repository,head:h.initialMain,confirm:true});
   assert.equal((await gui.handle('status',{directory})).owner_confirmation,'GUI_OWNER_CONFIRMATION_NOT_INTEGRATED');
   await assert.rejects(gui.handle('authorize',{directory,confirm:true}),code('local_fast_input'));
   await assert.rejects(gui.handle('start',{directory,confirm:false}),code('local_fast_confirmation'));
@@ -55,7 +56,7 @@ test('GUI never creates Owner authorization: missing, cancelled, expired, lock a
   await assert.rejects(gui.handle('start',{directory,confirm:true}),code('local_fast_watch_expired'));
 });
 test('GUI start uses existing Watcher, duplicate clicks launch once, stop/exit abort only owned process',{timeout:120000},async t=>{
-  const {h,gui,watch,executable,overrides,config}=setup(t),directory=h.repo;await h.bind();await gui.handle('attach',{directory,confirm:true});
+  const {h,gui,watch,executable,overrides,config}=setup(t),directory=h.repo;await h.bind();await gui.handle('attach',{directory,repository,head:h.initialMain,confirm:true});
   let launches=0,started;const ready=new Promise(r=>started=r);
   overrides.watch.executor={type:'codex-cli',run:async(_request,_started,signal)=>{launches++;started();await new Promise(r=>{if(signal.aborted)r();else signal.addEventListener('abort',r,{once:true});});return {exit_code:2};}};
   const owned=createLocalFastProjects(config,overrides);t.after(()=>owned.close());

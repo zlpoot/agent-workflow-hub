@@ -84,13 +84,14 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
     if(busy||closed)fail(409,'local_fast_busy','Wait for the current local operation');
     busy=true;
     try {
-      const fields:Record<string,string[]>={browse:['directory'],inspect:['directory'],attach:['directory','confirm'],bind:['directory','issues','checks','provider','confirm'],status:['directory'],start:['directory','confirm'],stop:['directory']};
+      const fields:Record<string,string[]>={browse:['directory'],inspect:['directory'],attach:['directory','repository','head','confirm'],bind:['directory','repository','head','issues','checks','provider','confirm'],status:['directory'],start:['directory','confirm'],stop:['directory']};
       if(!fields[action]||Object.keys(data).some(k=>!fields[action]!.includes(k)))fail(400,'local_fast_input','Closed local actions required');
       if(action==='browse') {if(data.directory===undefined)return {roots:c.project_roots,current:null,directories:[]};const root=selected(data.directory);return {roots:c.project_roots,current:root,directories:readdirSync(root,{withFileTypes:true}).filter(e=>e.isDirectory()&&!e.isSymbolicLink()&&!e.name.startsWith('.')).slice(0,128).map(e=>join(root,e.name))};}
       if(action==='inspect')return preview(data.directory);
       const {identity,fast}=inspect(data.directory),root=identity.root;
       if(action==='attach'||action==='bind') {
         if(data.confirm!==true)fail(400,'local_fast_confirmation','Explicit project confirmation required');
+        if(data.repository!==identity.repository||data.head!==identity.sha)fail(409,'local_fast_preview_changed','Git identity changed since preview; inspect and confirm again');
         if(action==='bind') {
           if(typeof data.issues!=='string'||!Array.isArray(data.checks)||data.checks.length>16||!data.checks.every(x=>typeof x==='string'&&x.length<=240)||!['personal-gh','github-app'].includes(String(data.provider)))fail(400,'local_fast_input','Select the exact finite queue and bounded checks');
           await fast.bind(identity.repository,data.issues,true,data.checks as string[],data.provider as 'personal-gh'|'github-app');

@@ -21,7 +21,7 @@ export function LocalFastProject({onConnected}:{onConnected:(project:string)=>vo
   const refresh=async(root=directory)=>{const result=await call('status',{directory:root});if(result)setStatus(result);};
   const confirm=async()=>{
     if(!preview||!confirmation)return;
-    const action=confirmation,result=await call(action,{directory:preview.directory,confirm:true,...(action==='bind'?{issues,checks:checks.split(/\r?\n/).map(v=>v.trim()).filter(Boolean),provider}:{})});
+    const action=confirmation,result=await call(action,{directory:preview.directory,confirm:true,...(action!=='start'?{repository:preview.repository,head:preview.head}:{}),...(action==='bind'?{issues,checks:checks.split(/\r?\n/).map(v=>v.trim()).filter(Boolean),provider}:{})});
     if(result){setConfirmation(null);if(action!=='start'){setPreview(result);setStatus(null);onConnected(result.project_id);}else await refresh(preview.directory);}
   };
   if(!available)return <Card><Heading size="4">Local Fast 本机接入未启用</Heading><Text>请在此 Windows Viewer 的安装设置中启用可信项目目录和独立保存目录。</Text></Card>;
