@@ -19,7 +19,7 @@ try {
   const settings=async()=>{await page.getByRole('tab',{name:'设置',exact:true}).click();await page.getByRole('heading',{name:'GitHub App',exact:true}).waitFor();await page.getByRole('button',{name:'刷新连接状态',exact:true}).waitFor({state:'visible'});};
   const fill=async()=>{await page.getByRole('textbox',{name:'App ID',exact:true}).fill(String(started.input.app_id));await page.getByRole('textbox',{name:'App slug',exact:true}).fill(started.input.app_slug);await page.getByRole('textbox',{name:'PEM 本机路径',exact:true}).fill(started.input.private_key_path);await page.getByRole('textbox',{name:'Reviewer',exact:true}).fill(started.input.reviewer);};
   const detect=async()=>{await page.getByRole('button',{name:'检测配置',exact:true}).click();await page.getByRole('heading',{name:'检测结果',exact:true}).waitFor();};
-  await page.goto(started.url);await settings();await page.getByText('未连接 · NOT_CONNECTED',{exact:true}).waitFor();
+  await page.goto(new URL('/dashboard/v1',started.url).href);await settings();await page.getByText('未连接 · NOT_CONNECTED',{exact:true}).waitFor();
   assert.equal(await page.getByRole('textbox',{name:'App slug',exact:true}).inputValue(),'zlpoot-awh-builder');assert.equal(await page.getByRole('textbox',{name:'Reviewer',exact:true}).inputValue(),'zlpoot');
   assert(await page.getByText('App Fixture · 模拟数据 · 真实 Preflight NOTRUN',{exact:true}).isVisible());
   await page.screenshot({path:output+'/not-connected.png',fullPage:true});
@@ -44,8 +44,8 @@ try {
     await page.screenshot({path:output+'/'+fault+'.png',fullPage:true});
   }
   await mode('success');await page.getByRole('button',{name:'重新检查',exact:true}).click();await page.getByText('实际检查通过 · PREFLIGHT_PASS',{exact:true}).waitFor();
-  await page.reload();await settings();await page.getByText('已保存本机连接 · 待检查 · CONNECTED_LOCAL',{exact:true}).waitFor();
-  await mode('restart');await page.getByRole('button',{name:'刷新连接状态',exact:true}).click();await page.getByText('已保存本机连接 · 待检查 · CONNECTED_LOCAL',{exact:true}).waitFor();
+  await page.reload();await settings();await page.getByText('GitHub 仓库范围已核验 · SCOPE_CURRENT',{exact:true}).waitFor();
+  await mode('restart');await page.getByRole('button',{name:'刷新连接状态',exact:true}).click();await page.getByText('GitHub 仓库范围已核验 · SCOPE_CURRENT',{exact:true}).waitFor();
   await page.setViewportSize({width:390,height:844});await page.screenshot({path:output+'/mobile.png',fullPage:true});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const button=page.getByRole('button',{name:'重新检查',exact:true});await button.focus();await page.keyboard.press('Enter');await page.getByText('实际检查通过 · PREFLIGHT_PASS',{exact:true}).waitFor();
   await mode('readonly');await page.getByRole('button',{name:'刷新连接状态',exact:true}).click();await page.getByText('当前 Viewer 仅可查看。本机可信 Owner 启用管理功能后，才能检测和连接。',{exact:true}).waitFor();assert(await page.getByRole('button',{name:'重新检查',exact:true}).isDisabled());
