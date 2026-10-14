@@ -32,7 +32,9 @@
     "dashboard:v2:preview": "node scripts/dashboard-v2-preview.mjs",
     "dashboard:v2:smoke": "node scripts/dashboard-v2-smoke.mjs",
     "dashboard:v2:viewer-smoke": "node scripts/dashboard-v2-viewer-smoke.mjs",
-    "dashboard:v2:app-smoke": "node scripts/dashboard-v2-app-smoke.mjs"
+    "dashboard:v2:app-smoke": "node scripts/dashboard-v2-app-smoke.mjs",
+    "test:self-bootstrap:local-fast": "node --test --test-name-pattern=\"^(?!.*(?:one binding drives three|same-account COMMENTED Review drives three|merged candidate needs|native failing or pending checks|interrupted creation)).*$\" tests/local-fast.test.mjs",
+    "test:self-bootstrap:github-app": "node --test --test-name-pattern=\"^(?!.*(?:App Watcher|App Review Bridge)).*$\" tests/github-app.test.mjs"
   },
   "devDependencies": {
     "@radix-ui/themes": "3.3.0",

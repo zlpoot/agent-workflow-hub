@@ -27,6 +27,8 @@ Local Fast 固定分支为 `codex/local-fast-<issue>`。`bind` 和 `flow next` �
 
 `stage execute` 接受已提交修改，也会为未提交文件创建 Commit；随后执行主线 diff 检查及已配置的有界检查，确认同一 clean final HEAD，非 Force Push，创建或更新同一 Draft PR，并验证远端准确 HEAD、Bot 作者、仓库/分支和 Draft 状态。App 实时 Preflight 完整检查 Selected 集合，写入用单仓最小权限 token，失败不回退个人写入。
 
+AWH 普通自举 PR 可追加 `--check 'pnpm test:self-bootstrap:local-fast'` 和 `--check 'pnpm test:self-bootstrap:github-app'`。这两个已有 pnpm 检查入口选择现有测试中的单 Issue 发布、有限范围/身份、准确 HEAD、失败/ACK 恢复和 App token/传输/Reviewer 门禁；三 Issue 连续推进、合并后推进、Watcher 合并与 Review Bridge 留给对应验收任务。完整回归不因此声称 PASS，安全测试断言不改写。调用链仍为 LocalFast.execute → deliveryDependencies.verify，单条检查的 300 秒上限不变；两个范围独立执行，不扩大验证器命令语法。
+
 ## 交接和停止点
 
 普通 PR 写清 SELF_BOOTSTRAP 范围、准确 HEAD 和本地测试边界，说明没有正式 Builder Evidence、confirmed Handoff 或 CP Run/Event。原始日志留在 gitignored `.handoff/local-fast/checks`。Stage 成功后停止于 `AWAITING_INDEPENDENT_REVIEW`；ChatGPT 独立读取新 HEAD 的 diff/tests，以保存的独立 Reviewer 身份提交原生 Review。修复新 HEAD 后重新验证并重新 Review；Owner 授权 ChatGPT 合并并回读，Codex 不自行批准或合并。
