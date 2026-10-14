@@ -45,7 +45,7 @@ function Fact({ label, value }: { label: string; value: React.ReactNode }) { ret
 function Empty({ children }: { children: React.ReactNode }) { return <Card className="empty"><Heading size="4">没有匹配的记录</Heading><Text color="gray">{children}</Text></Card>; }
 function App() {
   const fixture = document.querySelector<HTMLMetaElement>('meta[name="awh-dataset"]')?.content === 'fixture';
-  const [view, setView] = useState('Overview'), [search, setSearch] = useState(''), [project, setProject] = useState('all'), [status, setStatus] = useState('all');
+  const [view, setView] = useState(window.location.hash==='#local-fast'?'Enrollment':'Overview'), [search, setSearch] = useState(''), [project, setProject] = useState('all'), [status, setStatus] = useState('all');
   const [state, setState] = useState<State>({ snapshot: null, events: [], phase: 'loading', lastRefresh: null, error: null });
   const reader = useRef<DashboardReader | null>(null);
   const [githubInterval,setGithubInterval]=useState(300),[githubBusy,setGithubBusy]=useState(false),[githubError,setGithubError]=useState<string|null>(null),[githubCooldown,setGithubCooldown]=useState(0);
@@ -107,7 +107,7 @@ function App() {
       {githubError&&<div className="notice" role="alert">{githubError}</div>}
       {state.error && <div className="notice" role="alert">{errorText(state.error)}。{snapshot ? '显示上次成功读取的快照；在线状态可能已过期。' : '暂无可用快照。'}</div>}</>}
       {view === 'Settings' ? <Tabs.Content value="Settings"><GithubAppSettings/></Tabs.Content> : view === 'Enrollment' ? <Tabs.Content value="Enrollment"><section className="enrollment" aria-label="项目接入"><Enrollment
-        onConnected={id => { setProject(id); setSearch(''); setStatus('all'); setView('Executors');void reader.current?.refresh(); }} /></section></Tabs.Content> : !snapshot ? <Card className="empty"><Heading size="4">{state.phase === 'loading' ? '正在加载活动记录…' : '面板暂不可用'}</Heading><Text color="gray">{state.phase === 'loading' ? '正在读取一致的快照与已保存的时间线。' : '需要受保护的同源查看会话，并启用只读网关。'}</Text></Card> : <>
+        onConnected={id => { setProject(id); setSearch(''); setStatus('all'); if(!id.startsWith('lf-'))setView('Executors');void reader.current?.refresh(); }} /></section></Tabs.Content> : !snapshot ? <Card className="empty"><Heading size="4">{state.phase === 'loading' ? '正在加载活动记录…' : '面板暂不可用'}</Heading><Text color="gray">{state.phase === 'loading' ? '正在读取一致的快照与已保存的时间线。' : '需要受保护的同源查看会话，并启用只读网关。'}</Text></Card> : <>
       {<Flex gap="3" wrap="wrap" className="filters">{!['Overview','Tasks'].includes(view)&&<TextField.Root aria-label={`搜索${text(view)}`} placeholder={`搜索${text(view)}…`} value={search} onChange={event => setSearch(event.target.value)} className="search" />}
         <Select.Root value={project} onValueChange={setProject}><Select.Trigger aria-label="按项目筛选" /><Select.Content><Select.Item value="all">全部项目</Select.Item>{taskProjects.map(([id,repo]) => <Select.Item key={id} value={id}>{id} · {repo}</Select.Item>)}</Select.Content></Select.Root>
         {view === 'Runs' && <Select.Root value={status} onValueChange={setStatus}><Select.Trigger aria-label="按运行状态筛选" /><Select.Content><Select.Item value="all">全部状态</Select.Item>{[...new Set(runs.map(run => run.state))].sort().map(value => <Select.Item key={value} value={value}>{text(value)}</Select.Item>)}</Select.Content></Select.Root>}</Flex>}

@@ -9,7 +9,7 @@ import {
 import { Card } from "./ui/card";
 import { Status } from "./status";
 import { GitHubLink } from "./task-list";
-import { sourceLabels, stamp, taskFacts } from "../lib/task-model.mjs";
+import { sourceLabels, stamp, taskFacts, localFastReviewInstruction } from "../lib/task-model.mjs";
 import { localStale } from "../../dashboard/task-freshness.mjs";
 import { safeSourceUrl } from "../../dashboard/adapter.mjs";
 import type { ReactNode } from "react";
@@ -164,12 +164,14 @@ export function TaskDetail({
                   </Fact>
                   <Fact label="原生 Review（历史观察）">
                     {task.review
-                      ? `${task.review.state} · ${task.review.actor} · ${task.review.commit_id}`
+                      ? `${task.review.state} · ${task.review.decision ?? '未提供决定'} · ${task.review.actor} · ${task.review.commit_id}`
                       : "未核验"}
                   </Fact>
+                  <Fact label="PR / Merge（历史观察）">{task.pr ? `${task.pr.state ?? '未知'} · ${stamp(task.pr.merged_at)} · ${task.pr.merge_sha ?? 'Merge HEAD 未提供'}` : '未提供'}</Fact>
                   <Fact label="Stage 验证（历史记录）">
                     {task.stage.status} · {task.stage.head ?? "HEAD 未提供"}
                   </Fact>
+                  {task.stage.checks.map(check=><Fact key={check.name} label="定向校验">{check.name} · exit {check.exit_code}</Fact>)}
                   <Fact label="GitHub Checks（历史观察）">
                     {task.checks.status} · {task.checks.count}
                   </Fact>
@@ -199,6 +201,7 @@ export function TaskDetail({
                 ))}
                 <p className="muted">注册 / 心跳不等于 GitHub 授权核验。</p>
               </Card>
+              {task.workflow==='local-fast'&&task.pr&&facts.state==='awaiting_review'&&<Card className="detail-card"><h3>ChatGPT 独立 Review</h3><p>打开 PR，复制下列指令交给 Reviewer；先核对真实 PR 作者与交付身份，新的 HEAD 必须重新审查。</p><textarea aria-label="ChatGPT Review 指令" readOnly rows={10} value={localFastReviewInstruction(task)} onFocus={e=>e.currentTarget.select()}/></Card>}
               <Card className="detail-card">
                 <h3>历史记录</h3>
                 {task.history.length ? (

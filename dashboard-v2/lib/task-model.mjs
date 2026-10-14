@@ -34,6 +34,17 @@ export const stamp = (value) =>
   value == null
     ? "未提供"
     : new Date(value).toLocaleString("zh-CN", { hour12: false });
+/** Task DTO has no trusted provider; the Reviewer must read the native PR author. */
+export function localFastReviewInstruction(task) {
+  return [
+    `请独立审查 https://github.com/${task.repository}/pull/${task.pr.number} 的实际当前完整 HEAD、完整差异及 Issue，运行必要定向测试。`,
+    '先读取 GitHub 原生 PR 作者与当前 Reviewer 账号，并通过已有原生 Review Bridge prepare 核对交付身份、受信 Reviewer 和返回的 review_template / delivery_instructions，再选择对应操作：',
+    'github-app（Bot 作者）：由已绑定的独立个人 Reviewer 提交原生 APPROVED（API event: APPROVE）或 CHANGES_REQUESTED（API event: REQUEST_CHANGES）。个人账号的 COMMENTED + PASS 不会打开 Bot PR 的 Review Gate。',
+    'personal-gh（Reviewer 与个人 PR 作者同账号）：提交原生 COMMENTED（API event: COMMENT），正文使用 AWH-LOCAL-FAST-REVIEW v1 的结构化模板，包含恰好 head 和 decision 两个字段，decision 为 PASS 或 REQUEST_CHANGES。其他独立个人账号可提交原生 APPROVED 或 CHANGES_REQUESTED。',
+    '所有路径的 native commit_id 必须等于实际当前 HEAD；结构化 COMMENTED 的 head 也必须相同。发布后回读原生 Review 和当前 PR HEAD，未实际发布不算 Gate 通过。不要执行 Merge 或关闭 Issue。',
+    `观察的历史 HEAD：${task.github_head ?? task.source_head ?? '未核验'}；请重新读取 GitHub。`,
+  ].join('\n\n');
+}
 /** @param {string} phase @param {number|null} snapshotCursor @param {{cursor:number}[]} events */
 export function taskSnapshotPending(phase, snapshotCursor = null, events = []) {
   return (

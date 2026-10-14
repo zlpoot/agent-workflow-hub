@@ -129,10 +129,10 @@ export class LocalFastObservationAdapter implements TaskAdapter {
       for(const [i,t] of state.tasks.entries()) if(t.issue!==state.issues[i]||!['preparing','developing','publishing','awaiting_review','completed'].includes(t.phase)||t.head!==undefined&&!sha(t.head)||t.pr!==undefined&&!positive(t.pr))throw new Error('invalid_task');
       const operation=join(common,'awh-local-fast','operation.lock');
       if(existsSync(operation))try {const pid=file(operation);if(positive(pid))operationPid=pid;}catch{/* A stale or malformed lock cannot prove Stage execution. */}
-    } catch {
+    } catch(error) {
       // Retain an explicit unavailable source rather than silently removing a configured project.
       const task=taskBase(`lf:${c.project_id}:unavailable`,c.project_id,c.repository,0);task.workflow='local-fast';task.state='unknown';task.waiting_for=actor('owner','Owner');task.machine=c.machine;
-      task.next_action='Owner 检查已配置的 Local Fast 只读来源';task.blockers=['Local Fast 来源无法读取或身份不匹配'];task.observations=[observation('local_fast',now,'unknown')];return [task];
+      task.next_action='Owner 检查已配置的 Local Fast 只读来源';task.blockers=['Local Fast 来源无法读取或身份不匹配'];task.observations=[{...observation('local_fast',now,'unknown'),error_code:error instanceof Error&&['repository_mismatch','invalid_binding','invalid_task','redirected_file','invalid_file'].includes(error.message)?error.message:'read_failed'}];return [task];
     }
     let scope:Native|undefined,watch:Native|undefined,lock:Native|undefined,watchRead=false;
     try {
@@ -174,6 +174,7 @@ export class LocalFastObservationAdapter implements TaskAdapter {
       }
 
       if(attempt?.status==='blocked')task.history.push({source:'watcher',type:'attempt_blocked',occurred_at:null,observed_at:new Date(now).toISOString(),head:task.source_head,run_id:null});
+      if(attempt&&['reserved','running','published'].includes(attempt.status))task.history.push({source:'watcher',type:'attempt_'+attempt.status,occurred_at:null,observed_at:new Date(now).toISOString(),head:sha(attempt.head)?attempt.head:task.source_head,run_id:null});
       if(watch)task.history.push({source:'watcher',type:task.watcher.status,occurred_at:null,observed_at:new Date(now).toISOString(),head:task.source_head,run_id:null});
       if(task.pr?.merged_at)task.history.push({source:'github',type:'MERGED',occurred_at:task.pr.merged_at,observed_at:task.updated_at!,head:task.pr.merge_sha,run_id:null});
       if(task.review)task.history.push({source:'github',type:`REVIEW_${task.review.state}`,occurred_at:null,observed_at:task.updated_at!,head:task.review.commit_id,run_id:null});

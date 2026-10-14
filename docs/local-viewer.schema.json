@@ -6,6 +6,7 @@
   "properties": {
     "schema_version": { "const": "1.0" }, "mode": { "const": "local_browser_direct" },
     "database": { "$ref": "#/$defs/path" }, "machine_config_file": { "$ref": "#/$defs/path" }, "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "local_fast_projects": { "type": "object", "additionalProperties": false, "required": ["project_roots", "state_directory"], "properties": { "project_roots": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/path" } }, "state_directory": { "$ref": "#/$defs/path" } } },
     "viewer": {
       "type": "object", "additionalProperties": false, "required": ["id", "project_ids"],
       "properties": { "id": { "$ref": "#/$defs/id" }, "project_ids": { "type": "array", "minItems": 0, "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } } }
@@ -24,7 +25,7 @@
       }
     } }
   },
-  "allOf": [{ "if": { "not": { "properties": { "machine_config_file": {} }, "required": ["machine_config_file"] } }, "then": { "properties": { "viewer": { "type": "object", "properties": { "project_ids": { "type": "array", "minItems": 1 } } } } } }],
+  "allOf": [{ "if": { "not": { "anyOf": [{ "required": ["machine_config_file"] }, { "required": ["local_fast_projects"] }] } }, "then": { "properties": { "viewer": { "type": "object", "properties": { "project_ids": { "type": "array", "minItems": 1 } } } } } }],
   "$defs": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$" },
     "path": { "type": "string", "minLength": 1, "pattern": "^(?:[A-Za-z]:[\\\\/]|/)" }
