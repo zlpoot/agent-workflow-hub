@@ -6,6 +6,7 @@ import { initFlow, readFlow } from './flow.js';
 import { localFastRun } from './local-fast-github.js';
 import { selectReview, REVIEW_DELIVERY_INSTRUCTIONS, type ReviewDecision } from './local-fast-review.js';
 import { GithubApp, type AppBinding, type AppDelivery } from './github-app.js';
+import { createHash, randomUUID } from 'node:crypto';
 
 type Native = Record<string, any>;
 type Task = { issue: number; branch: string; base: string; worktree: string; phase: 'preparing' | 'developing' | 'publishing' | 'awaiting_review' | 'completed'; head?: string; pending_head?: string; pr?: number; create_attempted?: boolean; coding_executor?: { type: 'codex-cli' }; delivery_actor?: AppBinding['delivery_actor'] };
@@ -13,7 +14,9 @@ interface State {
   schema_version: '1.0'; mode: 'local-fast'; repository: string; repository_id: number;
   owner: { login: string; id: number }; root: string; issues: number[]; checks: string[]; tasks: Task[];
   delivery?: AppBinding;
+  queue_id?: string; previous_queues?: string[];
 }
+export const validQueueId = (value: unknown): value is string => typeof value === 'string' && (value === 'legacy' || /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value));
 export interface LocalFastDependencies {
   platform: NodeJS.Platform;
   run: (command: 'git' | 'gh', args: string[], cwd: string) => string;
@@ -87,6 +90,7 @@ export class LocalFast {
         !Array.isArray(s.issues) || !s.issues.length || s.issues.length > 128 || !s.issues.every(positive) || new Set(s.issues).size !== s.issues.length ||
         !Array.isArray(s.checks) || !s.checks.length || !s.checks.every(c => typeof c === 'string') || !Array.isArray(s.tasks) || s.tasks.length > s.issues.length)
       clientFail('local_fast_state', 'Invalid Local Fast binding; preserve the local file.');
+    if (s.queue_id !== undefined && (!validQueueId(s.queue_id) || s.queue_id === 'legacy') || s.previous_queues !== undefined && (!Array.isArray(s.previous_queues) || s.previous_queues.length > 32 || !s.previous_queues.every(validQueueId) || new Set(s.previous_queues).size !== s.previous_queues.length || s.previous_queues.includes(s.queue_id!))) clientFail('local_fast_state','Invalid queue history references');
     s.checks.forEach(checkCommand);
     if (s.delivery && (s.delivery.provider !== 'github-app' || !same(this.deps.app.binding(s.repository), s.delivery) || s.delivery.repository_id !== s.repository_id))
       clientFail('local_fast_app_binding', 'Saved App connection differs from this queue; preserve its history.');
@@ -102,13 +106,86 @@ export class LocalFast {
     if (boundRoot.repository !== s.repository || resolve(boundRoot.root, this.git(['rev-parse', '--git-common-dir'], boundRoot.root)) !== this.common)
       clientFail('local_fast_state', 'The original binding root is not a worktree of this repository.');
     const declaration = join(inspectRepository(this.cwd).root, '.awh', 'flow.json');
-    if (existsSync(declaration) && !same(readFlow(this.cwd).issues, s.issues)) clientFail('local_fast_queue_scope', 'Queue differs from the Owner-confirmed binding; it cannot expand scope automatically.');
+    if (existsSync(declaration) && !same(readFlow(this.cwd).issues, s.issues) && !this.archives(s).some(old=>same(old.issues,readFlow(this.cwd).issues))) clientFail('local_fast_queue_scope', 'Queue differs from the confirmed binding and preserved declarations.');
     return s;
   }
   private save(s: State) { atomicJson(this.file, s); }
   scope() {
-    const { repository, repository_id, owner, root, issues, checks, delivery } = this.load();
-    return { repository, repository_id, owner, root, issues: [...issues], checks: [...checks], ...(delivery ? { delivery } : {}) };
+    const { repository, repository_id, owner, root, issues, checks, delivery, queue_id } = this.load();
+    return { repository, repository_id, owner, root, issues: [...issues], checks: [...checks], ...(delivery ? { delivery } : {}), ...(queue_id ? { queue_id } : {}) };
+  }
+  assertScope(expected: ReturnType<LocalFast['scope']>) {
+    const s=readJson(this.file,256*1024) as State;
+    if(!s||s.schema_version!=='1.0'||s.mode!=='local-fast')clientFail('local_fast_watch_scope_changed','Invalid canonical binding during execution');
+    const current={repository:s.repository,repository_id:s.repository_id,owner:s.owner,root:s.root,issues:s.issues,checks:s.checks,...(s.delivery?{delivery:s.delivery}:{}),...(s.queue_id!==undefined?{queue_id:s.queue_id}:{})};
+    if(!same(current,expected))clientFail('local_fast_watch_scope_changed','The canonical queue changed during Watcher execution');
+  }
+  private archives(s: State): State[] {
+    return (s.previous_queues??[]).map(id=>{
+      const old = readJson(join(this.directory,'queues',id,'state.json'),256*1024) as State;
+      if (old.schema_version!=='1.0'||old.mode!=='local-fast'||old.repository!==s.repository||old.repository_id!==s.repository_id||old.root!==s.root||!same(old.owner,s.owner)||!Array.isArray(old.issues)||!old.issues.length||old.issues.length>128||!old.issues.every(positive)||new Set(old.issues).size!==old.issues.length||!Array.isArray(old.tasks)||old.tasks.length>old.issues.length||(old.queue_id??'legacy')!==id) clientFail('local_fast_state','Preserved queue identity is invalid');
+      return old;
+    });
+  }
+  queueInfo() {
+    // Display metadata only. Scope-changing operations independently validate identity via load().
+    const state=readJson(this.file,256*1024) as State;
+    if(!Array.isArray(state.tasks)||!Array.isArray(state.issues))clientFail('local_fast_state','Invalid queue metadata');
+    return {queue_id:state.queue_id??'legacy',queue_revision:createHash('sha256').update(readFileSync(this.file)).digest('hex'),
+      queue_editable:state.tasks.length===0||state.tasks.length===state.issues.length&&state.tasks.every(t=>t.phase==='completed'),queue_started:state.tasks.length>0,history_count:state.previous_queues?.length??0};
+  }
+  openIssues(page=1) {
+    if(!Number.isSafeInteger(page)||page<1||page>20)clientFail('local_fast_issue_page','Use a bounded Issue page');
+    const identity=inspectRepository(this.cwd);this.identity(identity.repository);
+    const rows=this.api(`repos/${identity.repository}/issues?state=open&per_page=50&page=${page}`);
+    if(!Array.isArray(rows)||rows.length>50)clientFail('local_fast_issue','Cannot read the bounded Issue page');
+    const items=rows.filter(row=>!row.pull_request).map(row=>{
+      if(!positive(row.number)||row.state!=='open'||typeof row.title!=='string'||row.title.length>512||/[\x00-\x1f]/.test(row.title))clientFail('local_fast_issue','Invalid ordinary Issue metadata');
+      return {number:row.number,title:row.title,state:'open',url:`https://github.com/${identity.repository}/issues/${row.number}`};
+    });
+    if(new Set(items.map(row=>row.number)).size!==items.length)clientFail('local_fast_issue','Duplicate Issue metadata');
+    return {repository:identity.repository,items,page,next_page:rows.length===50&&page<20?page+1:null,observed_at:new Date().toISOString()};
+  }
+  private declareQueue(cwd: string,s: State) {
+    const directory=join(inspectRepository(cwd).root,'.awh');
+    if(existsSync(join(directory,'flow.json'))&&!same(readFlow(cwd).issues,s.issues)){
+      if(!s.queue_id||!this.archives(s).some(old=>same(old.issues,readFlow(cwd).issues)))clientFail('flow_queue','Unknown declaration conflict; preserve it');
+      atomicJson(join(directory,'flow.json'),{schema_version:'1.0',issues:s.issues});return;
+    }
+    initFlow(cwd,s.issues.join(','));
+  }
+  /** Explicit finite replacement only when unstarted or natively completed; old grants are never reused. */
+  async setQueue(issues: string, expected: string, confirm: boolean, idle:()=>void) {
+    if(!confirm||!/^[1-9]\d*(?:,[1-9]\d*)*$/.test(issues))clientFail('local_fast_confirmation','Confirm the exact ordered Issue queue');
+    const queue=issues.split(',').map(Number);
+    if(queue.length>128||!queue.every(positive)||new Set(queue).size!==queue.length)clientFail('flow_queue','Use distinct positive Issue numbers');
+    return this.locked(async()=>{
+      const original=this.load();
+      const preview=inspectRepository(this.cwd);
+      if(this.cwd!==original.root||this.queueInfo().queue_revision!==expected)clientFail('local_fast_preview_changed','Inspect the original root and current queue again');
+      idle();
+      if(same(queue,original.issues)&&!original.tasks.length)return result('BOUND',{repository:original.repository,queue,queue_id:original.queue_id??'legacy'});
+      if(original.tasks.length){
+        const facts=await this.select(original,false);
+        if(facts.status!=='QUEUE_COMPLETED'||original.issues.some(n=>this.issue(original,n).state!=='closed'))clientFail('local_fast_queue_active','Finish the current queue before creating another round');
+      }
+      const past=this.archives(original);
+      if([...past,original].some(old=>old.tasks.some(t=>queue.includes(t.issue))))clientFail('local_fast_queue_history','Executed Issues cannot be queued again');
+      for(const number of queue)if(this.issue(original,number).state!=='open')clientFail('local_fast_issue','Queue only open ordinary Issues');
+      if(original.delivery)await this.deps.app.preflight(original.repository);
+      this.identity(original.repository,original.repository_id,original.owner);
+      if(!same(inspectRepository(this.cwd),preview)||this.queueInfo().queue_revision!==expected)clientFail('local_fast_preview_changed','Repository or queue changed during inspection');
+      const id=original.queue_id??'legacy',previous=[...(original.previous_queues??[]),id];
+      if(previous.length>32)clientFail('local_fast_queue_limit','Preserved queue history capacity reached');
+      const archived=join(this.directory,'queues',id,'state.json'),bytes=readFileSync(this.file);
+      mkdirSync(join(archived,'..'),{recursive:true});
+      if(existsSync(archived)){if(!readFileSync(archived).equals(bytes))clientFail('local_fast_queue_history','An archive differs; preserve both states');}
+      else writeFileSync(archived,bytes,{flag:'wx'});
+      // One atomic canonical binding commit. A known old declaration remains safe after interruption.
+      const updated:State={...original,issues:queue,tasks:[],queue_id:randomUUID(),previous_queues:previous};
+      idle();this.save(updated);this.declareQueue(this.cwd,updated);
+      return result('BOUND',{repository:updated.repository,queue,queue_id:updated.queue_id,history_count:previous.length,owner_authorization_required:true});
+    });
   }
   private main(s: State) {
     const ref = this.api(`repos/${s.repository}/git/ref/heads/main`);
@@ -134,7 +211,8 @@ export class LocalFast {
       const proposed: State = { schema_version: '1.0', mode: 'local-fast', repository, repository_id: identity.id, owner: identity.user, root: identity.local.root, issues: queue, checks: commands, tasks: [], ...(delivery ? { delivery } : {}) };
       if (existsSync(this.file)) {
         const original = this.load();
-        if (!same({ ...original, tasks: [] }, proposed)) clientFail('local_fast_binding_conflict', 'Existing binding differs; progress and scope cannot be overwritten.');
+        const {queue_id:_queue,previous_queues:_previous,...pinned}=original;
+        if (!same({ ...pinned, tasks: [] }, proposed)) clientFail('local_fast_binding_conflict', 'Existing binding differs; progress and scope cannot be overwritten.');
         return result('BOUND', { repository, queue, owner: identity.user.login });
       }
       this.main(proposed);
@@ -182,7 +260,7 @@ export class LocalFast {
         if (this.prs(s, task).length) clientFail('local_fast_pr_conflict', 'An unrecorded PR exists for the next Issue branch.');
         s.tasks.push(task); this.save(s); mkdirSync(join(s.root, '.handoff', 'local-fast'), { recursive: true });
         this.git(['worktree', 'add', '-b', branch, task.worktree, base]);
-        initFlow(task.worktree, s.issues.join(',')); task.phase = 'developing'; this.save(s);
+        this.declareQueue(task.worktree,s); task.phase = 'developing'; this.save(s);
         return this.ready(s, task, completed);
       }
       if (t.phase === 'preparing') {
@@ -192,7 +270,7 @@ export class LocalFast {
         if (prepared.repository !== s.repository || prepared.ref !== t.branch || prepared.sha !== t.base ||
             resolve(prepared.root, this.git(['rev-parse', '--git-common-dir'], prepared.root)) !== this.common)
           clientFail('local_fast_interrupted_prepare', 'The interrupted worktree differs from the reserved Issue; preserve it.');
-        initFlow(t.worktree, s.issues.join(',')); t.phase = 'developing'; this.save(s);
+        this.declareQueue(t.worktree,s); t.phase = 'developing'; this.save(s);
         return this.ready(s, t, completed);
       }
       const candidates = t.pr ? [this.api(`repos/${s.repository}/pulls/${t.pr}`)] : this.prs(s, t);

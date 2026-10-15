@@ -19,13 +19,13 @@ test('installed Windows Owner boundary pins external policy/helper/ACL, validate
   const acl=spawnSync('icacls',[directory,'/inheritance:r','/grant:r',`*${sid}:(OI)(CI)F`,'*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F'],{windowsHide:true,encoding:'utf8'});assert.equal(acl.status,0,'Fresh isolated Owner ACL');
   const install=spawnSync(process.execPath,[npmEntry(),'install','--prefix',join(directory,'viewer'),'--offline','--ignore-scripts','--no-audit','--no-fund',resolve('.handoff/packages/zlpoot-awh-viewer-'+CLIENT_VERSION+'.tgz')],{env:npmEnv(join(directory,'cache')),windowsHide:true,encoding:'utf8',timeout:60000});assert.equal(install.status,0,'Fresh isolated Viewer package required');
   const root=join(directory,'viewer/node_modules/@zlpoot/awh-viewer/dist/dashboard'),helper=join(root,'github-app-confirm.ps1');
-  const {createGithubAppOwnerConfirmation}=await import(pathToFileURL(join(root,'github-app-owner.js')));
+  const {createGithubAppOwnerConfirmation,createLocalFastOwnerConfirmation}=await import(pathToFileURL(join(root,'github-app-owner.js')));
   const raw=readFileSync(helper),hash=createHash('sha256').update(raw).digest('hex'),policy=join(directory,'app-owner.json');
   writeFileSync(policy,JSON.stringify({schema_version:'1.0',owner_sid:sid,confirmation_script_sha256:hash}));
   const request={kind:'github_app_connection',input:{app_id:5,app_slug:'synthetic-builder',private_key_path:join(directory,'fixture.pem'),reviewer:'synthetic-owner'},facts:{installation_id:9,account:{id:20,login:'synthetic-org',type:'Organization'},repository_selection:'selected',permissions:{contents:'write',pull_requests:'write',metadata:'read'},repositories:[{id:42,full_name:'synthetic-org/repo'}],delivery_actor:{id:77,login:'synthetic-builder[bot]',type:'Bot'},reviewer:{id:11,login:'synthetic-owner',type:'User'}},repository:'synthetic-org/repo'};
-  let answer='CANCELLED',tamper=false;
+  let answer='CANCELLED',tamper=false,selectedHelper=helper;
   const launch=(entry,args,settings)=>{
-    assert.equal(entry,powershell);assert.equal(settings.windowsHide,false);assert(args.includes('-Sta'));assert.equal(args[args.indexOf('-File')+1],helper);assert.equal(args[args.indexOf('-ExpectedOwnerSid')+1],sid);
+    assert.equal(entry,powershell);assert.equal(settings.windowsHide,false);assert(args.includes('-Sta'));assert.equal(args[args.indexOf('-File')+1],selectedHelper);assert.equal(args[args.indexOf('-ExpectedOwnerSid')+1],sid);
     assert(!Object.keys(settings.env).some(k=>/^(GH_|GITHUB_|AWH_|NODE_)/i.test(k)));
     const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{};
     queueMicrotask(()=>{if(tamper)writeFileSync(args[args.indexOf('-RequestFile')+1],'{}');child.stdout.write(answer);child.emit('close',0);});return child;
@@ -33,10 +33,19 @@ test('installed Windows Owner boundary pins external policy/helper/ACL, validate
   const confirm=createGithubAppOwnerConfirmation(policy,launch),signal=new AbortController().signal;
   assert.equal(await confirm(request,signal),false);answer='CONFIRMED';assert.equal(await confirm(request,signal),true);
   tamper=true;await assert.rejects(confirm(request,signal),e=>e.code==='app_owner_changed');tamper=false;
+  selectedHelper=join(root,'local-fast-confirm.ps1');const nativeRaw=readFileSync(selectedHelper),native=createLocalFastOwnerConfirmation(policy,launch);
+  const scope={schema_version:'1.0',mode:'local-fast',source:'windows-owner-confirmation',scope_version:'11111111-1111-4111-8111-111111111111',repository:'synthetic-org/repo',repository_id:42,owner:{login:'synthetic-owner',id:11},root:'C:\\synthetic\\repo',issues:[2,1],checks:[],expires_at:new Date(Date.now()+3600000).toISOString(),executor:{type:'codex-cli',executable:'C:\\synthetic\\codex.exe'},allow_merge:false};
+  answer='CANCELLED';assert.equal(await native(scope,signal),false);answer='CONFIRMED';assert.equal(await native(scope,signal),true);
+  tamper=true;await assert.rejects(native(scope,signal),e=>e.code==='app_owner_changed');tamper=false;
+  writeFileSync(selectedHelper,Buffer.concat([nativeRaw,Buffer.from('\r\n# changed')]));await assert.rejects(native(scope,signal),e=>e.code==='app_owner_changed');writeFileSync(selectedHelper,nativeRaw);
+  selectedHelper=helper;
   writeFileSync(helper,Buffer.concat([raw,Buffer.from('\r\n# changed')]));await assert.rejects(confirm(request,signal),e=>e.code==='app_owner_changed');writeFileSync(helper,raw);
   const widened=spawnSync('icacls',[policy,'/grant','*S-1-5-32-545:R'],{encoding:'utf8',windowsHide:true});assert.equal(widened.status,0);assert.throws(()=>createGithubAppOwnerConfirmation(policy,launch),e=>e.reason==='unsafe_acl');
   spawnSync('icacls',[policy,'/remove:g','*S-1-5-32-545'],{encoding:'utf8',windowsHide:true});
   const snapshot=join(directory,'wrong-owner-request.json');writeFileSync(snapshot,JSON.stringify(request));
   const wrongSid=spawnSync(powershell,['-NoProfile','-NonInteractive','-Sta','-File',helper,'-RequestFile',snapshot,'-ExpectedOwnerSid','S-1-5-21-1-2-3-9999'],{windowsHide:true,encoding:'utf8',timeout:10000});assert.notEqual(wrongSid.status,0);assert.match(wrongSid.stderr,/Windows Owner identity required/);
   const parse=spawnSync(powershell,['-NoProfile','-NonInteractive','-Command',`$taskTokens=$null;$taskErrors=$null;[void][Management.Automation.Language.Parser]::ParseFile('${helper.replaceAll("'","''")}',[ref]$taskTokens,[ref]$taskErrors);if($taskErrors.Count){exit 1}`],{windowsHide:true,encoding:'utf8'});assert.equal(parse.status,0);assert.deepEqual([...raw.subarray(0,3)],[239,187,191]);
+  const nativeHelper=join(root,'local-fast-confirm.ps1');writeFileSync(snapshot,JSON.stringify({kind:'local_fast_watch_scope',scope}));
+  const nativeWrongSid=spawnSync(powershell,['-NoProfile','-NonInteractive','-Sta','-File',nativeHelper,'-RequestFile',snapshot,'-ExpectedOwnerSid','S-1-5-21-1-2-3-9999'],{windowsHide:true,encoding:'utf8',timeout:10000});assert.notEqual(nativeWrongSid.status,0);assert.match(nativeWrongSid.stderr,/Windows Owner identity required/);
+  const nativeParse=spawnSync(powershell,['-NoProfile','-NonInteractive','-Command',`$taskTokens=$null;$taskErrors=$null;[void][Management.Automation.Language.Parser]::ParseFile('${nativeHelper.replaceAll("'","''")}',[ref]$taskTokens,[ref]$taskErrors);if($taskErrors.Count){exit 1}`],{windowsHide:true,encoding:'utf8'});assert.equal(nativeParse.status,0);assert.deepEqual([...nativeRaw.subarray(0,3)],[239,187,191]);
 });

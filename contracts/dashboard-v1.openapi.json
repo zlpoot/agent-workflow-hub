@@ -2633,6 +2633,13 @@
           "github_refresh"
         ],
         "properties": {
+          "queue_id": {
+            "type": "string",
+            "pattern": "^(legacy|[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12})$"
+          },
+          "queue_archived": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"

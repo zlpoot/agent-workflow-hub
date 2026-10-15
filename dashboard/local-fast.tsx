@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Card, Dialog, Flex, Heading, Text, TextField } from '@radix-ui/themes';
+import { localFastRequest } from './local-fast-api';
 
 export function LocalFastProject({onConnected}:{onConnected:(project:string)=>void}) {
   const [directory,setDirectory]=useState(''),[roots,setRoots]=useState<string[]>([]),[directories,setDirectories]=useState<string[]>([]);
@@ -10,10 +11,8 @@ export function LocalFastProject({onConnected}:{onConnected:(project:string)=>vo
     if(pending.current)return null;pending.current=true;setBusy(true);setError('');
     const controller=abort.current=new AbortController();
     try {
-      const response=await fetch('/dashboard/local-fast/v1/'+action,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:controller.signal});
-      if(response.status===404){setAvailable(false);return null;}
-      const value=await response.json();if(!response.ok||value.authority_verified!==false||!value.item)throw new Error(value.error?.code??'unavailable');return value.item;
-    }catch(e){if(!controller.signal.aborted)setError('操作未完成：'+(e instanceof Error?e.message:'unavailable')+'。保留原队列与历史。');return null;}
+      return await localFastRequest(action,data,controller.signal);
+    }catch(e){if(e instanceof Error&&e.message==='local_fast_unavailable')setAvailable(false);else if(!controller.signal.aborted)setError('操作未完成：'+(e instanceof Error?e.message:'unavailable')+'。保留原队列与历史。');return null;}
     finally{pending.current=false;if(!controller.signal.aborted)setBusy(false);}
   };
   const browse=async(path?:string)=>{const result=await call('browse',path?{directory:path}:{});if(result){setRoots(result.roots);setDirectories(result.directories);if(result.current){setDirectory(result.current);setPreview(null);setStatus(null);}}};

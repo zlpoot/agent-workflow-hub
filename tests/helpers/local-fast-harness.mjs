@@ -47,6 +47,7 @@ export function harness(t) {
         const path = args.at(-1), pages = args.includes('--slurp'), wrap = data => JSON.stringify(pages ? [data] : data);
         if (path === 'user') return wrap({ login: 'synthetic-owner', id: userId, type: 'User' });
         if (path === `repos/${repository}`) return wrap({ id: 42, full_name: repository, default_branch: 'main', permissions: { push: permission } });
+        if (/\/issues\?state=open&per_page=50&page=\d+$/.test(path)) return wrap(Number(path.split('page=').at(-1))===1?Array.from({length:6},(_,i)=>i+1).filter(n=>issueStates.get(n)!=='closed').map(number=>({number,title:`Ordinary Issue ${number}`,state:'open'})):[]);
         if (path.startsWith(`repos/${repository}/contents/.awh/flow.json?ref=`)) {
           const head = path.split('=')[1]; return wrap({ encoding: 'base64', content: Buffer.from(git(['show', `${head}:.awh/flow.json`])).toString('base64') });
         }

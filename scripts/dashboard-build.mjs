@@ -25,5 +25,6 @@ mkdirSync('dist/dashboard', { recursive: true });
 const ownerPrompt = readFileSync('src/dashboard/owner-confirm.ps1', 'utf8').replace(/^\uFEFF/, '');
 writeFileSync('dist/dashboard/owner-confirm.ps1', '\uFEFF' + ownerPrompt);
 writeFileSync('dist/dashboard/github-app-confirm.ps1', '\uFEFF' + readFileSync('src/dashboard/github-app-confirm.ps1', 'utf8').replace(/^\uFEFF/, ''));
+writeFileSync('dist/dashboard/local-fast-confirm.ps1', '\uFEFF' + readFileSync('src/dashboard/local-fast-confirm.ps1', 'utf8').replace(/^\uFEFF/, ''));
 console.log('Dashboard browser bundle and static OpenAPI validators built');
 await import('./dashboard-v2-build.mjs');

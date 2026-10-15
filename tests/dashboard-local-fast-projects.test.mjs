@@ -30,7 +30,9 @@ test('GUI binds exact queue, cancels without writes, rejects overrides/conflict,
   await assert.rejects(gui.handle('attach',{directory,confirm:true,watcher_directory:state}),code('local_fast_input'));
   const restored=createLocalFastProjects(config,overrides);assert.deepEqual(restored.configs,gui.configs);await restored.close();
   const moved=directory+'-disconnected';renameSync(directory,moved);
-  try{const disconnected=createLocalFastProjects(config,overrides);assert.equal(disconnected.configs[0].repository,repository);assert.deepEqual(disconnected.projectIds(),gui.projectIds());await disconnected.close();}finally{renameSync(moved,directory);}
+  try{const disconnected=createLocalFastProjects(config,overrides);assert.equal(disconnected.configs[0].repository,repository);assert.deepEqual(disconnected.projectIds(),gui.projectIds());const list=await disconnected.handle('list',{});assert.equal(list.items[0].available,false);assert.equal(list.items[0].reason,'directory_missing');assert.equal(list.items[0].project_id,result.project_id);await disconnected.close();}finally{renameSync(moved,directory);}
+  const listed=await gui.handle('list',{});assert.equal(listed.items[0].available,true);assert.deepEqual(listed.items[0].issues,[1,2,3]);assert.equal(readFileSync(h.statePath,'utf8'),before);
+  await assert.rejects(gui.handle('list',{directory}),code('local_fast_input'));
   assert(!h.calls.some(c=>c.command==='gh'&&c.args[0]!=='api'));
   assert(!existsSync(join(h.repo,'cp.sqlite')));
 });

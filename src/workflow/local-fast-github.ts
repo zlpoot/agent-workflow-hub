@@ -5,8 +5,17 @@ export type Native = Record<string, any>;
 export type NativeRun = (command: 'git' | 'gh', args: string[], cwd: string, input?: string) => string;
 export const localFastRun: NativeRun = (command, args, cwd, input) => {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^AWH_/i.test(key)));
-  const r = spawnSync(command, args, { cwd, input, env: { ...env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' },
+  const invoke = () => spawnSync(command, args, { cwd, input, env: { ...env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' },
     encoding: 'utf8', windowsHide: true, timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
+  // Retry only an unambiguously read-only native REST GET on a transient transport error.
+  // Never replay Git, GraphQL, Review/PR writes, authentication failures or rate limits.
+  const read = command === 'gh' && input === undefined && args[0] === 'api' &&
+    args.slice(1).every(arg => arg === '--paginate' || arg === '--slurp' || /^(?:user|repos\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^\s]*)?)$/.test(arg)) &&
+    args.some(arg => arg === 'user' || arg.startsWith('repos/'));
+  let r = invoke();
+  if (read && (r.error || r.status !== 0) && !/\b(?:401|403|429)\b|rate limit|authentication|permission/i.test(r.stderr ?? '') &&
+      (/\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN)\b/.test((r.error as NodeJS.ErrnoException | undefined)?.code ?? '') ||
+       /\b(?:502|503|504)\b|TLS handshake timeout|connection reset|unexpected EOF|i\/o timeout|temporary failure|timed out/i.test(r.stderr ?? ''))) r = invoke();
   if (r.error || r.status !== 0) clientFail('local_fast_' + command, `${command} operation failed using the existing login; credentials and remote diagnostics are suppressed.`);
   return r.stdout.trim();
 };

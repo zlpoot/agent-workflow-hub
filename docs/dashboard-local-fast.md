@@ -1,8 +1,8 @@
 # Dashboard Local Fast on Windows
 
-Open Dashboard V2 → **添加项目** → choose **Local Fast** in the existing V1 Enrollment area → browse/select the original Git checkout → **检查 Local Fast 项目** → confirm. Existing binding, Watcher directory and Viewer project scope are associated automatically. **查看 V2 任务** opens the task cards and GitHub/Watcher history. No CP Project, Run or Event is created.
+Open Dashboard V2 → **项目 / 添加项目** → browse/select the original Git checkout → **检查 Local Fast 项目** → **关联已有队列** → confirm. The normal Local Fast path stays in V2. Existing binding, Watcher directory and Viewer project scope are associated automatically. Project task cards and the Tasks page show GitHub/Watcher history. No CP Project, Run or Event is created. See the [V2 operation guide](dashboard-v2-local-fast.md).
 
-For a new unbound checkout, enter the exact ordered Issues, one bounded focused check per line and `personal-gh` (default) or an already connected `github-app`. Confirm uses the existing `LocalFast.bind`, then reads it back. Conflicting queues are preserved. This does not start development.
+For a new unbound checkout, enter the exact ordered Issues, one bounded focused check per line and an already connected `github-app` (V2 default) or existing `personal-gh` login. Preview and confirm uses the existing `LocalFast.bind`, then reads it back. Conflicting queues are preserved. This does not start development.
 
 **查询 Watcher** displays the saved scope and expiration, lock and queue status. With a matching valid Windows Owner scope, **启动已有 Owner scope** runs the existing Watcher. **停止本 GUI Watcher** and Viewer exit abort only Watchers started by this Viewer; external Watchers and locks remain untouched. Poll with 查询 Watcher; V2 observes local state every 10 seconds and GitHub according to its refresh control. Completed queues cannot be restarted here. Waiting for Review, open the PR from the task detail and copy its ChatGPT Review instruction; GUI does not submit Reviews.
 

@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { ClientError, same } from '../client/local.js';
 import { externalPath, readExternalFile } from '../shared/external-files.js';
@@ -214,6 +215,49 @@ export class GithubApp {
     try { writeFileSync(this.#d.configPath, JSON.stringify(validate(connection), null, 2), { flag: 'wx', mode: 0o600 }); this.#d.protect(this.#d.configPath); }
     catch { return stop('connection_save_failed'); }
     return this.status();
+  }
+  async #currentScope(c: Connection, signal?: AbortSignal): Promise<AppInstallation> {
+    const auth = await this.#authenticate(c, signal);
+    // Installation lookup still works when an Owner removes a previously selected repository.
+    const inst = await auth.request(`/app/installations/${c.installation_id}`, auth.jwt);
+    if (inst.id !== c.installation_id || inst.account?.login !== c.repositories[0]!.full_name.split('/')[0]) return stop('identity_drift');
+    const live = await this.#inspectInstallation(auth, inst);
+    if (!same(live.delivery_actor, c.delivery_actor)) return stop('identity_drift');
+    const user = await live.request(`/users/${c.reviewer.login}`, live.metadata.token);
+    if (user.id !== c.reviewer.id || user.login !== c.reviewer.login || user.type !== 'User') return stop('identity_drift');
+    return { installation_id: live.installation_id, account: live.account, repository_selection: live.repository_selection,
+      permissions: live.permissions, repositories: live.repositories, delivery_actor: live.delivery_actor, reviewer: c.reviewer };
+  }
+  /** Read actual metadata only. The server retains the save closure and credential references. */
+  async inspectScope(signal?: AbortSignal) {
+    const original = this.#read(), facts = await this.#currentScope(original, signal);
+    const input: AppInput = { app_id: original.app_id, app_slug: original.app_slug, private_key_path: original.private_key_path, reviewer: original.reviewer.login };
+    return {
+      input, facts, previous_repositories: original.repositories, changed: !same(facts.repositories, original.repositories),
+      save: async (confirmed: boolean, saveSignal?: AbortSignal, canSave?: () => boolean) => {
+        if (!confirmed) return stop('owner_cancelled');
+        const live = await this.#currentScope(original, saveSignal);
+        if (!same(live, facts)) return stop('scope_drift');
+        const check = () => {
+          if (saveSignal?.aborted || canSave && !canSave()) return stop('operation_cancelled');
+          if (!same(this.#read(), original)) return stop('identity_drift');
+        };
+        check();
+        if (same(original.repositories, live.repositories)) return this.status();
+        // Replace only repository metadata after native confirmation; preserve identity and a protected backup.
+        const updated = validate({ ...original, repositories: live.repositories });
+        const suffix = randomUUID(), temporary = this.#d.configPath + '.scope-' + suffix, backup = this.#d.configPath + '.backup-' + suffix;
+        try {
+          this.#d.protect(join(this.#d.configPath, '..'));
+          writeFileSync(backup, JSON.stringify(original, null, 2), { flag: 'wx', mode: 0o600 }); this.#d.protect(backup);
+          writeFileSync(temporary, JSON.stringify(updated, null, 2), { flag: 'wx', mode: 0o600 }); this.#d.protect(temporary);
+          check();
+          renameSync(temporary, this.#d.configPath);
+        } catch (e) { if (e instanceof GithubAppError) throw e; return stop('connection_save_failed'); }
+        finally { if (existsSync(temporary)) unlinkSync(temporary); }
+        return this.status();
+      }
+    };
   }
   async preflight(repository: string, signal?: AbortSignal): Promise<AppDelivery> {
     const c = this.#read(), binding = this.#bound(c, repository), live = await this.#inspect(c, repository, c, signal);

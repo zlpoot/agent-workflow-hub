@@ -6,24 +6,36 @@ import { fileURLToPath } from 'node:url';
 import { readExternalFile } from '../shared/external-files.js';
 import { fail } from '../shared/security.js';
 import { protectedAppPath, type AppInput, type AppInstallation } from '../workflow/github-app.js';
+import type { WatchScope } from '../workflow/local-fast-watcher.js';
 
 export type AppOwnerRequest = { kind: 'github_app_connection'; input: AppInput; facts: AppInstallation; repository: string };
 const digest = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 /** Opt-in, external Owner policy. Helper path is fixed to the installed package. */
 export function createGithubAppOwnerConfirmation(configPath: string, launch: typeof spawn = spawn) {
+  return createConfirmation(configPath,'github-app',launch) as (request:AppOwnerRequest,signal:AbortSignal)=>Promise<boolean>;
+}
+export function createLocalFastOwnerConfirmation(configPath:string,launch:typeof spawn=spawn) {
+  const confirm=createConfirmation(configPath,'local-fast',launch);
+  return (scope:WatchScope,signal:AbortSignal)=>confirm({kind:'local_fast_watch_scope',scope},signal);
+}
+function createConfirmation(configPath:string,kind:'github-app'|'local-fast',launch:typeof spawn) {
   if (process.platform !== 'win32') fail(500, 'app_owner_configuration', 'Windows Owner required');
-  const helper = join(dirname(fileURLToPath(import.meta.url)), 'github-app-confirm.ps1');
+  const installed=dirname(fileURLToPath(import.meta.url));
+  const appHelper=join(installed,'github-app-confirm.ps1');
+  const helper = kind==='github-app'?appHelper:join(installed,'local-fast-confirm.ps1');
   protectedAppPath(configPath);
   const raw = readExternalFile(configPath, 4096, true), c = JSON.parse(raw.toString('utf8'));
   if (!c || Object.keys(c).sort().join(',') !== 'confirmation_script_sha256,owner_sid,schema_version' || c.schema_version !== '1.0' ||
       !/^S-1-5-\d+(?:-\d+)+$/.test(c.owner_sid) || !/^[a-f0-9]{64}$/.test(c.confirmation_script_sha256)) fail(500, 'app_owner_configuration', 'Closed Owner policy required');
   const check = () => {
-    protectedAppPath(configPath); protectedAppPath(helper); protectedAppPath(dirname(configPath));
-    if (digest(readExternalFile(configPath, 4096, true)) !== digest(raw) || digest(readExternalFile(helper, 65536)) !== c.confirmation_script_sha256)
+    protectedAppPath(configPath); protectedAppPath(helper); protectedAppPath(appHelper); protectedAppPath(dirname(configPath));
+    if (digest(readExternalFile(configPath, 4096, true)) !== digest(raw) || digest(readExternalFile(appHelper, 65536)) !== c.confirmation_script_sha256 ||
+        kind==='local-fast'&&digest(readExternalFile(helper,65536))!=='f024f4cde5fb5361a1f4522a5bdad97472d7c3bfb926cbaab00f961e10d1ea9d')
       fail(409, 'app_owner_changed', 'Pinned Owner policy/helper changed');
   };
   check();
-  return async (request: AppOwnerRequest, signal: AbortSignal): Promise<boolean> => {
+  return async (request: AppOwnerRequest|{kind:'local_fast_watch_scope';scope:WatchScope}, signal: AbortSignal): Promise<boolean> => {
+    if(request.kind!==(kind==='github-app'?'github_app_connection':'local_fast_watch_scope'))fail(400,'app_owner_confirmation','Closed native confirmation kind required');
     check();
     const directory = mkdtempSync(join(dirname(configPath), 'awh-app-confirm-')), snapshot = join(directory, 'request.json');
     const bytes = Buffer.from(JSON.stringify(request));

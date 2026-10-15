@@ -42,13 +42,14 @@ try {
   browser=await chromium.launch({headless:false,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
   const context=await browser.newContext({viewport:{width:1600,height:1100},reducedMotion:'reduce'}),page=await context.newPage();page.setDefaultTimeout(30000);
   const errors=[],requests=[];page.on('pageerror',e=>errors.push(e.message));context.on('request',r=>requests.push({url:r.url(),method:r.method()}));
-  await page.goto(ready.v2_url);await page.getByRole('link',{name:'添加项目',exact:true}).click();
+  await page.goto(ready.v2_url);await page.getByRole('button',{name:'添加项目',exact:true}).click();
   await page.getByLabel('Local Fast 项目目录',{exact:true}).fill(repository);
   await page.getByRole('button',{name:'检查 Local Fast 项目',exact:true}).click();
-  await page.getByRole('dialog').waitFor();assert((await page.getByRole('dialog').innerText()).includes('确认只读观察已有队列'));
+  await page.getByRole('button',{name:'关联已有队列…'}).click();
+  await page.getByRole('dialog').waitFor();assert((await page.getByRole('dialog').innerText()).includes('确认关联已有队列'));
   await page.getByRole('button',{name:'取消',exact:true}).click();assert(!existsSync(join(state,'dashboard-local-fast.json')));
-  await page.getByRole('button',{name:'检查 Local Fast 项目',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();
-  await page.getByRole('dialog').waitFor({state:'hidden'});await page.screenshot({path:join(output,'add-project.png'),fullPage:true});
+  await page.getByRole('button',{name:'关联已有队列…'}).click();await page.getByRole('button',{name:'确认',exact:true}).click();
+  await page.getByRole('dialog').waitFor({state:'hidden'});await page.getByText('正在处理本机操作…',{exact:true}).waitFor({state:'hidden'});await page.screenshot({path:join(output,'add-project.png'),fullPage:true});
   await page.goto(ready.v2_url);
   const observations=[];
   const completedSnapshot=async()=>{
@@ -74,6 +75,12 @@ try {
   }
   await stop();await start();await page.goto(ready.v2_url);
   await completedSnapshot();
+  await page.getByRole('button',{name:'添加项目',exact:true}).click();
+  await page.getByRole('button',{name:/zlpoot\/awh-m1-e-sandbox.*Local Fast · 已关联/}).click();
+  await page.getByText('正在处理本机操作…',{exact:true}).waitFor({state:'hidden'});
+  assert(await page.getByText('Watcher：QUEUE_COMPLETED',{exact:false}).isVisible());
+  await page.getByRole('button',{name:'刷新',exact:true}).click();
+  await page.screenshot({path:join(output,'restored-project.png'),fullPage:true});
   assert.equal(digest(database),dbBefore);assert.deepEqual(protectedFiles.map(digest),before);assert.equal(errors.length,0);
   assert(!requests.some(r=>/\/(start|bind|authorize|stop)$/.test(r.url)));
   writeFileSync(join(output,'snapshot.json'),JSON.stringify(snapshot,null,2));

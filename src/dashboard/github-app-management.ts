@@ -17,13 +17,14 @@ const messages: Record<string, [string,string]> = {
   network_error: ['无法完成 GitHub 网络请求或请求已超时。','检查本机网络和 GitHub 可用性后重新检查。'],
   installation_suspended: ['此 App 安装已暂停。','由 Owner 在 GitHub 恢复该安装后重新检测。'],
   identity_drift: ['App、Installation、Bot 或 Reviewer 与已确认身份不一致。','停止连接/交付，核对 GitHub 与本机配置；新连接请重新检测。'],
-  scope_drift: ['Selected Repository 集合不完整或与保存的范围发生变化。','核对完整安装范围；不要通过重绑历史队列绕过检查。'],
+  scope_drift: ['GitHub 仓库范围发生变化，或完整范围暂未核验通过。','点击“同步 GitHub 仓库范围”回读实际范围；核对新增和移除仓库，再由 Windows Owner 确认保存。已有队列不会被重绑。'],
   reviewer_identity: ['Reviewer 不是该登录名对应的独立个人 User。','填写真实个人 Reviewer 登录名；不能使用 Bot 身份。'],
   bot_identity: ['GitHub 返回的 Bot 身份不符合该 App。','核对 App slug 及真实 Bot 用户。'],
   configuration_invalid: ['已有受保护连接配置无法校验。','由本机 Owner 检查配置文件和 ACL；此页面不会覆盖已有连接。'],
   installation_limit: ['安装列表超过安全上限或无法完整读取。','由 Owner 核对安装范围；AWH 最多检查 128 个安装/选中仓库。'],
   owner_cancelled: ['本机 Owner 已取消连接。','配置未保存。需要连接时重新检测并在 Windows 确认窗口中确认。'],
   owner_failed: ['Windows Owner 确认未完成。','检查本机 Owner 配置及确认窗口；配置不会由浏览器确认代替。'],
+  operation_cancelled: ['操作会话已失效或已取消，连接未更新。','返回设置重新同步 GitHub 范围，再核对并确认。'],
   invalid_input: ['填写的信息格式不正确。','App ID 必须为正整数，PEM 必须是本机绝对路径；核对 slug 和 Reviewer。'],
   configuration_directory: ['本机受保护 App 配置目录尚未就绪。','请本机管理员完成 AWH 安装的 Owner 目录保护后重试，不要在 Git 仓库内创建配置。'],
   connection_save_failed: ['连接文件未能安全保存，或已有文件不能覆盖。','刷新连接状态；由本机 Owner 检查受保护配置目录。'],
@@ -58,8 +59,9 @@ export function createGithubAppManagement(options: { app?: GithubApp; confirm?: 
   const app = options.app ?? new GithubApp(), now = options.now ?? Date.now;
   const csrf = new Map<string, { digest: string; expires: number }>();
   const detections = new Map<string, { session: string; input: AppInput; inspection: AppInspection; expires: number }>();
+  const scopes = new Map<string, { session: string; value: Awaited<ReturnType<GithubApp['inspectScope']>>; expires: number }>();
   let busy = false, active: AbortController | undefined;
-  const prune = () => { for (const [k,v] of csrf) if (v.expires <= now()) csrf.delete(k); for (const [k,v] of detections) if (v.expires <= now()) detections.delete(k); };
+  const prune = () => { for (const [k,v] of csrf) if (v.expires <= now()) csrf.delete(k); for (const [k,v] of detections) if (v.expires <= now()) detections.delete(k); for (const [k,v] of scopes) if (v.expires <= now()) scopes.delete(k); };
   const blocked = (code: string, extra: Record<string,unknown> = {}) => ({ status: 'BLOCKED', problem: appProblem(code), fixture: options.fixture === true, ...extra });
   const status = () => { try { return app.status(); } catch (e) { return blocked(e instanceof GithubAppError ? e.reason : 'configuration_invalid'); } };
   return {
@@ -75,12 +77,42 @@ export function createGithubAppManagement(options: { app?: GithubApp; confirm?: 
       const grant = csrf.get(session);
       if (!grant || grant.expires <= now() || grant.digest !== hash(token)) fail(403, 'app_csrf', 'Fresh same-session CSRF required');
       csrf.delete(session); // Consume before any asynchronous work, including errors/cancellation.
-      if (!['detect','connect','preflight'].includes(action)) fail(404, 'not_found', 'Fixed App action required');
+      if (!['detect','connect','preflight','refresh-scope','sync-scope'].includes(action)) fail(404, 'not_found', 'Fixed App action required');
       if (busy) fail(409, 'app_busy', 'Wait for current App operation');
       busy = true;
       active = new AbortController(); signal = AbortSignal.any([signal, active.signal]);
       const inspectionSignal = () => AbortSignal.any([signal, AbortSignal.timeout(120000)]);
       try {
+        if (action === 'refresh-scope') {
+          if (!keys(data, '')) fail(400, 'app_input', 'Scope refresh accepts no configuration');
+          const value = await app.inspectScope(inspectionSignal());
+          for (const [k,v] of scopes) if (v.session === session) scopes.delete(k);
+          if (scopes.size >= 64) fail(429, 'app_session_limit', 'Scope inspection limit');
+          if (signal.aborted || !authorized()) return blocked('owner_failed');
+          const proposal = randomBytes(32).toString('base64url');
+          if (value.changed) scopes.set(proposal, { session, value, expires: now() + 300000 });
+          const added = value.facts.repositories.filter(r => !value.previous_repositories.some(p => p.id === r.id && p.full_name === r.full_name));
+          const removed = value.previous_repositories.filter(r => !value.facts.repositories.some(p => p.id === r.id && p.full_name === r.full_name));
+          return { ...app.status(), status: value.changed ? 'SCOPE_CHANGED' : 'SCOPE_CURRENT', inspection: value.facts,
+            scope_change: value.changed ? { proposal_id: proposal, added, removed, repositories: value.facts.repositories } : undefined,
+            checked_at: new Date(now()).toISOString(), writes_performed: false, fixture: options.fixture === true };
+        }
+        if (action === 'sync-scope') {
+          if (!keys(data, 'proposal_id') || typeof data.proposal_id !== 'string') fail(400, 'app_input', 'Select the server-inspected scope proposal');
+          const snapshot = scopes.get(data.proposal_id); scopes.delete(data.proposal_id);
+          if (!snapshot || snapshot.session !== session || snapshot.expires <= now()) fail(409, 'app_detection_expired', 'Refresh scope again');
+          const value = snapshot.value;
+          const retained = value.facts.repositories.find(r => value.previous_repositories.some(p => p.id === r.id && p.full_name === r.full_name));
+          const repository = (retained ?? value.facts.repositories[0]!).full_name;
+          let confirmed: boolean;
+          try { confirmed = await options.confirm({ kind: 'github_app_connection', input: structuredClone(value.input), facts: structuredClone(value.facts), repository }, signal); }
+          catch { return blocked('owner_failed', { ...status(), status: 'BLOCKED' }); }
+          if (!confirmed) return blocked('owner_cancelled', { ...status(), status: 'BLOCKED' });
+          const saveSignal = inspectionSignal();
+          await value.save(true, saveSignal, () => !saveSignal.aborted && snapshot.expires > now() && authorized());
+          return { ...app.status(), status: 'SCOPE_SYNCED', inspection: value.facts, checked_at: new Date(now()).toISOString(),
+            scope_saved: true, writes_performed: false, fixture: options.fixture === true };
+        }
         if (action === 'detect') {
           if (app.status().status !== 'NOT_CONNECTED') fail(409, 'app_already_connected', 'Existing connection retained');
           const input = appInput(data), inspection = await app.detect(input, inspectionSignal()), detection = randomBytes(32).toString('base64url');
@@ -119,6 +151,6 @@ export function createGithubAppManagement(options: { app?: GithubApp; confirm?: 
       }
       finally { busy = false; active = undefined; }
     },
-    close() { active?.abort(); csrf.clear(); detections.clear(); }
+    close() { active?.abort(); csrf.clear(); detections.clear(); scopes.clear(); }
   };
 }

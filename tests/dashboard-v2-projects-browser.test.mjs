@@ -1,0 +1,84 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { chromium } from 'playwright';
+import { harness, repository } from './helpers/local-fast-harness.mjs';
+import { fixtureStore } from './store-fixture.mjs';
+import { DashboardReadStore } from '../dist/control-plane/store.js';
+import { createLocalFastProjects } from '../dist/dashboard/local-fast-projects.js';
+import { LocalFastWatcher } from '../dist/workflow/local-fast-watcher.js';
+import { githubTransport } from '../dist/workflow/local-fast-github.js';
+import { LocalFastObservationAdapter } from '../dist/dashboard/local-fast-observation.js';
+import { createDashboardGateway } from '../dist/dashboard/gateway.js';
+
+test('Windows Edge V2 project bind, duplicate start/stop, terminal guidance, Review copy, disconnect and restore',{skip:process.platform!=='win32',timeout:300000},async t=>{
+  const h=harness(t),external=mkdtempSync(join(tmpdir(),'awh-v2-project-')),state=join(external,'state');mkdirSync(state);
+  const executable=join(external,'codex.exe');writeFileSync(executable,'simulated executor');
+  const output=join(process.cwd(),'.handoff','v2-project-browser');mkdirSync(output,{recursive:true});
+  const database=join(external,'isolated.sqlite'),profile=JSON.parse(readFileSync('examples/protocol/project-alpha.json')).profile_policy;
+  fixtureStore(database,[profile]).close();
+  let launches=0,signal;
+  const watch={platform:'win32',interactive:true,localData:external,fast:h.deps,github:githubTransport(h.repo,h.deps.run),executor:{type:'codex-cli',run:async(_r,_started,s)=>{launches++;_started(process.pid);signal=s;await new Promise(r=>s.addEventListener('abort',r,{once:true}));return {exit_code:2};}}};
+  const config={project_roots:[dirname(h.repo)],state_directory:state},overrides={fast:h.deps,watch};
+  let gui,gateway,reader,origin;
+  const start=async()=>{
+    gui=createLocalFastProjects(config,overrides);reader=new DashboardReadStore(database);
+    gateway=createDashboardGateway({enabled:true,store:reader,assets:'dist/dashboard-ui',assetsV2:'dist/dashboard-v2',localBrowserViewer:{id:'isolated-v2',project_ids:gui.projectIds()},localFastProjects:gui,
+      tasks:new LocalFastObservationAdapter(gui.configs,{command:async(c,a,cwd)=>{
+        if(c==='gh'&&a.at(-1).includes('/status'))return JSON.stringify({statuses:[],total_count:0});
+        if(c==='gh'&&a.at(-1).includes('/check-runs'))return JSON.stringify({check_runs:[],total_count:0});
+        const value=h.deps.run(c,a,cwd);
+        if(c==='gh'&&/\/pulls\/\d+$/.test(a.at(-1))){const p=JSON.parse(value);p.head.repo.full_name=repository;p.base.repo.full_name=repository;return JSON.stringify(p);}
+        return value;
+      },alive:pid=>pid===process.pid})});
+    await new Promise(r=>gateway.server.listen(0,'127.0.0.1',r));origin=`http://127.0.0.1:${gateway.server.address().port}`;
+  };
+  await start();
+  const browser=await chromium.launch({headless:false,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
+  t.after(async()=>{await browser.close();await gateway.close();reader.close();});
+  const context=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write']}),page=await context.newPage();page.setDefaultTimeout(60000);
+  const errors=[],documents=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.isNavigationRequest())documents.push(new URL(r.url()).pathname);});
+  await page.goto(origin+'/dashboard');await page.getByRole('button',{name:'添加项目',exact:true}).click();
+  await page.getByLabel('Local Fast 项目目录').fill(h.repo);await page.getByRole('button',{name:'检查 Local Fast 项目',exact:true}).click();
+  await page.getByLabel('Local Fast Issue 列表').fill('1,1');assert(await page.getByRole('button',{name:'预览绑定队列…'}).isDisabled());
+  await page.getByLabel('Local Fast Issue 列表').fill('1,2,3');await page.getByLabel('Local Fast 校验命令').fill('node --test tests/smoke.test.mjs');
+  await page.getByLabel('Local Fast 交付身份').selectOption('personal-gh');await page.getByRole('button',{name:'预览绑定队列…'}).click();
+  await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();assert.equal(gui.configs.length,0);
+  await page.getByRole('button',{name:'预览绑定队列…'}).click();await page.getByRole('dialog').getByRole('button',{name:'确认',exact:true}).dblclick();await page.getByRole('dialog').waitFor({state:'hidden'});
+  await page.getByText('GUI_OWNER_CONFIRMATION_NOT_INTEGRATED：',{exact:false}).waitFor();assert.equal(gui.configs.length,1);
+  assert(await page.getByRole('button',{name:'启动已有 Owner scope…'}).isDisabled());
+  await page.getByLabel('Codex 可执行文件').fill(executable);await page.getByRole('button',{name:'复制Owner 授权命令'}).click();
+  assert((await page.evaluate(()=>navigator.clipboard.readText())).includes("--issues '1,2,3'"));
+  // Simulated Owner grant only in a fresh test directory. No GUI authorize action exists.
+  new LocalFastWatcher(h.repo,watch).authorize(repository,'1,2,3',new Date(Date.now()+3600000).toISOString(),executable,false,true);
+  await page.getByRole('button',{name:'查询 Watcher',exact:true}).click();await page.getByRole('button',{name:'启动已有 Owner scope…'}).click();
+  await page.getByRole('dialog').getByRole('button',{name:'确认',exact:true}).dblclick();await page.getByRole('dialog').waitFor({state:'hidden'});
+  await page.waitForFunction(()=>document.body.innerText.includes('GUI：RUNNING'));assert.equal(launches,1);
+  await page.screenshot({path:join(output,'synthetic-watcher-running.png'),fullPage:true});
+  await page.getByRole('button',{name:'停止本 GUI Watcher',exact:true}).click();await page.waitForFunction(()=>document.body.innerText.includes('GUI：BLOCKED'));assert(signal.aborted);assert.equal(launches,1);
+  const worktree=JSON.parse(readFileSync(h.statePath)).tasks[0].worktree;
+  writeFileSync(join(worktree,'code.txt'),'synthetic candidate\n');
+  await page.getByRole('button',{name:'查询 Watcher',exact:true}).click();
+  await page.getByRole('button',{name:'恢复现有候选的 Stage…',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();assert.equal(h.prs.length,0);
+  await page.getByRole('button',{name:'恢复现有候选的 Stage…',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'确认',exact:true}).dblclick();await page.getByRole('dialog').waitFor({state:'hidden'});
+  const recoveredDeadline=Date.now()+60000;
+  while(Date.now()<recoveredDeadline){if(JSON.parse(readFileSync(h.statePath)).tasks[0].phase==='awaiting_review')break;const current=await gui.handle('status',{directory:h.repo});if(current.gui_status==='BLOCKED')assert.fail(current.gui_reason);await new Promise(r=>setTimeout(r,50));}
+  assert.equal(JSON.parse(readFileSync(h.statePath)).tasks[0].phase,'awaiting_review');assert.equal(h.prs.length,1);assert.equal(launches,1);
+  await page.getByRole('button',{name:'查询 Watcher',exact:true}).click();assert((await page.getByRole('status').allTextContents()).some(v=>v.includes('AWAITING_INDEPENDENT_REVIEW')));
+  await page.screenshot({path:join(output,'synthetic-stage-recovered.png'),fullPage:true});
+  await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('button',{name:/^任务.*Tasks/}).click();
+  await page.getByRole('button',{name:'#1 Ordinary Issue 1',exact:true}).click();const detail=page.getByRole('dialog');
+  await detail.getByRole('button',{name:'复制ChatGPT Review 指令'}).click();assert((await page.evaluate(()=>navigator.clipboard.readText())).includes('personal-gh（Reviewer 与个人 PR 作者同账号）'));
+  await page.screenshot({path:join(output,'synthetic-review-handoff.png')});await page.keyboard.press('Escape');
+  await context.setOffline(true);await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByText(/^(离线|数据已过期)$/).waitFor();
+  assert.equal(await page.locator('.desktop-table').getByText('状态未知',{exact:true}).count(),3);
+  await page.screenshot({path:join(output,'synthetic-disconnected.png'),fullPage:true});
+  await context.setOffline(false);await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByText('已连接',{exact:true}).waitFor();
+  await gateway.close();reader.close();await start();await page.goto(origin+'/dashboard/v2');await page.getByRole('button',{name:'添加项目',exact:true}).click();
+  await page.getByRole('button',{name:new RegExp(repository)}).click();await page.getByRole('heading',{name:'项目任务 · 队列顺序'}).waitFor();assert.equal(gui.configs.length,1);
+  await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:join(output,'synthetic-mobile-project.png'),fullPage:true});
+  assert.equal(errors.length,0);assert(!documents.some(p=>p==='/dashboard/v1'));assert(!h.calls.some(c=>c.command==='gh'&&['review','merge'].includes(c.args[1])));
+  writeFileSync(join(output,'result.json'),JSON.stringify({status:'PASS',provider:'SIMULATED',owner_scope:'SIMULATED_ISOLATED',launches,restore:true,disconnect_recovery:true,documents,page_errors:errors,real_business_queue:'NOTRUN'},null,2));
+});

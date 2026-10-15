@@ -5,13 +5,14 @@ import {
   ArrowUpRight,
   ShieldCheck,
   Settings,
+  FolderGit2,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "./ui/button";
 import { Status } from "./status";
 import { stamp, taskSnapshotPending } from "../lib/task-model.mjs";
 import type { DashboardState } from "../hooks/use-dashboard";
-export type View = "Overview" | "Tasks" | "Settings";
+export type View = "Overview" | "Projects" | "Tasks" | "Settings";
 export function AppShell({
   view,
   setView,
@@ -43,7 +44,7 @@ export function AppShell({
         </div>
         <p className="nav-label">WORKSPACE / 工作区</p>
         <nav aria-label="面板导航">
-          {(["Overview", "Tasks", "Settings"] as View[]).map((name) => (
+          {(["Overview", "Projects", "Tasks", "Settings"] as View[]).map((name) => (
             <Button
               key={name}
               variant="ghost"
@@ -54,8 +55,8 @@ export function AppShell({
                 <LayoutDashboard aria-hidden="true" />
               ) : name === "Tasks" ? (
                 <ListTodo aria-hidden="true" />
-              ) : <Settings aria-hidden="true" />}
-              {name === "Overview" ? "总览" : name === "Tasks" ? "任务" : "设置"}
+              ) : name === "Projects" ? <FolderGit2 aria-hidden="true"/> : <Settings aria-hidden="true" />}
+              {name === "Overview" ? "总览" : name === "Tasks" ? "任务" : name === "Projects" ? "项目" : "设置"}
               <span className="nav-english">{name}</span>
             </Button>
           ))}
@@ -63,15 +64,15 @@ export function AppShell({
         {view === "Settings" && <a className="settings-subnav" href="#github-app-settings" aria-current="page">GitHub App</a>}
         <div className="sidebar-note">
           <ShieldCheck size={18} aria-hidden="true" />
-          <strong>只读工作区</strong>
-          <p>观察任务，保留事实来源。独立 Review 由下一责任方完成。</p>
+          <strong>Local Fast 工作区</strong>
+          <p>接入项目、控制 Watcher、观察任务。独立 Review 由 ChatGPT 会话完成。</p>
         </div>
       </aside>
       <main id="main-content" tabIndex={-1}>
         <header className="topbar">
           <span>
             工作区 <span className="muted">/</span>{" "}
-            {view === "Overview" ? "总览" : view === "Tasks" ? "任务" : "设置 / GitHub App"}
+            {view === "Overview" ? "总览" : view === "Tasks" ? "任务" : view === "Projects" ? "项目" : "设置 / GitHub App"}
           </span>
           <div className="flex flex-wrap items-center gap-2">
             <Status value={state.phase} />
@@ -83,11 +84,9 @@ export function AppShell({
               <RefreshCw aria-hidden="true" />
               刷新
             </Button>
+            <Button variant="ghost" onClick={()=>setView("Projects")}>添加项目</Button>
             <Button variant="ghost" asChild>
-              <a href="/dashboard#local-fast">添加项目</a>
-            </Button>
-            <Button variant="ghost" asChild>
-              <a href="/dashboard">
+              <a href="/dashboard/v1">
                 Dashboard V1 <ArrowUpRight aria-hidden="true" />
               </a>
             </Button>
@@ -97,11 +96,11 @@ export function AppShell({
           <div className="page-heading">
             <div>
               <p className="eyebrow">WORKFLOW COMMAND CENTER</p>
-              <h1>{view === "Overview" ? "工作流总览" : view === "Tasks" ? "任务工作台" : "设置"}</h1>
+              <h1>{view === "Overview" ? "工作流总览" : view === "Tasks" ? "任务工作台" : view === "Projects" ? "项目操作台" : "设置"}</h1>
               <p className="muted">
                 {view === "Overview"
                   ? "让每一次交接，都有清晰的下一步。"
-                  : view === "Tasks" ? "查看阶段、实际执行者、等待责任方与下一动作。" : "查看本机 GitHub App 连接，按可信 Owner 配置启用管理。"}
+                  : view === "Tasks" ? "查看阶段、实际执行者、等待责任方与下一动作。" : view === "Projects" ? "已有仓库 → 有序队列 → Owner 授权 → Watcher → 任务与 Review。" : "查看本机 GitHub App 连接，按可信 Owner 配置启用管理。"}
               </p>
             </div>
             {fixture && (
@@ -137,7 +136,7 @@ export function AppShell({
           )}
           {children}
           <footer>
-            只读 Viewer · 注册 / 心跳不代表 GitHub 授权 · 运行时声明不代表独立
+            CP 只读观察 / 本机 Local Fast 操作 · 注册 / 心跳不代表 GitHub 授权 · 运行时声明不代表独立
             Review
           </footer>
         </div>
