@@ -8,7 +8,7 @@ type Result = { status: string; reason?: string };
 export function runLocalFastWatchWorker(root: string, action: Action, signal: AbortSignal): Promise<Result> {
   if (signal.aborted) return Promise.resolve({ status: 'STOPPED' });
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./local-fast-watch-worker.js', import.meta.url), { workerData: { root, action } });
+    const worker = new Worker(new URL('./local-fast-watch-worker.js', import.meta.url), { workerData: { kind: 'awh-gui-watch', root, action } });
     let settled = false;
     const stop = () => worker.postMessage('stop');
     const finish = (result?: Result) => {
@@ -28,11 +28,11 @@ export function runLocalFastWatchWorker(root: string, action: Action, signal: Ab
   });
 }
 
-if (!isMainThread) {
+if (!isMainThread && workerData?.kind === 'awh-gui-watch') {
   const controller = new AbortController();
   parentPort!.on('message', message => { if (message === 'stop') controller.abort(); });
   try {
-    if (!workerData || Object.keys(workerData).sort().join(',') !== 'action,root' ||
+    if (!workerData || Object.keys(workerData).sort().join(',') !== 'action,kind,root' ||
         typeof workerData.root !== 'string' || !['start', 'resume-stage'].includes(workerData.action)) throw new Error('invalid_worker_request');
     const watcher = new LocalFastWatcher(workerData.root);
     const initial = workerData.action === 'resume-stage' ? await watcher.resumeStage(true, controller.signal) : null;

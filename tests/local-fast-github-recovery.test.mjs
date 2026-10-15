@@ -72,3 +72,20 @@ test('installed GUI worker isolates blocking reads, supports stop/Stage continua
   assert.match(r.stdout,/"responsive":true/);assert.doesNotMatch(r.stdout+r.stderr,/must-not-leak|private diagnostic/);
  }
 });
+
+test('read-only projection completes during blocked GUI checks, retains one reader and accepts restored project configurations',{timeout:60000},async t=>{
+ const h=harness(t),base=dirname(h.repo),preload=join(base,'observation-preload.mjs'),programFile=join(base,'observation-client.mjs');
+ const url=path=>pathToFileURL(join(process.cwd(),path)).href;
+ writeFileSync(preload,`import {LocalFastObservationAdapter} from ${JSON.stringify(url('dist/dashboard/local-fast-observation.js'))};import {taskBase} from ${JSON.stringify(url('dist/dashboard/tasks.js'))};
+ await import(${JSON.stringify(url('dist/dashboard/local-fast-projects.js'))});
+ let calls=0;LocalFastObservationAdapter.prototype.observe=async function(ids){if(!this.configs.length)return [];Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,150);const c=this.configs.find(c=>ids.includes(c.project_id));if(!c)return [];const t=taskBase('test:'+c.project_id,c.project_id,c.repository,1);t.issue.title=String(++calls);t.updated_at=new Date().toISOString();return [t];};`);
+ writeFileSync(programFile,`import assert from 'node:assert/strict';import {createObservationWorker} from ${JSON.stringify(url('dist/dashboard/observation-worker.js'))};
+ let id='probe';const reader=createObservationWorker(()=>({local:[{project_id:id,repository:'synthetic/test',root:${JSON.stringify(h.repo)},machine:{id:'test',name:'Test',platform:'win32'}}],projects:[],github:[]}));
+ assert.equal((await reader.observe([id]))[0].issue.title,'1');
+ const waiting=reader.observe([id]);await new Promise(r=>setTimeout(r,20));const begin=Date.now();Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,700);const end=Date.now();const result=(await waiting)[0];
+ assert.equal(result.issue.title,'2');assert(Date.parse(result.updated_at)>=begin&&Date.parse(result.updated_at)<end-100,'native projection finished independently of GUI event-loop delay');
+ id='restored-project';const restored=await reader.observe([id]);assert.equal(restored[0].project_id,id);assert.equal(restored[0].issue.title,'3','the same worker retains its read cache/reader across requests');
+ await reader.close();await assert.rejects(reader.observe([id]),/observation_worker_unavailable/);console.log('READ_OBSERVATION_WORKER_PASS');`);
+ const output=await new Promise((resolve,reject)=>childProcess.execFile(process.execPath,['--import',pathToFileURL(preload).href,programFile],{windowsHide:true,timeout:20000},(error,stdout,stderr)=>error?reject(new Error(stderr)):resolve(stdout)));
+ assert.match(output,/READ_OBSERVATION_WORKER_PASS/);
+});
