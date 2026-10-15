@@ -39,6 +39,7 @@
     "test:local-fast:native-owner": "node --test --test-name-pattern=\"Codex metadata|native scope|pending native\" tests/dashboard-native-owner.test.mjs",
     "test:dashboard:native-owner": "node --test --test-name-pattern=\"Windows Edge prefilled\" tests/dashboard-native-owner.test.mjs",
     "test:local-fast:stage-recovery": "node --test tests/local-fast-stage-recovery.test.mjs",
+    "test:local-fast:github-recovery": "node --test tests/local-fast-github-recovery.test.mjs tests/dashboard-refresh.test.mjs",
     "test:self-bootstrap:local-fast": "node --test --test-name-pattern=\"bind checks write permission|failed verification retains auto-Commit|verification cannot alter the committed candidate|lost PR create ACK reconciles|interrupted Push can resume|effective Push URL|Local Fast has a bounded Windows-only CLI\" tests/local-fast.test.mjs",
     "test:self-bootstrap:github-app": "node --test --test-name-pattern=\"one-time connect discovers|App connection and token boundaries|pinned installation|complete selected-set pagination|operation-minimum single-repository|private repository Draft creation|transport refuses executable|askPass|trusted personal exact-head|actual App provider simulated Stage|lost create ACK readback|App push failure retains|credential paths cannot\" tests/github-app.test.mjs"
   },

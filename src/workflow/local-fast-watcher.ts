@@ -213,7 +213,7 @@ export class LocalFastWatcher {
     if (facts.status === 'AWAITING_REVIEW') {
       if (await this.merge(grant, facts, state)) return { mode: 'local-fast', status: 'MERGE_CONFIRMED', issue: facts.issue, head: facts.head, next_action: 'SYNC_AND_CONTINUE' };
       const nextAction = facts.review?.decision === 'PASS' ? facts.github_checks_passed ? 'AWAIT_HUMAN_MERGE' : 'AWAIT_GITHUB_CHECKS' : 'AWAITING_INDEPENDENT_REVIEW';
-      state.status = nextAction; this.save(state); return { ...facts, next_action: nextAction, ...this.metrics(state) };
+      state.status = nextAction; delete state.last_error; this.save(state); return { ...facts, next_action: nextAction, ...this.metrics(state) };
     }
     if (!['READY','REQUEST_CHANGES'].includes(facts.status)) clientFail('local_fast_watch_recovery', 'Interrupted preparation/publication requires explicit recovery; no new task was started.');
     const repair = facts.status === 'REQUEST_CHANGES';

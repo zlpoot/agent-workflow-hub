@@ -11,6 +11,7 @@ import { LocalFastWatcher, type WatchDependencies, type WatchScope } from '../wo
 import { detectCodexExecutable } from './codex-executable.js';
 import type { LocalFastObservationConfig } from './local-fast-observation.js';
 import { fileURLToPath } from 'node:url';
+import { runLocalFastWatchWorker } from './local-fast-watch-worker.js';
 
 export interface LocalFastProjectsConfig { project_roots: string[]; state_directory: string }
 export function validateLocalFastProjects(c: LocalFastProjectsConfig) {
@@ -160,7 +161,9 @@ export function createLocalFastProjects(c: LocalFastProjectsConfig, overrides: {
       if(status.watcher_running||status.stale_lock||status.status==='QUEUE_COMPLETED')fail(409,'local_fast_watch_unavailable','Completed queues and existing locks cannot be restarted');
       const controller=new AbortController(),run={controller,done:Promise.resolve() as Promise<unknown>,status:'RUNNING',reason:undefined as string|undefined};
       runs.set(root,run);
-      run.done=(action==='resume-stage'?watcher.resumeStage(true,controller.signal).then(result=>
+      // Injected test adapters remain in-process. Installed GUI execution uses the same
+      // Watcher in a worker so synchronous native Git/GitHub reads cannot time out SSE/cache reads.
+      run.done=(!overrides.watch&&!overrides.fast?runLocalFastWatchWorker(root,action as 'start'|'resume-stage',controller.signal):action==='resume-stage'?watcher.resumeStage(true,controller.signal).then(result=>
         result.status==='AWAITING_INDEPENDENT_REVIEW'&&!controller.signal.aborted?watcher.run(false,controller.signal):result):watcher.run(false,controller.signal))
         .then(result=>{run.status=result.status;run.reason=result.reason;},error=>{run.status='BLOCKED';run.reason=error instanceof ClientError?error.code:'local_fast_watch_operation';});
       return {status:'STARTING',owner_confirmation:'saved_windows_owner_scope'};
